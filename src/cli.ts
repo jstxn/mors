@@ -2090,7 +2090,7 @@ Prerequisites:
   try {
     const deployOutput = execFileSyncImport(
       deployConfig.flyctlPath,
-      ['deploy', '--app', deployConfig.appName, '--region', deployConfig.primaryRegion],
+      ['deploy', '--app', deployConfig.appName, '--primary-region', deployConfig.primaryRegion],
       {
         cwd: process.cwd(),
         encoding: 'utf8',

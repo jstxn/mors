@@ -1841,7 +1841,7 @@ Prerequisites:
         console.log(`Deploying to Fly.io (app: ${deployConfig.appName}, region: ${deployConfig.primaryRegion})...`);
     }
     try {
-        const deployOutput = execFileSyncImport(deployConfig.flyctlPath, ['deploy', '--app', deployConfig.appName, '--region', deployConfig.primaryRegion], {
+        const deployOutput = execFileSyncImport(deployConfig.flyctlPath, ['deploy', '--app', deployConfig.appName, '--primary-region', deployConfig.primaryRegion], {
             cwd: process.cwd(),
             encoding: 'utf8',
             timeout: 300_000,
