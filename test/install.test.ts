@@ -1,105 +1,162 @@
-import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { execSync } from "node:child_process";
+import { describe, it, expect } from 'vitest';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
 
-const ROOT = resolve(import.meta.dirname, "..");
-const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+const ROOT = resolve(import.meta.dirname, '..');
+const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 
-describe("distribution metadata", () => {
-  it("package is not marked private", () => {
+describe('distribution metadata', () => {
+  it('package is not marked private', () => {
     expect(pkg.private).not.toBe(true);
   });
 
-  it("package has bin entry pointing to dist/index.js", () => {
+  it('package has bin entry pointing to dist/index.js', () => {
     expect(pkg.bin).toBeDefined();
-    expect(pkg.bin.mors).toBe("./dist/index.js");
+    expect(pkg.bin.mors).toBe('./dist/index.js');
   });
 
-  it("package has files field including dist", () => {
+  it('package has files field including dist', () => {
     expect(pkg.files).toBeDefined();
     expect(Array.isArray(pkg.files)).toBe(true);
-    expect(pkg.files).toContain("dist");
+    expect(pkg.files).toContain('dist');
   });
 
-  it("package has prepare script that builds", () => {
+  it('package has prepare script that builds', () => {
     expect(pkg.scripts).toBeDefined();
     expect(pkg.scripts.prepare).toBeDefined();
-    expect(pkg.scripts.prepare).toContain("build");
+    expect(pkg.scripts.prepare).toContain('build');
   });
 
-  it("package has engines constraint for node >=20", () => {
+  it('package has engines constraint for node >=20', () => {
     expect(pkg.engines).toBeDefined();
-    expect(pkg.engines.node).toBe(">=20");
+    expect(pkg.engines.node).toBe('>=20');
   });
 
-  it("package type is module", () => {
-    expect(pkg.type).toBe("module");
+  it('package type is module', () => {
+    expect(pkg.type).toBe('module');
   });
 });
 
-describe("build output", () => {
-  it("dist/index.js exists after build", () => {
+describe('build output', () => {
+  it('dist/index.js exists after build', () => {
     // Ensure build has been run
-    execSync("npm run build", { cwd: ROOT, stdio: "pipe" });
-    expect(existsSync(join(ROOT, "dist", "index.js"))).toBe(true);
+    execSync('npm run build', { cwd: ROOT, stdio: 'pipe' });
+    expect(existsSync(join(ROOT, 'dist', 'index.js'))).toBe(true);
   });
 
-  it("dist/index.js starts with shebang", () => {
-    const content = readFileSync(join(ROOT, "dist", "index.js"), "utf8");
-    expect(content.startsWith("#!/usr/bin/env node")).toBe(true);
+  it('dist/index.js starts with shebang', () => {
+    const content = readFileSync(join(ROOT, 'dist', 'index.js'), 'utf8');
+    expect(content.startsWith('#!/usr/bin/env node')).toBe(true);
   });
 
-  it("dist/index.js is executable", () => {
-    const stat = statSync(join(ROOT, "dist", "index.js"));
+  it('dist/index.js is executable', () => {
+    const stat = statSync(join(ROOT, 'dist', 'index.js'));
     // Check owner execute bit (0o100)
     const ownerExec = (stat.mode & 0o100) !== 0;
     expect(ownerExec).toBe(true);
   });
 
-  it("dist/cli.js exists after build", () => {
-    expect(existsSync(join(ROOT, "dist", "cli.js"))).toBe(true);
+  it('dist/cli.js exists after build', () => {
+    expect(existsSync(join(ROOT, 'dist', 'cli.js'))).toBe(true);
   });
 });
 
-describe("npm pack includes correct files", () => {
-  it("npm pack --dry-run lists dist files and package.json", () => {
-    const output = execSync("npm pack --dry-run --json 2>/dev/null", {
+describe('npm pack includes correct files', () => {
+  it('npm pack --dry-run lists dist files and package.json', () => {
+    const output = execSync('npm pack --dry-run --json 2>/dev/null', {
       cwd: ROOT,
-      encoding: "utf8",
+      encoding: 'utf8',
     });
     const packInfo = JSON.parse(output);
     expect(Array.isArray(packInfo)).toBe(true);
-    const files = packInfo[0].files.map(
-      (f: { path: string }) => f.path,
-    );
+    const files = packInfo[0].files.map((f: { path: string }) => f.path);
 
     // Must include key distribution files
-    expect(files).toContain("package.json");
-    expect(files.some((f: string) => f.startsWith("dist/"))).toBe(true);
-    expect(files.some((f: string) => f === "dist/index.js")).toBe(true);
-    expect(files.some((f: string) => f === "dist/cli.js")).toBe(true);
+    expect(files).toContain('package.json');
+    expect(files.some((f: string) => f.startsWith('dist/'))).toBe(true);
+    expect(files.some((f: string) => f === 'dist/index.js')).toBe(true);
+    expect(files.some((f: string) => f === 'dist/cli.js')).toBe(true);
 
     // Must NOT include source or test files
-    expect(files.some((f: string) => f.startsWith("src/"))).toBe(false);
-    expect(files.some((f: string) => f.startsWith("test/"))).toBe(false);
-    expect(
-      files.some((f: string) => f === "tsconfig.json"),
-    ).toBe(false);
+    expect(files.some((f: string) => f.startsWith('src/'))).toBe(false);
+    expect(files.some((f: string) => f.startsWith('test/'))).toBe(false);
+    expect(files.some((f: string) => f === 'tsconfig.json')).toBe(false);
   });
 });
 
-describe("prepare script lifecycle", () => {
-  it("prepare script produces runnable dist/index.js", () => {
+describe('homebrew formula', () => {
+  const formulaPath = join(ROOT, 'Formula', 'mors.rb');
+
+  it('Formula/mors.rb exists in the repository', () => {
+    expect(existsSync(formulaPath)).toBe(true);
+  });
+
+  it('formula is valid Ruby with class Mors < Formula', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/class\s+Mors\s+<\s+Formula/);
+  });
+
+  it('formula has desc, homepage, url, and sha256 metadata', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/desc\s+"/);
+    expect(content).toMatch(/homepage\s+"/);
+    expect(content).toMatch(/url\s+"/);
+    expect(content).toMatch(/sha256\s+"/);
+  });
+
+  it('formula depends on node', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/depends_on\s+"node"/);
+  });
+
+  it('formula depends on python for build (native addon)', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/depends_on\s+"python".*=>.*:build/);
+  });
+
+  it('formula depends on sqlcipher', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/depends_on\s+"sqlcipher"/);
+  });
+
+  it('formula has install stanza using npm install with std_npm_args', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/def\s+install/);
+    expect(content).toMatch(/system\s+"npm",\s*"install"/);
+    expect(content).toMatch(/std_npm_args/);
+    expect(content).toMatch(/bin\.install_symlink/);
+  });
+
+  it('formula has test stanza that invokes mors', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/test\s+do/);
+    expect(content).toMatch(/mors/);
+  });
+
+  it('formula references npm registry tarball URL', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    expect(content).toMatch(/registry\.npmjs\.org\/mors\/-\/mors-/);
+  });
+
+  it('formula version aligns with package.json', () => {
+    const content = readFileSync(formulaPath, 'utf8');
+    // The formula URL should reference the current package version
+    expect(content).toContain(`mors-${pkg.version}.tgz`);
+  });
+});
+
+describe('prepare script lifecycle', () => {
+  it('prepare script produces runnable dist/index.js', () => {
     // Running prepare should build the project
-    execSync("npm run prepare", { cwd: ROOT, stdio: "pipe" });
-    expect(existsSync(join(ROOT, "dist", "index.js"))).toBe(true);
+    execSync('npm run prepare', { cwd: ROOT, stdio: 'pipe' });
+    expect(existsSync(join(ROOT, 'dist', 'index.js'))).toBe(true);
 
     // The built entry should be runnable and output version info
-    const result = execSync("node dist/index.js --version", {
+    const result = execSync('node dist/index.js --version', {
       cwd: ROOT,
-      encoding: "utf8",
-      env: { ...process.env, MORS_CONFIG_DIR: "/tmp/mors-install-test-noop" },
+      encoding: 'utf8',
+      env: { ...process.env, MORS_CONFIG_DIR: '/tmp/mors-install-test-noop' },
     });
     // Should output the version from package.json
     expect(result.trim()).toContain(pkg.version);
