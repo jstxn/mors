@@ -12,7 +12,7 @@ import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
 import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
-import { getDeviceKeysDir } from './e2ee/device-keys.js';
+import { getDeviceKeysDir, isDeviceBootstrapped } from './e2ee/device-keys.js';
 import { loadKeyExchangeSession, listKeyExchangeSessions, } from './e2ee/key-exchange.js';
 import { ContractValidationError } from './contract/errors.js';
 import { saveSession, loadSession, clearSession, markAuthEnabled, saveSigningKey, loadSigningKey, } from './auth/session.js';
@@ -1405,7 +1405,7 @@ function runLogin(_args) {
     }
     // Check device keys bootstrap
     const keysDir = getDeviceKeysDir(configDir);
-    const hasDeviceKeys = existsSyncCheck(`${keysDir}/device.pub`) && existsSyncCheck(`${keysDir}/device.key`);
+    const hasDeviceKeys = isDeviceBootstrapped(keysDir);
     if (!hasDeviceKeys) {
         missing.push('device_keys');
     }

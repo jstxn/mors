@@ -39,6 +39,7 @@ function makeTempDir(): string {
 
 /**
  * Simulate a fully initialized mors config directory with device keys.
+ * Uses the real mors init file layout (device-keys.json, x25519.key, ed25519.key).
  */
 function simulateFullInit(configDir: string): void {
   mkdirSync(configDir, { recursive: true });
@@ -54,8 +55,18 @@ function simulateFullInit(configDir: string): void {
   writeFileSync(join(configDir, '.initialized'), '');
   const keysDir = join(configDir, 'e2ee');
   mkdirSync(keysDir, { recursive: true });
-  writeFileSync(join(keysDir, 'device.pub'), 'test-pub-key-data');
-  writeFileSync(join(keysDir, 'device.key'), 'test-priv-key-data', { mode: 0o600 });
+  writeFileSync(
+    join(keysDir, 'device-keys.json'),
+    JSON.stringify({
+      x25519PublicKey: 'a'.repeat(64),
+      ed25519PublicKey: 'b'.repeat(64),
+      fingerprint: 'c'.repeat(64),
+      deviceId: 'device-test-001',
+      createdAt: new Date().toISOString(),
+    })
+  );
+  writeFileSync(join(keysDir, 'x25519.key'), Buffer.alloc(32, 0xbb), { mode: 0o600 });
+  writeFileSync(join(keysDir, 'ed25519.key'), Buffer.alloc(32, 0xcc), { mode: 0o600 });
 }
 
 /**

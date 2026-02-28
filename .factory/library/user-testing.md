@@ -183,3 +183,27 @@ SSE streaming assertions are best validated through the existing integration tes
 - Each test creates its own RelayMessageStore and token verifier
 - Stub tokens: token-alice (userId=1001), token-bob (userId=1002)
 - No shared state between test files
+
+---
+
+## Flow Validator Guidance: Native Identity (native-identity-core)
+
+**Testing tool:** Direct CLI invocation via `node dist/index.js` with `MORS_CONFIG_DIR` isolation.
+
+**Assertions covered:** VAL-AUTH-001, VAL-AUTH-002, VAL-AUTH-007, VAL-AUTH-011
+
+**Setup:**
+- Build first: `npm run build`
+- Use `mors init --json` to create a fully initialized config directory (creates identity, device keys, init sentinel)
+- Generate invite tokens: `mors-invite-$(openssl rand -hex 32)`
+- Each test uses a unique `MORS_CONFIG_DIR` temp directory
+
+**Known issue (fixed):**
+- The CLI login command originally checked for `device.pub` and `device.key` files, but `mors init` creates `device-keys.json`, `x25519.key`, and `ed25519.key`. This was fixed by using the canonical `isDeviceBootstrapped()` function. Test `simulateFullInit` helpers were updated to match the real file layout.
+
+**Test flow:**
+1. `mors init --json` → creates identity + device keys
+2. `mors login --invite-token <token> --json` → native auth, no GitHub dependency
+3. `mors status --json --offline` → persisted session with same account_id
+4. `mors login --json` (no token) → exit code 1, missing_prerequisites with remediation
+5. `mors login --invite-token "invalid" --json` → exit code 1, invalid_invite_token

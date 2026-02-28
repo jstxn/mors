@@ -1,0 +1,32 @@
+{
+  "milestone": "native-identity-core",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": ["VAL-AUTH-001", "VAL-AUTH-002", "VAL-AUTH-007", "VAL-AUTH-011"],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "src/cli.ts",
+      "description": "Fixed device key bootstrap check in login command to use canonical isDeviceBootstrapped() function instead of checking for wrong filenames (device.pub/device.key vs device-keys.json/x25519.key/ed25519.key)",
+      "source": "flow-report"
+    },
+    {
+      "target": "test/auth/native-auth-validation.test.ts",
+      "description": "Updated simulateFullInit to create real mors init file layout (device-keys.json, x25519.key, ed25519.key) instead of legacy filenames",
+      "source": "flow-report"
+    },
+    {
+      "target": "test/auth/login-relay-key-coordination.test.ts",
+      "description": "Updated simulateFullInit to create real mors init file layout (device-keys.json, x25519.key, ed25519.key) instead of legacy filenames",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}

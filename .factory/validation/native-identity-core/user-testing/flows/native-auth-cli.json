@@ -1,0 +1,35 @@
+{
+  "flowId": "native-auth-cli",
+  "milestone": "native-identity-core",
+  "assertions": {
+    "VAL-AUTH-001": {
+      "status": "pass",
+      "evidence": "mors init + mors login --invite-token <token> --json: exit code 0, output {\"status\":\"authenticated\",\"account_id\":\"<hex32>\",\"device_id\":\"device-<uuid>\"}. No GitHub URLs, device codes, verification URIs, OAuth references in output. Account ID is hex-derived from invite token (not GitHub user ID). Session token is mors-session.* format (not gh*_ OAuth token).",
+      "issues": []
+    },
+    "VAL-AUTH-002": {
+      "status": "pass",
+      "evidence": "After login, separate process `mors status --json --offline` returns {\"status\":\"authenticated\",\"account_id\":\"<same-hex32>\"} with matching account_id. `mors status --json` (with liveness) returns token_valid:true. Session file persists across process boundaries.",
+      "issues": []
+    },
+    "VAL-AUTH-007": {
+      "status": "pass",
+      "evidence": "1) Empty dir (no init): exit code 1, missing=[\"invite_token\",\"device_keys\",\"initialized\"], message includes remediation for each. 2) After init, no invite token: exit code 1, missing=[\"invite_token\"], remediation mentions --invite-token. 3) Non-JSON mode: stderr includes 'Missing required authentication prerequisites' with remediation steps.",
+      "issues": []
+    },
+    "VAL-AUTH-011": {
+      "status": "pass",
+      "evidence": "1) Invalid invite-token format rejected: exit code 1, error=invalid_invite_token, message mentions format. 2) Valid invite-token + device keys: exit code 0, status=authenticated, session persisted. 3) Invite token via MORS_INVITE_TOKEN env var: exit code 0, status=authenticated. 4) Absent device keys rejected with missing_prerequisites. Initial bug found and fixed: CLI checked for wrong device key filenames (device.pub/device.key instead of device-keys.json/x25519.key/ed25519.key). Fix: replaced inline file check with canonical isDeviceBootstrapped() function.",
+      "issues": []
+    }
+  },
+  "frictions": [
+    {
+      "description": "CLI login command checked for legacy device key filenames (device.pub, device.key) instead of the real filenames created by mors init (device-keys.json, x25519.key, ed25519.key). This caused all login attempts after real mors init to fail with missing_prerequisites. Fixed by using the canonical isDeviceBootstrapped() function.",
+      "severity": "blocking",
+      "resolved": true
+    }
+  ],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js CLI", "vitest test suite"]
+}

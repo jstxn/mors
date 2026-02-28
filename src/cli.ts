@@ -28,7 +28,7 @@ import {
   CipherError,
 } from './errors.js';
 import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
-import { getDeviceKeysDir } from './e2ee/device-keys.js';
+import { getDeviceKeysDir, isDeviceBootstrapped } from './e2ee/device-keys.js';
 import {
   loadKeyExchangeSession,
   listKeyExchangeSessions,
@@ -1613,8 +1613,7 @@ function runLogin(_args: string[]): void {
 
   // Check device keys bootstrap
   const keysDir = getDeviceKeysDir(configDir);
-  const hasDeviceKeys =
-    existsSyncCheck(`${keysDir}/device.pub`) && existsSyncCheck(`${keysDir}/device.key`);
+  const hasDeviceKeys = isDeviceBootstrapped(keysDir);
   if (!hasDeviceKeys) {
     missing.push('device_keys');
   }
