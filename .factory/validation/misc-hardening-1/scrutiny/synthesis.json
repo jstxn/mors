@@ -1,0 +1,56 @@
+{
+  "milestone": "misc-hardening-1",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
+    "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 1,
+    "failed": 1,
+    "failedFeatures": ["misc-hardening-dedupe-concurrency-and-race-tests"]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "misc-hardening-dedupe-concurrency-and-race-tests",
+      "severity": "blocking",
+      "description": "Reply contention tests in test/thread.test.ts (line ~1117) and integration overlapping tests in test/integration.test.ts (line ~1206) use synchronous looped calls rather than true overlapping/parallel contention, not exercising real lock contention as the feature intends."
+    },
+    {
+      "featureId": "misc-hardening-dedupe-concurrency-and-race-tests",
+      "severity": "blocking",
+      "description": "The newly added INSERT-conflict recovery branches in src/message.ts (sendMessage catch ~line 233 and replyMessage catch ~line 718) are never exercised by tests because the pre-INSERT SELECT dedupe check finds the canonical row first, leaving the race-recovery code path unverified."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added concurrency testing guidance to architecture.md: better-sqlite3 is synchronous single-connection, so true INSERT-level race contention cannot be exercised with single-handle in-process tests. Multi-process or multi-handle patterns are needed.",
+      "sourceFeature": "misc-hardening-dedupe-concurrency-and-race-tests"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update mors-worker skill to explicitly reference .factory/library/user-testing.md for stable CLI invocation patterns (MORS_CONFIG_DIR + node dist/index.js) during manual verification steps, so workers don't waste cycles discovering the pattern through trial and error.",
+      "evidence": "Config-dir-permissions worker (c24c6152) transcript shows repeated failed attempts using 'npx tsx src/cli.ts init --json' before falling back to programmatic checks. The stable pattern is already documented in .factory/library/user-testing.md but not cross-referenced from the skill.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify that workers must ensure newly added catch/recovery branches are actually exercised by tests (branch coverage for error-handling paths). When better-sqlite3's synchronous nature prevents true race conditions, workers should use targeted fault injection or mocking to verify recovery branches rather than claiming concurrent coverage from sequential loops.",
+      "evidence": "Dedupe-concurrency worker added INSERT-conflict recovery code that is structurally unreachable in single-handle synchronous tests, then reported tests as covering the feature. The skill's TDD procedure was reported as followed despite tests not going red-then-green for the recovery branch.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "TDD procedure fidelity concern: tests passed before implementation and skillFeedback.followedProcedure was set to true",
+      "reason": "This is already captured as a systemic issue in suggestedGuidanceUpdates (branch coverage enforcement). The procedure-fidelity concern is a symptom of the same root cause — unclear expectations for recovery-branch testing — not a separate actionable item."
+    }
+  ],
+  "previousRound": null
+}

@@ -1,0 +1,28 @@
+{
+  "featureId": "misc-hardening-config-dir-permissions",
+  "reviewedAt": "2026-02-28T06:47:13Z",
+  "commitId": "e6080c6f71c5089cbad8f961783dea4a8ac93733",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation satisfies the feature goal: config directory permissions are explicitly hardened to 0700 after directory creation and on init re-run, key files remain explicitly enforced at 0600, and regression tests were added for pre-existing broad permissions and re-run hardening.",
+    "issues": [
+      {
+        "file": "test/init.test.ts",
+        "line": 720,
+        "severity": "non_blocking",
+        "description": "The new regression test seeds broad permissions via `mkdirSync(..., { mode: 0o755 })` and asserts exact 0755 at line 722. Because mkdir mode is masked by process umask, this precondition can fail under restrictive umask settings; using `chmodSync(configDir, 0o755)` after creation would make the test deterministic across environments."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker spent multiple attempts trying to manually validate `init` through `npx tsx src/cli.ts init --json`, then fell back to programmatic `initCommand` checks. The skill asks for manual CLI sanity checks but does not explicitly point to the stable invocation pattern already documented in shared state (`node dist/index.js` with `MORS_CONFIG_DIR`).",
+      "evidence": "Transcript skeleton shows repeated failed/empty-output CLI attempts (`npx tsx src/cli.ts init --json`) and subsequent fallback note: 'The async `.then()` doesn't wait for completion before the process exits... Let me just verify manually through a programmatic approach'. Compare with `.factory/library/user-testing.md` Flow Validator Guidance that specifies `MORS_CONFIG_DIR=... node dist/index.js <command>`."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit e6080c6 for misc-hardening-config-dir-permissions. Runtime hardening behavior matches requirements and regression coverage was added; one non-blocking test determinism concern was noted, plus a skill-guidance clarity observation for CLI manual verification workflow."
+}

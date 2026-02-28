@@ -1,0 +1,45 @@
+{
+  "featureId": "misc-hardening-dedupe-concurrency-and-race-tests",
+  "reviewedAt": "2026-02-28T06:47:46Z",
+  "commitId": "4a2ecdaf912312f354d4a98e3d201ac13cecd277",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The core dedupe-recovery code changes are directionally correct, and CLI help text was updated as requested. However, the new contention tests do not implement true overlapping/parallel contention for reply/integration paths, and the newly added INSERT-conflict recovery branches are not actually exercised by the added tests.",
+    "issues": [
+      {
+        "file": "test/thread.test.ts",
+        "line": 1117,
+        "severity": "blocking",
+        "description": "The new reply 'contention' tests execute synchronous calls in a tight loop (`Array.from(..., () => replyMessage(...))`) on a single DB handle, which is sequential execution rather than true overlapping/parallel contention required by the feature."
+      },
+      {
+        "file": "test/integration.test.ts",
+        "line": 1206,
+        "severity": "blocking",
+        "description": "The integration 'overlapping' send/reply contention tests are also synchronous looped calls (`Array.from` / `for` loop at line 1395), so they do not exercise real parallel overlap/lock contention as specified in expected behavior."
+      },
+      {
+        "file": "test/message.test.ts",
+        "line": 899,
+        "severity": "blocking",
+        "description": "The added 'UNIQUE constraint conflict' test explicitly notes that the pre-INSERT SELECT check finds the canonical row first, so it never reaches the new INSERT-catch recovery path in `src/message.ts` (`sendMessage` catch at line 233 and `replyMessage` catch at line 718). This leaves the new race-recovery branch unverified."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "`mors-worker` requires strict red/green TDD and truthful procedure reporting, but transcript evidence shows tests were added and passed before implementation of the recovery branch while `skillFeedback.followedProcedure` was still set to true.",
+      "evidence": "Transcript skeleton includes 'Now let me write the failing test first' followed by a passing test run before code change, and handoff sets `skillFeedback.followedProcedure: true`."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared docs do not capture a concrete strategy for validating true dedupe race overlap with synchronous better-sqlite3 in-process calls, which likely contributed to sequential tests being labeled as concurrent/overlapping.",
+      "evidence": "`test/message.test.ts:847` states true parallelism is not possible in-process; `.factory/library/architecture.md` / `environment.md` do not provide guidance for multi-process or multi-handle contention validation patterns."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: feature intent is only partially met. Runtime hardening code was added and help text was clarified, but the added contention tests do not provide true overlapping/parallel coverage and do not exercise the newly added INSERT-level recovery branches."
+}
