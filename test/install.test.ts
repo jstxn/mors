@@ -22,10 +22,10 @@ describe('distribution metadata', () => {
     expect(pkg.files).toContain('dist');
   });
 
-  it('package has prepare script that builds', () => {
+  it('package has prepare script that compiles TypeScript', () => {
     expect(pkg.scripts).toBeDefined();
     expect(pkg.scripts.prepare).toBeDefined();
-    expect(pkg.scripts.prepare).toContain('build');
+    expect(pkg.scripts.prepare).toContain('tsc');
   });
 
   it('package has engines constraint for node >=20', () => {
@@ -267,6 +267,68 @@ describe('GitHub shortcut install without build deps (VAL-INSTALL-001)', () => {
     const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
     // dist/ must NOT appear as a gitignore pattern
     expect(gitignore).not.toMatch(/^dist\/?$/m);
+  });
+
+  it('prepare script invokes tsc via explicit local path, not via PATH lookup', () => {
+    // npm bug #8440: `npm i -g github:jstxn/mors` clones to a temp dir and
+    // runs devDep install + prepare. But in the nested npm global git-dep
+    // context, the shell PATH does NOT reliably include node_modules/.bin/,
+    // so bare `tsc` commands fail with "sh: tsc: command not found" (exit 127).
+    //
+    // The prepare script MUST use an explicit path (node_modules/.bin/tsc)
+    // to invoke the compiler, never delegating to `npm run build` which in
+    // turn invokes bare `tsc` — that bare invocation fails in nested contexts.
+    const prepareCmd = pkg.scripts.prepare as string;
+
+    // The prepare script must reference tsc via explicit path
+    expect(prepareCmd).toContain('node_modules/.bin/tsc');
+    // It must NOT delegate to `npm run build` (which uses bare `tsc`)
+    expect(prepareCmd).not.toContain('npm run build');
+  });
+
+  it('prepare script succeeds when tsc exists locally but is not in PATH (nested npm git-dep context)', () => {
+    // Simulates the npm bug where `npm i -g github:jstxn/mors` installs
+    // devDependencies (so node_modules/.bin/tsc exists) but the shell PATH
+    // during prepare does NOT include node_modules/.bin/ — causing
+    // `tsc` to be unreachable by name even though the binary is present.
+    //
+    // The prepare script must resolve tsc using its local path (not relying
+    // on PATH), or gracefully succeed (using pre-built dist).
+    const prepareCmd = pkg.scripts.prepare as string;
+
+    // Build a PATH that excludes any directory containing node_modules
+    const pathDirs = (process.env.PATH ?? '')
+      .split(':')
+      .filter((dir) => !dir.includes('node_modules'));
+    const strippedPath = pathDirs.join(':');
+
+    let exitCode = 0;
+    try {
+      execSync(`bash -c '${prepareCmd}'`, {
+        cwd: ROOT,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          PATH: strippedPath,
+        },
+      });
+    } catch (err: unknown) {
+      const e = err as { status?: number };
+      exitCode = e.status ?? 1;
+    }
+
+    // Must succeed — tsc invoked via explicit local path, not via PATH lookup
+    expect(exitCode).toBe(0);
+
+    // dist/index.js must remain runnable after this prepare
+    expect(existsSync(join(ROOT, 'dist', 'index.js'))).toBe(true);
+    const result = execSync('node dist/index.js --version', {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...process.env, MORS_CONFIG_DIR: '/tmp/mors-install-test-noop' },
+    });
+    expect(result.trim()).toContain(pkg.version);
   });
 
   it('prepare script still builds when tsc IS available', () => {
