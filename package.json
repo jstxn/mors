@@ -6,8 +6,12 @@
   "bin": {
     "mors": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -15,7 +19,6 @@
   "engines": {
     "node": ">=20"
   },
-  "private": true,
   "license": "UNLICENSED",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
