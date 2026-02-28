@@ -1,0 +1,31 @@
+{
+  "featureId": "native-identity-core-fix-relay-signing-key-fail-closed",
+  "reviewedAt": "2026-02-28T22:19:06Z",
+  "commitId": "50a5d3f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Compared against the original failed feature diff (4914680) and prior review findings, this fix commit (50a5d3f) correctly removes empty-key fallback behavior and enforces fail-closed relay auth startup with actionable remediation. `createProductionServerOptions` now throws when `MORS_RELAY_SIGNING_KEY` is unset/empty/whitespace (`src/relay/index.ts`), and `createNativeTokenVerifier` rejects all verification when the effective key is empty (`src/relay/auth-middleware.ts`), closing the empty-key token forgery path identified in the prior failure.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-global-worker skill's milestone applicability list appears stale and does not include `native-identity-core`, even though this feature uses that skill.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:12 lists only `relay-foundation`, `global-async-messaging`, `realtime-watch`, and `developer-launch-path`; feature metadata for native-identity-core-fix-relay-signing-key-fail-closed sets `skillName` to `mors-global-worker`."
+    },
+    {
+      "area": "skills",
+      "observation": "Skill procedure requires manual-check rationale when manual checks are skipped for internal-only primitives, but this handoff marks followedProcedure=true without recording manual/interactive checks or a skip rationale.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31 requires explicit rationale when manual checks are not applicable; handoff at /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T22-06-33-974Z__native-identity-core-fix-relay-signing-key-fail-closed__c17a70ef-a7f6-4e69-bff0-25d992e937f0.json has `verification.commandsRun` only and `skillFeedback.followedProcedure: true`."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Environment knowledge still documents empty/unset relay signing key as a fail-open risk, but this fix enforces fail-closed startup behavior; shared docs should reflect the current invariant.",
+      "evidence": ".factory/library/environment.md:21 says empty/unset `MORS_RELAY_SIGNING_KEY` creates a fail-open risk, while commit 50a5d3f adds startup throw + verifier guard in `src/relay/index.ts` and `src/relay/auth-middleware.ts`."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/native-identity-core/scrutiny/reviews/native-auth-invite-session-core.json",
+  "summary": "Reviewed feature native-identity-core-fix-relay-signing-key-fail-closed by inspecting feature metadata, fix handoff/transcript skeleton, worker skill guidance, and both diffs (original failed commit 4914680 and fix commit 50a5d3f). The fix adequately resolves the empty-key fail-open/token-forgery blocker from the prior failure and meets the feature's expected fail-closed startup and remediation behavior."
+}

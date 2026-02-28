@@ -1,0 +1,34 @@
+{
+  "featureId": "native-identity-core-fix-login-relay-key-coordination",
+  "reviewedAt": "2026-02-28T22:18:46Z",
+  "commitId": "d30c52dfa6ebac9eb36c1e66a6c96fc1cc6f05eb",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fix commit correctly introduces deterministic key coordination for normal configured flow (CLI login and status liveness now prefer MORS_RELAY_SIGNING_KEY, with fallback to local key), and compared with the original failed feature diff (tests-only), this materially addresses the core relay/CLI mismatch path. However, the feature's expected behavior requiring explicit remediation for mismatched signing-key paths is still not met.",
+    "issues": [
+      {
+        "file": "src/auth/guards.ts",
+        "line": 146,
+        "severity": "blocking",
+        "description": "On signature mismatch, verifyTokenLiveness throws only a generic message ('Session token signature is invalid — token may be expired or revoked') without explicit key-mismatch remediation (e.g., instructing users to align MORS_RELAY_SIGNING_KEY between login and relay). This does not satisfy the feature expectedBehavior requiring mismatched signing-key paths to fail with explicit remediation."
+      },
+      {
+        "file": "test/auth/login-relay-key-coordination.test.ts",
+        "line": 285,
+        "severity": "non_blocking",
+        "description": "The mismatch test suite is labeled as validating 'explicit remediation' but only asserts token_expired/token_valid false; it does not assert remediation text, so the requirement is not guarded against regressions."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The assigned skill file's 'When to Use' scope does not include native-identity-core even though this feature (and others in this milestone) explicitly use mors-global-worker.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:12 lists relay-foundation/global-async-messaging/realtime-watch/developer-launch-path only; mission features entry uses skillName mors-global-worker for native-identity-core-fix-login-relay-key-coordination at /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/features.json:1506"
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/native-identity-core/scrutiny/reviews/native-auth-invite-session-core.json",
+  "summary": "Reviewed fix feature native-identity-core-fix-login-relay-key-coordination using feature metadata, prior failed review, handoff, transcript skeleton, and both diffs (original failed feature commit 4914680a056d14600bb23b322f84294b5ab3e9f7 and fix commit d30c52dfa6ebac9eb36c1e66a6c96fc1cc6f05eb). The fix resolves deterministic key coordination in configured flow but still lacks explicit remediation messaging for key-mismatch failures, so this review remains fail."
+}

@@ -18,7 +18,7 @@ Environment variables, dependencies, and setup notes for global relay/auth messa
 Use `.env.example` as the source of required placeholders:
 
 - `MORS_RELAY_PORT`, `MORS_RELAY_BASE_URL`
-- `MORS_RELAY_SIGNING_KEY` — signing key used by relay to verify native auth tokens. Must match the key used during token issuance. Empty/unset key creates a fail-open risk.
+- `MORS_RELAY_SIGNING_KEY` — signing key used by relay to verify native auth tokens. Must match the key used during token issuance. Relay startup enforces non-empty key (fail-closed); empty/unset key causes startup error with remediation guidance.
 - `MORS_AUTH_TOKEN_ISSUER`, `MORS_AUTH_AUDIENCE`
 - `FLY_APP_NAME`, `FLY_PRIMARY_REGION`, `FLY_ORG`
 
