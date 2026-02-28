@@ -35,6 +35,12 @@ import { encryptMessage, decryptMessage, type EncryptedPayload } from '../../src
 
 import { CipherError } from '../../src/errors.js';
 
+import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
+import { loadRelayConfig } from '../../src/relay/config.js';
+import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
+import { RelayMessageStore, type RelayMessage } from '../../src/relay/message-store.js';
+import { RelayClient, type RelayMessageResponse } from '../../src/relay/client.js';
+
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'mors-cipher-test-'));
 }
@@ -440,6 +446,340 @@ describe('E2EE cipher runtime', () => {
       expect(wirePayload).not.toContain(canary);
       expect(wirePayload).not.toContain('CANARY');
       expect(wirePayload).not.toContain('XYZ789');
+    });
+  });
+});
+
+// ── E2EE Relay Transport Integration ────────────────────────────────
+//
+// These tests verify that E2EE cipher operations are integrated into the
+// actual relay transport path: client → server → client read, with
+// ciphertext-only wire payloads, successful recipient decrypt, and
+// tamper detection in the real relay send/read flow.
+
+const ALICE_RELAY = { token: 'token-alice-e2ee', userId: 2001, login: 'alice-e2ee' };
+const BOB_RELAY = { token: 'token-bob-e2ee', userId: 2002, login: 'bob-e2ee' };
+
+const e2eeStubVerifier: TokenVerifier = async (token: string) => {
+  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
+    [ALICE_RELAY.token]: { githubUserId: ALICE_RELAY.userId, githubLogin: ALICE_RELAY.login },
+    [BOB_RELAY.token]: { githubUserId: BOB_RELAY.userId, githubLogin: BOB_RELAY.login },
+  };
+  return map[token] ?? null;
+};
+
+function getTestPort(): number {
+  return 30000 + Math.floor(Math.random() * 10000);
+}
+
+describe('E2EE relay transport integration', () => {
+  let tempDir: string;
+  let server: RelayServer | null = null;
+  let messageStore: RelayMessageStore;
+  let port: number;
+
+  /** Captured wire payloads for inspection. */
+  let capturedWirePayloads: string[] = [];
+
+  beforeEach(async () => {
+    tempDir = mkdtempSync(join(tmpdir(), 'mors-e2ee-relay-'));
+    port = getTestPort();
+    messageStore = new RelayMessageStore();
+    capturedWirePayloads = [];
+
+    const config = loadRelayConfig({
+      MORS_RELAY_PORT: String(port),
+      MORS_RELAY_HOST: '127.0.0.1',
+    });
+
+    server = createRelayServer(config, {
+      logger: () => {},
+      tokenVerifier: e2eeStubVerifier,
+      participantStore: {
+        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, githubUserId);
+        },
+      },
+      messageStore,
+    });
+    await server.start();
+  });
+
+  afterEach(async () => {
+    if (server) {
+      await server.close();
+      server = null;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  // ── VAL-E2EE-003: Relay client sends ciphertext payloads ──────────
+
+  describe('relay client sends ciphertext payloads (VAL-E2EE-003)', () => {
+    it('sendEncrypted sends ciphertext body through relay — no plaintext on wire', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+      const canary = 'SUPER_SECRET_PLAINTEXT_CANARY_42';
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+        // Intercept fetch to capture wire payload
+        fetchFn: async (url, init) => {
+          if (init?.body) {
+            capturedWirePayloads.push(init.body as string);
+          }
+          return fetch(url, init);
+        },
+      });
+
+      const result = await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: canary,
+        sharedSecret,
+      });
+
+      expect(result.queued).toBe(false);
+      expect(result.message).toBeDefined();
+
+      // Wire payload must not contain plaintext canary
+      expect(capturedWirePayloads.length).toBeGreaterThan(0);
+      for (const payload of capturedWirePayloads) {
+        expect(payload).not.toContain(canary);
+        expect(payload).not.toContain('SUPER_SECRET');
+        expect(payload).not.toContain('CANARY_42');
+      }
+
+      // Relay store body must not contain plaintext
+      const stored = messageStore.inbox(BOB_RELAY.userId);
+      expect(stored.length).toBe(1);
+      expect(stored[0].body).not.toContain(canary);
+      expect(stored[0].body).not.toContain('SUPER_SECRET');
+    });
+
+    it('sendEncrypted wire payload contains valid EncryptedPayload JSON structure', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+
+      await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: 'test encrypted structure',
+        sharedSecret,
+      });
+
+      // The stored body in relay should be a valid EncryptedPayload JSON
+      const stored = messageStore.inbox(BOB_RELAY.userId);
+      expect(stored.length).toBe(1);
+      const parsed = JSON.parse(stored[0].body) as EncryptedPayload;
+      expect(parsed).toHaveProperty('ciphertext');
+      expect(parsed).toHaveProperty('iv');
+      expect(parsed).toHaveProperty('authTag');
+      expect(typeof parsed.ciphertext).toBe('string');
+      expect(typeof parsed.iv).toBe('string');
+      expect(typeof parsed.authTag).toBe('string');
+    });
+  });
+
+  // ── VAL-E2EE-004: Recipient read path decrypts ────────────────────
+
+  describe('recipient read path decrypts with valid key exchange context (VAL-E2EE-004)', () => {
+    it('readDecrypted decrypts relay message with matching shared secret', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+      const plaintext = 'Hello Bob, this is a secret message from Alice!';
+
+      // Alice sends encrypted
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+
+      const sendResult = await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: plaintext,
+        sharedSecret,
+      });
+
+      const message = sendResult.message;
+      expect(message).toBeDefined();
+      const messageId = (message as RelayMessageResponse).id;
+
+      // Bob reads and decrypts
+      const bobClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: BOB_RELAY.token,
+      });
+
+      const readResult = await bobClient.readDecrypted(messageId, sharedSecret);
+      expect(readResult.decryptedBody).toBe(plaintext);
+      expect(readResult.firstRead).toBe(true);
+    });
+
+    it('readDecrypted round-trip preserves unicode and special characters', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+      const messages = [
+        'unicode: 你好世界 🌍',
+        'special: \n\t\r\\/"\'',
+        'markdown: **bold** _italic_ `code`',
+        'a'.repeat(5000),
+      ];
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+      const bobClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: BOB_RELAY.token,
+      });
+
+      for (const plaintext of messages) {
+        const sendResult = await aliceClient.sendEncrypted({
+          recipientId: BOB_RELAY.userId,
+          body: plaintext,
+          sharedSecret,
+        });
+
+        const msg = sendResult.message as RelayMessageResponse;
+        const readResult = await bobClient.readDecrypted(msg.id, sharedSecret);
+        expect(readResult.decryptedBody).toBe(plaintext);
+      }
+    });
+
+    it('readDecrypted with wrong shared secret throws CipherError', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+
+      const sendResult = await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: 'secret for right eyes only',
+        sharedSecret,
+      });
+
+      const bobClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: BOB_RELAY.token,
+      });
+
+      const msg = sendResult.message as RelayMessageResponse;
+      const wrongSecret = randomBytes(32);
+      await expect(bobClient.readDecrypted(msg.id, wrongSecret)).rejects.toThrow(CipherError);
+    });
+  });
+
+  // ── VAL-E2EE-009: Tampered ciphertext rejected in relay flow ──────
+
+  describe('tampered ciphertext is rejected in relay-backed flow (VAL-E2EE-009)', () => {
+    it('tampered ciphertext in relay store is detected and rejected on readDecrypted', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+
+      const sendResult = await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: 'tamper-proof message',
+        sharedSecret,
+      });
+
+      const sentMsg = sendResult.message as RelayMessageResponse;
+      const messageId = sentMsg.id;
+
+      // Tamper with the stored message body in the relay store directly
+      const stored = messageStore.get(messageId);
+      expect(stored).toBeDefined();
+
+      const parsed = JSON.parse((stored as RelayMessage).body) as EncryptedPayload;
+      const ciphertextBuf = Buffer.from(parsed.ciphertext, 'base64');
+      ciphertextBuf[0] ^= 0xff; // flip a byte
+      const tampered: EncryptedPayload = {
+        ...parsed,
+        ciphertext: ciphertextBuf.toString('base64'),
+      };
+      // Mutate the store directly (simulating relay-level tampering)
+      (stored as { body: string }).body = JSON.stringify(tampered);
+
+      // Bob tries to read — should detect tampering
+      const bobClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: BOB_RELAY.token,
+      });
+
+      await expect(bobClient.readDecrypted(messageId, sharedSecret)).rejects.toThrow(CipherError);
+    });
+
+    it('tampered authTag in relay store is detected on readDecrypted', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+
+      const sendResult = await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: 'authenticated message',
+        sharedSecret,
+      });
+
+      const sentMsg = sendResult.message as RelayMessageResponse;
+      const messageId = sentMsg.id;
+      const stored = messageStore.get(messageId);
+      expect(stored).toBeDefined();
+
+      const parsed = JSON.parse((stored as RelayMessage).body) as EncryptedPayload;
+      const authTagBuf = Buffer.from(parsed.authTag, 'base64');
+      authTagBuf[0] ^= 0xff;
+      const tampered: EncryptedPayload = {
+        ...parsed,
+        authTag: authTagBuf.toString('base64'),
+      };
+      (stored as { body: string }).body = JSON.stringify(tampered);
+
+      const bobClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: BOB_RELAY.token,
+      });
+
+      await expect(bobClient.readDecrypted(messageId, sharedSecret)).rejects.toThrow(CipherError);
+    });
+
+    it('relay store plaintext canary is absent after sendEncrypted (VAL-E2EE-007)', async () => {
+      const { sharedSecret } = setupKeyExchangePair(tempDir);
+      const canary = 'RELAY_STORE_PLAINTEXT_LEAK_CANARY';
+
+      const aliceClient = new RelayClient({
+        baseUrl: `http://127.0.0.1:${port}`,
+        token: ALICE_RELAY.token,
+      });
+
+      const sendResult = await aliceClient.sendEncrypted({
+        recipientId: BOB_RELAY.userId,
+        body: canary,
+        sharedSecret,
+      });
+
+      // Inspect relay store: body must be ciphertext JSON, not plaintext
+      const sentMsg = sendResult.message as RelayMessageResponse;
+      const stored = messageStore.get(sentMsg.id);
+      expect(stored).toBeDefined();
+      const storedMsg = stored as RelayMessage;
+      expect(storedMsg.body).not.toContain(canary);
+      expect(storedMsg.body).not.toContain('PLAINTEXT_LEAK');
+
+      // Verify the body parses as a valid EncryptedPayload
+      const parsed = JSON.parse(storedMsg.body) as EncryptedPayload;
+      expect(parsed.ciphertext).toBeDefined();
+      expect(parsed.iv).toBeDefined();
+      expect(parsed.authTag).toBeDefined();
     });
   });
 });

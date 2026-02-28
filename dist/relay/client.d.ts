@@ -111,6 +111,28 @@ export interface AckResult {
     message: RelayMessageResponse;
     firstAck: boolean;
 }
+/** Options for sending an encrypted message via relay. */
+export interface EncryptedSendOptions {
+    /** Recipient GitHub user ID. */
+    recipientId: number;
+    /** Plaintext message body to encrypt before sending. */
+    body: string;
+    /** Optional subject line (not encrypted — metadata). */
+    subject?: string;
+    /** Parent message ID for replies. */
+    inReplyTo?: string;
+    /** Shared secret from key exchange (32 bytes). */
+    sharedSecret: Buffer;
+}
+/** Result of an encrypted read operation. */
+export interface DecryptedReadResult {
+    /** Decrypted plaintext message body. */
+    decryptedBody: string;
+    /** The raw relay message (body field contains ciphertext JSON). */
+    message: RelayMessageResponse;
+    /** Whether this read was the first read. */
+    firstRead: boolean;
+}
 /** Thrown when a non-transient client error occurs (4xx). */
 export declare class RelayClientError extends Error {
     readonly statusCode: number;
@@ -179,6 +201,36 @@ export declare class RelayClient {
      * Ack a message by ID with transient failure retry.
      */
     ack(messageId: string): Promise<AckResult>;
+    /**
+     * Send an encrypted message via the relay.
+     *
+     * Encrypts the plaintext body using the shared secret from key exchange
+     * before sending. The wire payload contains only ciphertext (serialized
+     * EncryptedPayload JSON) — no plaintext body is ever transmitted.
+     *
+     * The relay server stores the ciphertext body as-is. Only the intended
+     * recipient with the matching shared secret can decrypt.
+     *
+     * @param options - Encrypted send options including body and shared secret.
+     * @returns SendResult with the relay message (body field contains ciphertext JSON).
+     * @throws CipherError if the shared secret is invalid or encryption fails.
+     */
+    sendEncrypted(options: EncryptedSendOptions): Promise<SendResult>;
+    /**
+     * Read and decrypt a message from the relay.
+     *
+     * Reads the message via the relay read endpoint, then decrypts the
+     * ciphertext body using the shared secret from key exchange.
+     *
+     * Tampered ciphertext, wrong shared secret, or malformed payloads
+     * will cause decryption to fail with a CipherError.
+     *
+     * @param messageId - Message ID to read and decrypt.
+     * @param sharedSecret - Shared secret from key exchange (32 bytes).
+     * @returns DecryptedReadResult with the decrypted plaintext body.
+     * @throws CipherError if decryption fails (tampered, wrong key, malformed).
+     */
+    readDecrypted(messageId: string, sharedSecret: Buffer): Promise<DecryptedReadResult>;
     /**
      * Send a payload to the relay with retry logic.
      * Throws RelayClientError for non-transient errors (4xx).

@@ -20,6 +20,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { generateDedupeKey } from '../contract/ids.js';
+import { encryptMessage, decryptMessage, type EncryptedPayload } from '../e2ee/cipher.js';
+import { CipherError } from '../errors.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -126,6 +128,30 @@ export interface ReadResult {
 export interface AckResult {
   message: RelayMessageResponse;
   firstAck: boolean;
+}
+
+/** Options for sending an encrypted message via relay. */
+export interface EncryptedSendOptions {
+  /** Recipient GitHub user ID. */
+  recipientId: number;
+  /** Plaintext message body to encrypt before sending. */
+  body: string;
+  /** Optional subject line (not encrypted — metadata). */
+  subject?: string;
+  /** Parent message ID for replies. */
+  inReplyTo?: string;
+  /** Shared secret from key exchange (32 bytes). */
+  sharedSecret: Buffer;
+}
+
+/** Result of an encrypted read operation. */
+export interface DecryptedReadResult {
+  /** Decrypted plaintext message body. */
+  decryptedBody: string;
+  /** The raw relay message (body field contains ciphertext JSON). */
+  message: RelayMessageResponse;
+  /** Whether this read was the first read. */
+  firstRead: boolean;
 }
 
 // ── Errors ───────────────────────────────────────────────────────────
@@ -305,6 +331,79 @@ export class RelayClient {
     return {
       message: body['message'] as RelayMessageResponse,
       firstAck: body['first_ack'] as boolean,
+    };
+  }
+
+  // ── E2EE Transport Integration ─────────────────────────────────────
+
+  /**
+   * Send an encrypted message via the relay.
+   *
+   * Encrypts the plaintext body using the shared secret from key exchange
+   * before sending. The wire payload contains only ciphertext (serialized
+   * EncryptedPayload JSON) — no plaintext body is ever transmitted.
+   *
+   * The relay server stores the ciphertext body as-is. Only the intended
+   * recipient with the matching shared secret can decrypt.
+   *
+   * @param options - Encrypted send options including body and shared secret.
+   * @returns SendResult with the relay message (body field contains ciphertext JSON).
+   * @throws CipherError if the shared secret is invalid or encryption fails.
+   */
+  async sendEncrypted(options: EncryptedSendOptions): Promise<SendResult> {
+    const { recipientId, body, subject, inReplyTo, sharedSecret } = options;
+
+    // Encrypt the plaintext body into an EncryptedPayload
+    const encrypted = encryptMessage(sharedSecret, body);
+
+    // Serialize the EncryptedPayload as the body field on the wire.
+    // The relay stores this ciphertext JSON string — no plaintext leaves the client.
+    const ciphertextBody = JSON.stringify(encrypted);
+
+    return this.send({
+      recipientId,
+      body: ciphertextBody,
+      subject,
+      inReplyTo,
+    });
+  }
+
+  /**
+   * Read and decrypt a message from the relay.
+   *
+   * Reads the message via the relay read endpoint, then decrypts the
+   * ciphertext body using the shared secret from key exchange.
+   *
+   * Tampered ciphertext, wrong shared secret, or malformed payloads
+   * will cause decryption to fail with a CipherError.
+   *
+   * @param messageId - Message ID to read and decrypt.
+   * @param sharedSecret - Shared secret from key exchange (32 bytes).
+   * @returns DecryptedReadResult with the decrypted plaintext body.
+   * @throws CipherError if decryption fails (tampered, wrong key, malformed).
+   */
+  async readDecrypted(messageId: string, sharedSecret: Buffer): Promise<DecryptedReadResult> {
+    const readResult = await this.read(messageId);
+    const msg = readResult.message;
+
+    // Parse the ciphertext body (stored as EncryptedPayload JSON)
+    let encrypted: EncryptedPayload;
+    try {
+      encrypted = JSON.parse(msg.body) as EncryptedPayload;
+    } catch {
+      throw new CipherError(
+        'Failed to parse encrypted payload from relay message body. ' +
+          'The message may not have been encrypted or the payload is corrupted.'
+      );
+    }
+
+    // Decrypt using the shared secret
+    const decryptedBody = decryptMessage(sharedSecret, encrypted);
+
+    return {
+      decryptedBody,
+      message: msg,
+      firstRead: readResult.firstRead,
     };
   }
 
