@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -169,15 +169,60 @@ describe('GitHub shortcut install without build deps (VAL-INSTALL-001)', () => {
     // global git installs don't install devDependencies before prepare).
     // It should check for tsc availability and succeed gracefully if absent.
     expect(pkg.scripts.prepare).toMatch(/tsc/);
-    expect(pkg.scripts.prepare).toMatch(/\|\|/);
     // Must not be a bare `npm run build` which would fail without tsc
     expect(pkg.scripts.prepare).not.toBe('npm run build');
+  });
+
+  it('prepare script propagates real build failures when tsc is present', () => {
+    // When tsc IS available but the build itself fails (e.g. type errors),
+    // the prepare script must NOT swallow the failure — it must propagate
+    // the non-zero exit code so developers see real build errors.
+    //
+    // We simulate a build failure by temporarily injecting a bad tsconfig
+    // that causes tsc to fail, then verify the prepare script exits non-zero.
+    const tsconfigBuildPath = join(ROOT, 'tsconfig.build.json');
+    const originalTsconfig = readFileSync(tsconfigBuildPath, 'utf8');
+
+    try {
+      // Write a tsconfig that references a non-existent file to force tsc failure
+      const brokenTsconfig = JSON.stringify(
+        {
+          extends: './tsconfig.json',
+          compilerOptions: {
+            outDir: './dist',
+          },
+          include: ['src/nonexistent-file-that-does-not-exist.ts'],
+        },
+        null,
+        2
+      );
+      writeFileSync(tsconfigBuildPath, brokenTsconfig + '\n');
+
+      // The prepare script should fail because tsc IS present but the build fails
+      let exitCode = 0;
+      try {
+        execSync(`bash -c '${pkg.scripts.prepare}'`, {
+          cwd: ROOT,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 30_000,
+        });
+      } catch (err: unknown) {
+        const e = err as { status?: number };
+        exitCode = e.status ?? 1;
+      }
+
+      // Build failure must NOT be swallowed — exit code must be non-zero
+      expect(exitCode).not.toBe(0);
+    } finally {
+      // Restore original tsconfig.build.json
+      writeFileSync(tsconfigBuildPath, originalTsconfig);
+    }
   });
 
   it('prepare script logic succeeds when node_modules/.bin/tsc is absent', () => {
     // Directly test the shell logic the prepare script uses.
     // Simulate the scenario where tsc is not installed (no devDependencies).
-    // The `test -x` check should fail, `|| true` should succeed.
+    // The `test -x` check should fail, so the if-body is skipped and exit is 0.
     const prepareCmd = pkg.scripts.prepare as string;
 
     // Run the exact prepare script in a simulated environment where

@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "prepare": "test -x node_modules/.bin/tsc && npm run build || true",
+    "prepare": "if test -x node_modules/.bin/tsc; then npm run build; fi",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
