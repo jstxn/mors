@@ -71,18 +71,19 @@ export function createRelayServer(config, options) {
             });
             return;
         }
-        // ── Auth guard: when a token verifier is configured, all non-public
-        // routes require a valid Bearer token. Without a verifier, routes
-        // operate without auth (development/legacy mode). ──
-        let principal;
-        if (tokenVerifier) {
-            const authResult = await extractAndVerify(req, tokenVerifier);
-            if (!authResult.authenticated) {
-                send401(res, authResult.detail);
-                return;
-            }
-            principal = authResult.principal;
+        // ── Auth guard: all non-public routes require a valid Bearer token.
+        // Fail-closed: if no token verifier is configured, protected routes
+        // return 401 (never fall through to 200). ──
+        if (!tokenVerifier) {
+            send401(res, 'Authentication service unavailable. Token verifier is not configured.');
+            return;
         }
+        const authResult = await extractAndVerify(req, tokenVerifier);
+        if (!authResult.authenticated) {
+            send401(res, authResult.detail);
+            return;
+        }
+        const principal = authResult.principal;
         // Route: GET /events (SSE baseline — auth required when verifier configured)
         if (url === '/events' || url.startsWith('/events?')) {
             if (method !== 'GET' && method !== 'HEAD') {
@@ -107,29 +108,27 @@ export function createRelayServer(config, options) {
         // Route: /conversations/:conversationId/... (auth + participant required)
         const convRoute = parseConversationRoute(url);
         if (convRoute) {
-            // Object-level authorization: check participant access (requires auth)
-            if (participantStore && principal) {
-                const isAllowed = await participantStore.isParticipant(convRoute.conversationId, principal.githubUserId);
-                if (!isAllowed) {
-                    send403(res, `Not a participant of conversation "${convRoute.conversationId}". Access denied.`);
-                    return;
-                }
+            // Object-level authorization: fail-closed when participant store is absent.
+            // If no participant store is configured, deny access (never fall through to 200).
+            if (!participantStore) {
+                send403(res, 'Authorization service unavailable. Participant store is not configured.');
+                return;
+            }
+            const isAllowed = await participantStore.isParticipant(convRoute.conversationId, principal.githubUserId);
+            if (!isAllowed) {
+                send403(res, `Not a participant of conversation "${convRoute.conversationId}". Access denied.`);
+                return;
             }
             // Notify callback for observability/testing
-            if (principal) {
-                onConversationAccess?.(principal);
-            }
+            onConversationAccess?.(principal);
             // Placeholder conversation endpoint — returns success with conversation context
-            const responseBody = {
+            sendJson(res, 200, {
                 conversationId: convRoute.conversationId,
-            };
-            if (principal) {
-                responseBody['principal'] = {
+                principal: {
                     githubUserId: principal.githubUserId,
                     githubLogin: principal.githubLogin,
-                };
-            }
-            sendJson(res, 200, responseBody);
+                },
+            });
             return;
         }
         // All other routes: 404

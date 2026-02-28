@@ -9,6 +9,7 @@
 import { loadRelayConfig } from './config.js';
 import { bootstrapRelay } from './bootstrap.js';
 import { createRelayServer } from './server.js';
+import { createGitHubTokenVerifier } from './auth-middleware.js';
 async function main() {
     const config = loadRelayConfig();
     // Initialize persistence and other dependencies before accepting requests
@@ -18,7 +19,22 @@ async function main() {
         console.error(`relay bootstrap failed: services not ready: ${failed.join(', ')}`);
         process.exit(1);
     }
-    const server = createRelayServer(config);
+    // Wire production auth dependencies — fail-closed by default.
+    // Token verification uses the GitHub API to validate bearer tokens.
+    // Participant store is a scaffold that denies all access until
+    // real persistence is wired in a future milestone.
+    const tokenVerifier = createGitHubTokenVerifier();
+    const participantStore = {
+        async isParticipant(_conversationId, _githubUserId) {
+            // Scaffold: deny all until real persistence is wired.
+            // This ensures fail-closed authz on conversation routes.
+            return false;
+        },
+    };
+    const server = createRelayServer(config, {
+        tokenVerifier,
+        participantStore,
+    });
     // Graceful shutdown handler
     const shutdown = async (signal) => {
         console.log(`\nReceived ${signal}, shutting down...`);

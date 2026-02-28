@@ -23,9 +23,15 @@ export type RelayLogger = (message: string) => void;
 export interface RelayServerOptions {
     /** Custom logger. Defaults to console.log. */
     logger?: RelayLogger;
-    /** Token verifier for auth. If not provided, all protected routes return 401. */
+    /**
+     * Token verifier for auth. Fail-closed: if not provided, all protected
+     * routes return 401 (no fail-open path).
+     */
     tokenVerifier?: TokenVerifier;
-    /** Participant store for object-level authorization on conversation routes. */
+    /**
+     * Participant store for object-level authorization on conversation routes.
+     * Fail-closed: if not provided, conversation routes return 403.
+     */
     participantStore?: ParticipantStore;
     /** Optional callback invoked on successful conversation access (for testing/observability). */
     onConversationAccess?: (principal: AuthPrincipal) => void;

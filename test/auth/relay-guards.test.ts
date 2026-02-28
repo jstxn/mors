@@ -409,4 +409,116 @@ describe('relay auth guards', () => {
       expect(headers.get('content-type')).toBe('application/json');
     });
   });
+
+  // ── Fail-closed: protected routes reject when auth dependencies are absent ──
+
+  describe('fail-closed when tokenVerifier is absent', () => {
+    it('returns 401 on conversation endpoint when no tokenVerifier is configured', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      // No tokenVerifier — must fail closed (not 200 open)
+      server = createRelayServer(config, {});
+      await server.start();
+
+      const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages');
+      expect(status).toBe(401);
+      const payload = JSON.parse(body);
+      expect(payload.error).toBe('unauthorized');
+    });
+
+    it('returns 401 on SSE /events when no tokenVerifier is configured', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      server = createRelayServer(config, {});
+      await server.start();
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/events`, {
+          signal: controller.signal,
+        });
+        expect(res.status).toBe(401);
+        const payload = (await res.json()) as Record<string, unknown>;
+        expect(payload['error']).toBe('unauthorized');
+      } finally {
+        clearTimeout(timeout);
+      }
+    });
+
+    it('returns 401 even with valid-looking Bearer header when no verifier', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      server = createRelayServer(config, {});
+      await server.start();
+
+      const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
+        headers: { Authorization: 'Bearer some-token' },
+      });
+      expect(status).toBe(401);
+      const payload = JSON.parse(body);
+      expect(payload.error).toBe('unauthorized');
+    });
+
+    it('health endpoint remains accessible when no tokenVerifier is configured', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      server = createRelayServer(config, {});
+      await server.start();
+
+      const { status, body } = await fetchRelay(port, '/health');
+      expect(status).toBe(200);
+      const payload = JSON.parse(body);
+      expect(payload.status).toBe('ok');
+    });
+  });
+
+  describe('fail-closed when participantStore is absent', () => {
+    const tokenMap = {
+      'valid-token-alice': { githubUserId: 100, githubLogin: 'alice' },
+    };
+
+    it('returns 403 on conversation endpoint when authenticated but no participantStore', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const verifier = createStubVerifier(tokenMap);
+      // tokenVerifier set, but no participantStore — must fail closed (not 200 open)
+      server = createRelayServer(config, { tokenVerifier: verifier });
+      await server.start();
+
+      const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
+        headers: { Authorization: 'Bearer valid-token-alice' },
+      });
+      expect(status).toBe(403);
+      const payload = JSON.parse(body);
+      expect(payload.error).toBe('forbidden');
+    });
+
+    it('SSE /events with valid auth still succeeds without participantStore (non-conversation)', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const verifier = createStubVerifier(tokenMap);
+      server = createRelayServer(config, { tokenVerifier: verifier });
+      await server.start();
+
+      const controller = new AbortController();
+      const res = await fetch(`http://127.0.0.1:${port}/events`, {
+        signal: controller.signal,
+        headers: {
+          Authorization: 'Bearer valid-token-alice',
+          Accept: 'text/event-stream',
+        },
+      });
+      expect(res.status).toBe(200);
+      controller.abort();
+    });
+  });
+
+  describe('production entry point wiring', () => {
+    it('createGitHubTokenVerifier is exported and callable', async () => {
+      const { createGitHubTokenVerifier } = await import('../../src/relay/auth-middleware.js');
+      const verifier = createGitHubTokenVerifier();
+      expect(typeof verifier).toBe('function');
+    });
+  });
 });

@@ -36,9 +36,15 @@ export type RelayLogger = (message: string) => void;
 export interface RelayServerOptions {
   /** Custom logger. Defaults to console.log. */
   logger?: RelayLogger;
-  /** Token verifier for auth. If not provided, all protected routes return 401. */
+  /**
+   * Token verifier for auth. Fail-closed: if not provided, all protected
+   * routes return 401 (no fail-open path).
+   */
   tokenVerifier?: TokenVerifier;
-  /** Participant store for object-level authorization on conversation routes. */
+  /**
+   * Participant store for object-level authorization on conversation routes.
+   * Fail-closed: if not provided, conversation routes return 403.
+   */
   participantStore?: ParticipantStore;
   /** Optional callback invoked on successful conversation access (for testing/observability). */
   onConversationAccess?: (principal: AuthPrincipal) => void;
@@ -116,19 +122,21 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       return;
     }
 
-    // ── Auth guard: when a token verifier is configured, all non-public
-    // routes require a valid Bearer token. Without a verifier, routes
-    // operate without auth (development/legacy mode). ──
-    let principal: AuthPrincipal | undefined;
+    // ── Auth guard: all non-public routes require a valid Bearer token.
+    // Fail-closed: if no token verifier is configured, protected routes
+    // return 401 (never fall through to 200). ──
 
-    if (tokenVerifier) {
-      const authResult = await extractAndVerify(req, tokenVerifier);
-      if (!authResult.authenticated) {
-        send401(res, authResult.detail);
-        return;
-      }
-      principal = authResult.principal;
+    if (!tokenVerifier) {
+      send401(res, 'Authentication service unavailable. Token verifier is not configured.');
+      return;
     }
+
+    const authResult = await extractAndVerify(req, tokenVerifier);
+    if (!authResult.authenticated) {
+      send401(res, authResult.detail);
+      return;
+    }
+    const principal: AuthPrincipal = authResult.principal;
 
     // Route: GET /events (SSE baseline — auth required when verifier configured)
     if (url === '/events' || url.startsWith('/events?')) {
@@ -160,37 +168,36 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
     // Route: /conversations/:conversationId/... (auth + participant required)
     const convRoute = parseConversationRoute(url);
     if (convRoute) {
-      // Object-level authorization: check participant access (requires auth)
-      if (participantStore && principal) {
-        const isAllowed = await participantStore.isParticipant(
-          convRoute.conversationId,
-          principal.githubUserId
+      // Object-level authorization: fail-closed when participant store is absent.
+      // If no participant store is configured, deny access (never fall through to 200).
+      if (!participantStore) {
+        send403(res, 'Authorization service unavailable. Participant store is not configured.');
+        return;
+      }
+
+      const isAllowed = await participantStore.isParticipant(
+        convRoute.conversationId,
+        principal.githubUserId
+      );
+      if (!isAllowed) {
+        send403(
+          res,
+          `Not a participant of conversation "${convRoute.conversationId}". Access denied.`
         );
-        if (!isAllowed) {
-          send403(
-            res,
-            `Not a participant of conversation "${convRoute.conversationId}". Access denied.`
-          );
-          return;
-        }
+        return;
       }
 
       // Notify callback for observability/testing
-      if (principal) {
-        onConversationAccess?.(principal);
-      }
+      onConversationAccess?.(principal);
 
       // Placeholder conversation endpoint — returns success with conversation context
-      const responseBody: Record<string, unknown> = {
+      sendJson(res, 200, {
         conversationId: convRoute.conversationId,
-      };
-      if (principal) {
-        responseBody['principal'] = {
+        principal: {
           githubUserId: principal.githubUserId,
           githubLogin: principal.githubLogin,
-        };
-      }
-      sendJson(res, 200, responseBody);
+        },
+      });
       return;
     }
 

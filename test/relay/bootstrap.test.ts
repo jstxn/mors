@@ -15,6 +15,16 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig, type RelayConfig } from '../../src/relay/config.js';
 import { bootstrapRelay } from '../../src/relay/bootstrap.js';
+import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
+
+/** Stub token verifier that accepts a known test token. */
+const TEST_TOKEN = 'test-token-bootstrap';
+const stubVerifier: TokenVerifier = async (token: string) => {
+  if (token === TEST_TOKEN) {
+    return { githubUserId: 1, githubLogin: 'test-user' };
+  }
+  return null;
+};
 
 /** Helper to make HTTP requests to the relay server. */
 async function fetchRelay(port: number, path: string): Promise<{ status: number; body: string }> {
@@ -212,16 +222,31 @@ describe('relay bootstrap', () => {
       expect(typeof payload.configWarnings).toBe('number');
     });
 
-    it('returns 404 for unknown routes', async () => {
+    it('returns 404 for unknown routes (with valid auth)', async () => {
       const port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
-      server = createRelayServer(config);
+      server = createRelayServer(config, { tokenVerifier: stubVerifier });
+      await server.start();
+
+      const res = await fetch(`http://127.0.0.1:${port}/nonexistent`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      const body = await res.text();
+      expect(res.status).toBe(404);
+      const payload = JSON.parse(body);
+      expect(payload.error).toBe('not_found');
+    });
+
+    it('returns 401 for unknown routes when no auth provided', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
       const { status, body } = await fetchRelay(port, '/nonexistent');
-      expect(status).toBe(404);
+      expect(status).toBe(401);
       const payload = JSON.parse(body);
-      expect(payload.error).toBe('not_found');
+      expect(payload.error).toBe('unauthorized');
     });
 
     it('returns 405 for non-GET methods on /health', async () => {
@@ -238,16 +263,19 @@ describe('relay bootstrap', () => {
   // --- SSE baseline tests ---
 
   describe('SSE baseline', () => {
-    it('GET /events returns SSE content type headers', async () => {
+    it('GET /events returns SSE content type headers with valid auth', async () => {
       const port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
-      server = createRelayServer(config);
+      server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
       const controller = new AbortController();
       const res = await fetch(`http://127.0.0.1:${port}/events`, {
         signal: controller.signal,
-        headers: { Accept: 'text/event-stream' },
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${TEST_TOKEN}`,
+        },
       });
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('text/event-stream');
@@ -256,16 +284,19 @@ describe('relay bootstrap', () => {
       controller.abort();
     });
 
-    it('SSE stream sends initial heartbeat comment', async () => {
+    it('SSE stream sends initial heartbeat comment with valid auth', async () => {
       const port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
-      server = createRelayServer(config);
+      server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
       const controller = new AbortController();
       const res = await fetch(`http://127.0.0.1:${port}/events`, {
         signal: controller.signal,
-        headers: { Accept: 'text/event-stream' },
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${TEST_TOKEN}`,
+        },
       });
 
       const body = res.body;
@@ -324,14 +355,17 @@ describe('relay bootstrap', () => {
     it('server.close() resolves even when active SSE connections exist', async () => {
       const port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
-      server = createRelayServer(config);
+      server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
-      // Open an SSE connection
+      // Open an SSE connection with valid auth
       const controller = new AbortController();
       const ssePromise = fetch(`http://127.0.0.1:${port}/events`, {
         signal: controller.signal,
-        headers: { Accept: 'text/event-stream' },
+        headers: {
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${TEST_TOKEN}`,
+        },
       });
 
       // Wait for connection to be established
