@@ -1,0 +1,28 @@
+{
+  "featureId": "distribution-followup-github-shortcut-install-without-build-deps",
+  "reviewedAt": "2026-02-28T09:05:12Z",
+  "commitId": "f827ad8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature correctly targets npm git-install behavior by committing prebuilt dist artifacts and adding coverage for first-run CLI flow without a manual build. However, the prepare-script guard currently masks real build failures whenever TypeScript is present, which can silently ship stale/broken dist output.",
+    "issues": [
+      {
+        "file": "package.json",
+        "line": 14,
+        "severity": "blocking",
+        "description": "`prepare` is `test -x node_modules/.bin/tsc && npm run build || true`, which returns success even when `npm run build` fails (because `|| true` swallows non-zero exits). This suppresses legitimate compile failures and can leave stale dist artifacts while install/prepare appears successful."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Worker had to research npm CLI issue #8440 at implementation time to justify the git-install workaround, but this known install-channel caveat is not captured in shared library docs.",
+      "evidence": "Transcript skeleton shows WebSearch/FetchUrl for npm issue #8440; `.factory/library` grep only finds a generic GitHub install command in `user-testing.md` and no note about devDependencies/prepare behavior for git global installs."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking prepare-script regression risk: build failures are currently swallowed. Aside from that, the implementation and tests align with the feature goal of GitHub shortcut install viability without global TypeScript/manual build."
+}
