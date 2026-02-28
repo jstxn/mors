@@ -35,8 +35,8 @@ async function fetchRelay(port: number, path: string): Promise<{ status: number;
 
 /** Find a random available port for test isolation. */
 function getTestPort(): number {
-  // Use a random port in ephemeral range for test isolation
-  return 30000 + Math.floor(Math.random() * 10000);
+  // Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions
+  return 0;
 }
 
 describe('relay bootstrap', () => {
@@ -118,42 +118,43 @@ describe('relay bootstrap', () => {
 
   describe('server lifecycle', () => {
     it('starts on configured port and resolves start promise', async () => {
-      const port = getTestPort();
-      const config: RelayConfig = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config: RelayConfig = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
       expect(server.listening).toBe(true);
-      expect(server.port).toBe(port);
+      expect(server.port).toBeGreaterThan(0);
     });
 
     it('emits deterministic startup log', async () => {
-      const port = getTestPort();
       const logs: string[] = [];
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config, { logger: (msg: string) => logs.push(msg) });
       await server.start();
-      expect(logs.some((l) => l.includes('listening') && l.includes(String(port)))).toBe(true);
+      const actualPort = server.port;
+      expect(logs.some((l) => l.includes('listening') && l.includes(String(actualPort)))).toBe(
+        true
+      );
     });
 
     it('close resolves cleanly and port is freed', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
+      const boundPort = server.port;
       await server.close();
       expect(server.listening).toBe(false);
       server = null;
 
       // Verify port is freed by starting a new server on the same port
-      const server2 = createRelayServer(config);
+      const config2 = loadRelayConfig({ MORS_RELAY_PORT: String(boundPort) });
+      const server2 = createRelayServer(config2);
       await server2.start();
       expect(server2.listening).toBe(true);
       await server2.close();
     });
 
     it('double-close is idempotent', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
       await server.close();
@@ -164,13 +165,12 @@ describe('relay bootstrap', () => {
     });
 
     it('close terminates in-flight connections without hanging', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
 
       // Start a request but close server during it
-      const fetchPromise = fetch(`http://127.0.0.1:${port}/health`);
+      const fetchPromise = fetch(`http://127.0.0.1:${server.port}/health`);
       await server.close();
       server = null;
 
@@ -187,12 +187,11 @@ describe('relay bootstrap', () => {
 
   describe('health endpoint', () => {
     it('GET /health returns 200 with JSON success payload', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
 
-      const { status, body } = await fetchRelay(port, '/health');
+      const { status, body } = await fetchRelay(server.port, '/health');
       expect(status).toBe(200);
       const payload = JSON.parse(body);
       expect(payload.status).toBe('ok');
@@ -200,35 +199,32 @@ describe('relay bootstrap', () => {
     });
 
     it('health response includes uptime field', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
 
-      const { body } = await fetchRelay(port, '/health');
+      const { body } = await fetchRelay(server.port, '/health');
       const payload = JSON.parse(body);
       expect(typeof payload.uptime).toBe('number');
       expect(payload.uptime).toBeGreaterThanOrEqual(0);
     });
 
     it('health response includes config diagnostics count', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
 
-      const { body } = await fetchRelay(port, '/health');
+      const { body } = await fetchRelay(server.port, '/health');
       const payload = JSON.parse(body);
       expect(typeof payload.configWarnings).toBe('number');
     });
 
     it('returns 404 for unknown routes (with valid auth)', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
-      const res = await fetch(`http://127.0.0.1:${port}/nonexistent`, {
+      const res = await fetch(`http://127.0.0.1:${server.port}/nonexistent`, {
         headers: { Authorization: `Bearer ${TEST_TOKEN}` },
       });
       const body = await res.text();
@@ -238,24 +234,22 @@ describe('relay bootstrap', () => {
     });
 
     it('returns 401 for unknown routes when no auth provided', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
-      const { status, body } = await fetchRelay(port, '/nonexistent');
+      const { status, body } = await fetchRelay(server.port, '/nonexistent');
       expect(status).toBe(401);
       const payload = JSON.parse(body);
       expect(payload.error).toBe('unauthorized');
     });
 
     it('returns 405 for non-GET methods on /health', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config);
       await server.start();
 
-      const res = await fetch(`http://127.0.0.1:${port}/health`, { method: 'POST' });
+      const res = await fetch(`http://127.0.0.1:${server.port}/health`, { method: 'POST' });
       expect(res.status).toBe(405);
     });
   });
@@ -264,13 +258,12 @@ describe('relay bootstrap', () => {
 
   describe('SSE baseline', () => {
     it('GET /events returns SSE content type headers with valid auth', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
       const controller = new AbortController();
-      const res = await fetch(`http://127.0.0.1:${port}/events`, {
+      const res = await fetch(`http://127.0.0.1:${server.port}/events`, {
         signal: controller.signal,
         headers: {
           Accept: 'text/event-stream',
@@ -285,13 +278,12 @@ describe('relay bootstrap', () => {
     });
 
     it('SSE stream sends initial heartbeat comment with valid auth', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
       const controller = new AbortController();
-      const res = await fetch(`http://127.0.0.1:${port}/events`, {
+      const res = await fetch(`http://127.0.0.1:${server.port}/events`, {
         signal: controller.signal,
         headers: {
           Accept: 'text/event-stream',
@@ -316,14 +308,21 @@ describe('relay bootstrap', () => {
 
   describe('test harness: spin up/down without orphaned processes', () => {
     it('multiple sequential start/stop cycles work correctly', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      // Start once to get an ephemeral port, then reuse it for subsequent cycles
+      const config0 = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
+      const srv0 = createRelayServer(config0);
+      await srv0.start();
+      const boundPort = srv0.port;
+      const { status: s0 } = await fetchRelay(boundPort, '/health');
+      expect(s0).toBe(200);
+      await srv0.close();
 
-      for (let i = 0; i < 3; i++) {
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(boundPort) });
+      for (let i = 0; i < 2; i++) {
         const srv = createRelayServer(config);
         await srv.start();
         expect(srv.listening).toBe(true);
-        const { status } = await fetchRelay(port, '/health');
+        const { status } = await fetchRelay(srv.port, '/health');
         expect(status).toBe(200);
         await srv.close();
         expect(srv.listening).toBe(false);
@@ -331,10 +330,8 @@ describe('relay bootstrap', () => {
     });
 
     it('parallel server instances on different ports', async () => {
-      const port1 = getTestPort();
-      const port2 = port1 + 1;
-      const config1 = loadRelayConfig({ MORS_RELAY_PORT: String(port1) });
-      const config2 = loadRelayConfig({ MORS_RELAY_PORT: String(port2) });
+      const config1 = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
+      const config2 = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
 
       const srv1 = createRelayServer(config1);
       const srv2 = createRelayServer(config2);
@@ -342,8 +339,8 @@ describe('relay bootstrap', () => {
       await Promise.all([srv1.start(), srv2.start()]);
 
       const [res1, res2] = await Promise.all([
-        fetchRelay(port1, '/health'),
-        fetchRelay(port2, '/health'),
+        fetchRelay(srv1.port, '/health'),
+        fetchRelay(srv2.port, '/health'),
       ]);
 
       expect(res1.status).toBe(200);
@@ -353,14 +350,13 @@ describe('relay bootstrap', () => {
     });
 
     it('server.close() resolves even when active SSE connections exist', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       server = createRelayServer(config, { tokenVerifier: stubVerifier });
       await server.start();
 
       // Open an SSE connection with valid auth
       const controller = new AbortController();
-      const ssePromise = fetch(`http://127.0.0.1:${port}/events`, {
+      const ssePromise = fetch(`http://127.0.0.1:${server.port}/events`, {
         signal: controller.signal,
         headers: {
           Accept: 'text/event-stream',
@@ -395,42 +391,42 @@ describe('relay bootstrap', () => {
     });
 
     it('server startup log reflects actual host binding', async () => {
-      const port = getTestPort();
       const logs: string[] = [];
       const config = loadRelayConfig({
-        MORS_RELAY_PORT: String(port),
+        MORS_RELAY_PORT: String(getTestPort()),
         MORS_RELAY_HOST: '127.0.0.1',
       });
       server = createRelayServer(config, { logger: (msg: string) => logs.push(msg) });
       await server.start();
-      expect(logs.some((l) => l.includes('127.0.0.1') && l.includes(String(port)))).toBe(true);
+      const actualPort = server.port;
+      expect(logs.some((l) => l.includes('127.0.0.1') && l.includes(String(actualPort)))).toBe(
+        true
+      );
     });
 
     it('server binds to 0.0.0.0 by default and is reachable on 127.0.0.1', async () => {
-      const port = getTestPort();
-      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(getTestPort()) });
       // config.host should default to '0.0.0.0'
       expect(config.host).toBe('0.0.0.0');
       server = createRelayServer(config);
       await server.start();
 
       // 0.0.0.0 binding is reachable via 127.0.0.1
-      const { status } = await fetchRelay(port, '/health');
+      const { status } = await fetchRelay(server.port, '/health');
       expect(status).toBe(200);
     });
 
     it('server binds to specified host from config', async () => {
-      const port = getTestPort();
       const logs: string[] = [];
       const config = loadRelayConfig({
-        MORS_RELAY_PORT: String(port),
+        MORS_RELAY_PORT: String(getTestPort()),
         MORS_RELAY_HOST: '127.0.0.1',
       });
       server = createRelayServer(config, { logger: (msg: string) => logs.push(msg) });
       await server.start();
 
       // Should be reachable
-      const { status } = await fetchRelay(port, '/health');
+      const { status } = await fetchRelay(server.port, '/health');
       expect(status).toBe(200);
 
       // Log should show the configured host
@@ -465,9 +461,8 @@ describe('relay bootstrap', () => {
     it('bootstrap runs before server start in the entrypoint flow', async () => {
       // Verify that the relay entrypoint module calls bootstrapRelay
       // by testing the combined flow: bootstrap + server create + start
-      const port = getTestPort();
       const config = loadRelayConfig({
-        MORS_RELAY_PORT: String(port),
+        MORS_RELAY_PORT: String(getTestPort()),
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const logs: string[] = [];

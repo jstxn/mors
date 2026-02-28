@@ -17,9 +17,9 @@ import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
 
-/** Find a random available port for test isolation. */
+/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
 function getTestPort(): number {
-  return 30000 + Math.floor(Math.random() * 10000);
+  return 0;
 }
 
 /** Helper to make HTTP requests to the relay server. */
@@ -61,11 +61,12 @@ describe('relay auth guards', () => {
 
   describe('401 for missing/invalid/expired auth', () => {
     it('returns 401 for API endpoint with no Authorization header', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages');
       expect(status).toBe(401);
@@ -75,11 +76,12 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 for API endpoint with invalid token', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer invalid-token-xxx' },
@@ -91,12 +93,13 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 for API endpoint with expired token', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       // Token maps to nothing (simulates expired)
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer expired-token-yyy' },
@@ -107,11 +110,12 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 for SSE /events endpoint with no Authorization header', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/events');
       expect(status).toBe(401);
@@ -120,11 +124,12 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 for SSE /events endpoint with invalid token', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/events', {
         headers: { Authorization: 'Bearer bad-token-zzz' },
@@ -135,11 +140,12 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 for malformed Authorization header (not Bearer)', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Basic dXNlcjpwYXNz' },
@@ -150,11 +156,12 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 for empty Bearer token', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer ' },
@@ -165,11 +172,12 @@ describe('relay auth guards', () => {
     });
 
     it('health endpoint remains public (no auth required)', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/health');
       expect(status).toBe(200);
@@ -178,11 +186,12 @@ describe('relay auth guards', () => {
     });
 
     it('401 response does not leak token details', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer my-secret-token-value' },
@@ -201,7 +210,7 @@ describe('relay auth guards', () => {
     };
 
     it('returns 403 when authenticated user is not a participant of the conversation', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       server = createRelayServer(config, {
@@ -214,6 +223,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       // Alice (100) tries to access conv-1 where only bob is a participant
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
@@ -226,7 +236,7 @@ describe('relay auth guards', () => {
     });
 
     it('403 does not mutate conversation state', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       let mutationOccurred = false;
@@ -242,6 +252,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       // Alice attempts access — should be blocked before any mutation
       await fetchRelay(port, '/conversations/conv-1/messages', {
@@ -251,7 +262,7 @@ describe('relay auth guards', () => {
     });
 
     it('authorized participant gets 200 on conversation endpoint', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       server = createRelayServer(config, {
@@ -263,6 +274,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       // Bob (200) is a participant of conv-1
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
@@ -274,7 +286,7 @@ describe('relay auth guards', () => {
     });
 
     it('returns 403 for different conversation where user has no access', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       server = createRelayServer(config, {
@@ -287,6 +299,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       const { status } = await fetchRelay(port, '/conversations/conv-secret/messages', {
         headers: { Authorization: 'Bearer valid-token-bob' },
@@ -295,11 +308,12 @@ describe('relay auth guards', () => {
     });
 
     it('SSE /events with valid auth succeeds', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const controller = new AbortController();
       const res = await fetch(`http://127.0.0.1:${port}/events`, {
@@ -315,7 +329,7 @@ describe('relay auth guards', () => {
     });
 
     it('authenticated user gets correct principal identity from token', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       let capturedPrincipal: { githubUserId: number; githubLogin: string } | null = null;
@@ -331,6 +345,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer valid-token-bob' },
@@ -346,7 +361,7 @@ describe('relay auth guards', () => {
 
   describe('edge cases', () => {
     it('POST to conversation endpoint with valid auth and participant returns 200', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({
         'valid-token': { githubUserId: 300, githubLogin: 'charlie' },
@@ -358,6 +373,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         method: 'POST',
@@ -373,7 +389,7 @@ describe('relay auth guards', () => {
     });
 
     it('auth check happens before object-level authorization', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       let participantCheckCalled = false;
       const verifier = createStubVerifier({});
@@ -387,6 +403,7 @@ describe('relay auth guards', () => {
         },
       });
       await server.start();
+      port = server.port;
 
       const { status } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer bad-token' },
@@ -397,11 +414,12 @@ describe('relay auth guards', () => {
     });
 
     it('401 on /events does not start SSE connection', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({});
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, headers } = await fetchRelay(port, '/events');
       expect(status).toBe(401);
@@ -414,11 +432,12 @@ describe('relay auth guards', () => {
 
   describe('fail-closed when tokenVerifier is absent', () => {
     it('returns 401 on conversation endpoint when no tokenVerifier is configured', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       // No tokenVerifier — must fail closed (not 200 open)
       server = createRelayServer(config, {});
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages');
       expect(status).toBe(401);
@@ -427,10 +446,11 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 on SSE /events when no tokenVerifier is configured', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       server = createRelayServer(config, {});
       await server.start();
+      port = server.port;
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
@@ -447,10 +467,11 @@ describe('relay auth guards', () => {
     });
 
     it('returns 401 even with valid-looking Bearer header when no verifier', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       server = createRelayServer(config, {});
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer some-token' },
@@ -461,10 +482,11 @@ describe('relay auth guards', () => {
     });
 
     it('health endpoint remains accessible when no tokenVerifier is configured', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       server = createRelayServer(config, {});
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/health');
       expect(status).toBe(200);
@@ -479,12 +501,13 @@ describe('relay auth guards', () => {
     };
 
     it('returns 403 on conversation endpoint when authenticated but no participantStore', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       // tokenVerifier set, but no participantStore — must fail closed (not 200 open)
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const { status, body } = await fetchRelay(port, '/conversations/conv-1/messages', {
         headers: { Authorization: 'Bearer valid-token-alice' },
@@ -495,11 +518,12 @@ describe('relay auth guards', () => {
     });
 
     it('SSE /events with valid auth still succeeds without participantStore (non-conversation)', async () => {
-      const port = getTestPort();
+      let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
       server = createRelayServer(config, { tokenVerifier: verifier });
       await server.start();
+      port = server.port;
 
       const controller = new AbortController();
       const res = await fetch(`http://127.0.0.1:${port}/events`, {

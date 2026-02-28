@@ -62,8 +62,8 @@ export function loadRelayConfig(env = process.env) {
     if (!Number.isFinite(port) || !Number.isInteger(port)) {
         throw new Error(`Invalid port value: "${portStr}". MORS_RELAY_PORT must be a valid integer.`);
     }
-    if (port < 1 || port > 65535) {
-        throw new Error(`Port ${port} is out of range. Must be between 1 and 65535.`);
+    if (port < 0 || port > 65535) {
+        throw new Error(`Port ${port} is out of range. Must be between 0 and 65535.`);
     }
     // Host resolution: MORS_RELAY_HOST > '0.0.0.0' (container/hosted default)
     const host = env['MORS_RELAY_HOST'] ?? '0.0.0.0';

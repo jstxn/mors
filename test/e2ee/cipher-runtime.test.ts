@@ -468,8 +468,9 @@ const e2eeStubVerifier: TokenVerifier = async (token: string) => {
   return map[token] ?? null;
 };
 
+/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
 function getTestPort(): number {
-  return 30000 + Math.floor(Math.random() * 10000);
+  return 0;
 }
 
 describe('E2EE relay transport integration', () => {
@@ -503,6 +504,7 @@ describe('E2EE relay transport integration', () => {
       messageStore,
     });
     await server.start();
+    port = server.port;
   });
 
   afterEach(async () => {

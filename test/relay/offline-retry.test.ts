@@ -30,9 +30,9 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   return map[token] ?? null;
 };
 
-/** Find a random available port for test isolation. */
+/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
 function getTestPort(): number {
-  return 30000 + Math.floor(Math.random() * 10000);
+  return 0;
 }
 
 /** Helper for authenticated relay requests (for direct verification). */
@@ -93,6 +93,7 @@ describe('relay offline queue and transient retry recovery', () => {
       messageStore,
     });
     await server.start();
+    port = server.port;
   });
 
   afterEach(async () => {

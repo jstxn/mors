@@ -31,9 +31,9 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   return map[token] ?? null;
 };
 
-/** Find a random available port for test isolation. */
+/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
 function getTestPort(): number {
-  return 30000 + Math.floor(Math.random() * 10000);
+  return 0;
 }
 
 /** Helper for authenticated relay requests. */
@@ -100,9 +100,9 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
   beforeEach(async () => {
     const setup = createTestServer();
     server = setup.server;
-    port = setup.port;
     messageStore = setup.store;
     await server.start();
+    port = server.port;
   });
 
   afterEach(async () => {
@@ -716,8 +716,8 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
       if (server) await server.close();
       const newSetup = createTestServer(messageStore);
       server = newSetup.server;
-      port = newSetup.port;
       await server.start();
+      port = server.port;
 
       // Re-read after restart
       const read2 = await relayFetch(port, `/messages/${msgId}/read`, {
@@ -756,8 +756,8 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
       if (server) await server.close();
       const newSetup = createTestServer(messageStore);
       server = newSetup.server;
-      port = newSetup.port;
       await server.start();
+      port = server.port;
 
       // Re-ack after restart
       const ack2 = await relayFetch(port, `/messages/${msgId}/ack`, {
@@ -799,8 +799,8 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
       if (server) await server.close();
       const newSetup = createTestServer(messageStore);
       server = newSetup.server;
-      port = newSetup.port;
       await server.start();
+      port = server.port;
 
       // Re-read and re-ack
       const reRead = await relayFetch(port, `/messages/${msgId}/read`, {
@@ -912,8 +912,8 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
       if (server) await server.close();
       const newSetup = createTestServer(messageStore);
       server = newSetup.server;
-      port = newSetup.port;
       await server.start();
+      port = server.port;
 
       // Retry send with same dedupe key
       const send2 = await relayFetch(port, '/messages', {

@@ -31,9 +31,9 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   return map[token] ?? null;
 };
 
-/** Find a random available port for test isolation. */
+/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
 function getTestPort(): number {
-  return 30000 + Math.floor(Math.random() * 10000);
+  return 0;
 }
 
 /** Helper for authenticated relay requests. */
@@ -122,6 +122,7 @@ describe('relay entrypoint wiring', () => {
         logger: () => {},
       });
       await server.start();
+      port = server.port;
 
       const { status, body } = await relayFetch(port, '/messages', {
         method: 'POST',
@@ -151,6 +152,7 @@ describe('relay entrypoint wiring', () => {
         logger: () => {},
       });
       await server.start();
+      port = server.port;
 
       // Send a message first
       await relayFetch(port, '/messages', {
@@ -183,6 +185,7 @@ describe('relay entrypoint wiring', () => {
         logger: () => {},
       });
       await server.start();
+      port = server.port;
 
       // Alice sends to Bob
       const sendRes = await relayFetch(port, '/messages', {

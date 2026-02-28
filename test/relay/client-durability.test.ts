@@ -38,9 +38,9 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   return map[token] ?? null;
 };
 
-/** Find a random available port for test isolation. */
+/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
 function getTestPort(): number {
-  return 30000 + Math.floor(Math.random() * 10000);
+  return 0;
 }
 
 /** Helper for authenticated relay requests (for direct verification). */
@@ -217,21 +217,28 @@ describe('durable offline queue persistence', () => {
   });
 
   it('offline queued sends survive process restart and deliver after reconnect', async () => {
-    const port = getTestPort();
     const messageStore = new RelayMessageStore();
-    const config = loadRelayConfig({
-      MORS_RELAY_PORT: String(port),
-      MORS_RELAY_HOST: '127.0.0.1',
-    });
     const participantStore: ParticipantStore = {
       async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
         return messageStore.isParticipant(conversationId, githubUserId);
       },
     };
 
+    // Start server briefly to discover an ephemeral port, then stop for offline phase
+    const initConfig = loadRelayConfig({ MORS_RELAY_PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    const initServer = createRelayServer(initConfig, {
+      logger: () => {},
+      tokenVerifier: stubVerifier,
+      participantStore,
+      messageStore,
+    });
+    await initServer.start();
+    const port = initServer.port;
+    await initServer.close();
+
     const queuePath = join(tmpDir, 'restart-queue.json');
 
-    // Client1 queues while offline (no server)
+    // Client1 queues while offline (server stopped)
     const client1 = new RelayClient({
       baseUrl: `http://127.0.0.1:${port}`,
       token: ALICE.token,
@@ -258,7 +265,11 @@ describe('durable offline queue persistence', () => {
 
     expect(client2.queueSize).toBe(2);
 
-    // Now start the server
+    // Now start the server on the same port
+    const config = loadRelayConfig({
+      MORS_RELAY_PORT: String(port),
+      MORS_RELAY_HOST: '127.0.0.1',
+    });
     const server = createRelayServer(config, {
       logger: () => {},
       tokenVerifier: stubVerifier,
@@ -288,21 +299,28 @@ describe('durable offline queue persistence', () => {
   });
 
   it('successful flush clears the persisted queue file', async () => {
-    const port = getTestPort();
     const messageStore = new RelayMessageStore();
-    const config = loadRelayConfig({
-      MORS_RELAY_PORT: String(port),
-      MORS_RELAY_HOST: '127.0.0.1',
-    });
     const participantStore: ParticipantStore = {
       async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
         return messageStore.isParticipant(conversationId, githubUserId);
       },
     };
 
+    // Start server briefly to discover an ephemeral port, then stop for offline phase
+    const initConfig = loadRelayConfig({ MORS_RELAY_PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    const initServer = createRelayServer(initConfig, {
+      logger: () => {},
+      tokenVerifier: stubVerifier,
+      participantStore,
+      messageStore,
+    });
+    await initServer.start();
+    const port = initServer.port;
+    await initServer.close();
+
     const queuePath = join(tmpDir, 'clear-queue.json');
 
-    // Queue while offline
+    // Queue while offline (server stopped)
     const client = new RelayClient({
       baseUrl: `http://127.0.0.1:${port}`,
       token: ALICE.token,
@@ -315,7 +333,11 @@ describe('durable offline queue persistence', () => {
     await client.send({ recipientId: BOB.userId, body: 'Clear test' });
     expect(existsSync(queuePath)).toBe(true);
 
-    // Start server and flush
+    // Restart server on the same port and flush
+    const config = loadRelayConfig({
+      MORS_RELAY_PORT: String(port),
+      MORS_RELAY_HOST: '127.0.0.1',
+    });
     const server = createRelayServer(config, {
       logger: () => {},
       tokenVerifier: stubVerifier,
@@ -366,6 +388,7 @@ describe('flush reconciliation with retry and bounded backoff', () => {
       messageStore,
     });
     await server.start();
+    port = server.port;
   });
 
   afterEach(async () => {
