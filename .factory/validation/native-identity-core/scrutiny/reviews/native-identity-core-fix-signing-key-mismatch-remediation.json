@@ -1,0 +1,21 @@
+{
+  "featureId": "native-identity-core-fix-signing-key-mismatch-remediation",
+  "reviewedAt": "2026-02-28T22:33:39Z",
+  "commitId": "de0636d91b13602d77e7e1ff845a3ea5b8d09750",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed the fix transcript skeleton, the prior failed review, and both relevant diffs (d30c52dfa6ebac9eb36c1e66a6c96fc1cc6f05eb and de0636d91b13602d77e7e1ff845a3ea5b8d09750). The fix resolves the original blocking gap by introducing explicit signing-key-mismatch handling in token liveness checks (src/auth/guards.ts), surfacing actionable MORS_RELAY_SIGNING_KEY remediation, avoiding generic token-expired status for mismatch paths in CLI status output, and adding regression tests that explicitly assert remediation text and mismatch-specific behavior.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The assigned skill scope in mors-global-worker does not list the native-identity-core milestone even though this fix feature (and its predecessor) are implemented with this skill. The procedure was followed in this run, but the scope text remains out of sync with actual mission usage.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:12 lists only relay-foundation/global-async-messaging/realtime-watch/developer-launch-path; mission features use skillName mors-global-worker for native-identity-core entries at /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/features.json:1505 and :1530"
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/native-identity-core/scrutiny/reviews/native-identity-core-fix-login-relay-key-coordination.json",
+  "summary": "Pass: this fix adequately addresses the prior blocking failure by replacing generic mismatch handling with explicit signing-key alignment remediation and adding direct assertions for remediation text in auth guard coverage, with updated CLI mismatch status and relay mismatch guidance." 
+}

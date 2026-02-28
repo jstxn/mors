@@ -1,54 +1,41 @@
 {
   "milestone": "native-identity-core",
-  "round": 2,
-  "status": "fail",
+  "round": 3,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
     "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
   },
   "reviewsSummary": {
-    "total": 2,
+    "total": 1,
     "passed": 1,
-    "failed": 1,
-    "failedFeatures": ["native-identity-core-fix-login-relay-key-coordination"]
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "native-identity-core-fix-login-relay-key-coordination",
-      "severity": "blocking",
-      "description": "On signing-key mismatch, verifyTokenLiveness in src/auth/guards.ts:146 throws a generic 'Session token signature is invalid — token may be expired or revoked' message without explicitly diagnosing key mismatch or providing signing-key alignment remediation. The feature's expected behavior requires mismatched signing-key paths to fail with explicit remediation. The test suite also does not assert remediation text content, so this gap is not regression-guarded.",
-      "file": "src/auth/guards.ts",
-      "line": 146
-    }
-  ],
-  "appliedUpdates": [
-    {
-      "target": "library",
-      "description": "Updated environment.md MORS_RELAY_SIGNING_KEY description to reflect fail-closed startup enforcement (was incorrectly documenting empty-key as fail-open risk).",
-      "sourceFeature": "native-identity-core-fix-relay-signing-key-fail-closed"
-    }
-  ],
+  "blockingIssues": [],
+  "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "skills",
       "suggestion": "Update mors-global-worker skill scope to include native-identity-core and onboarding-handle-profile milestones, since it is actively assigned to features in those milestones.",
-      "evidence": "Both reviewers flagged: .factory/skills/mors-global-worker/SKILL.md:12 lists only relay-foundation/global-async-messaging/realtime-watch/developer-launch-path, but features.json assigns native-identity-core features to mors-global-worker. Two independent reviewers confirmed the same gap.",
+      "evidence": "All three rounds of scrutiny reviewers flagged: .factory/skills/mors-global-worker/SKILL.md:12 lists only relay-foundation/global-async-messaging/realtime-watch/developer-launch-path, but features.json assigns native-identity-core features to mors-global-worker. Three independent reviewers across rounds 1-3 confirmed the same gap.",
       "isSystemic": true
     },
     {
       "target": "skills",
       "suggestion": "Add guidance to mors-global-worker skill for stabilization/fix features where the strict 'red test first → green' TDD loop does not apply because failing tests already exist. Workers should be able to mark followedProcedure=true for justified stabilization deviations.",
-      "evidence": "Worker for native-identity-core-fix-deploy-tests-flyctl-env-compat marked followedProcedure=false for a justified stabilization deviation; this pattern will recur for all fix features. Same observation from round 1.",
+      "evidence": "Worker for native-identity-core-fix-deploy-tests-flyctl-env-compat marked followedProcedure=false for a justified stabilization deviation; this pattern will recur for all fix features. Same observation from rounds 1 and 2.",
       "isSystemic": true
     },
     {
       "target": "skills",
       "suggestion": "Skill procedure should require manual-check skip rationale when workers mark followedProcedure=true without recording any interactive checks for internal-only primitives.",
-      "evidence": "Reviewer for native-identity-core-fix-relay-signing-key-fail-closed noted handoff has followedProcedure=true but no interactive checks or skip rationale.",
+      "evidence": "Reviewer for native-identity-core-fix-relay-signing-key-fail-closed noted handoff has followedProcedure=true but no interactive checks or skip rationale. Same observation from round 2.",
       "isSystemic": false
     }
   ],
   "rejectedObservations": [],
-  "previousRound": ".factory/validation/native-identity-core/scrutiny/synthesis.json (round 1)"
+  "previousRound": ".factory/validation/native-identity-core/scrutiny/synthesis.json (round 2)",
+  "notes": "Round 3 re-run after fix feature native-identity-core-fix-signing-key-mismatch-remediation addressed the round 2 blocking issue on native-identity-core-fix-login-relay-key-coordination. All validators pass. The fix reviewer confirmed the original blocking issue (generic mismatch error without remediation) is now resolved with explicit signing-key mismatch handling and regression tests asserting remediation text. One flaky test (cli-encrypted-remote.test.ts 'send --remote --no-encrypt sends plaintext') failed on first full-suite run but passed on re-run and in isolation — likely port collision under concurrent execution."
 }
