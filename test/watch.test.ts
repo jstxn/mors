@@ -510,6 +510,159 @@ describe('VAL-WATCH-003: watch startup behavior is deterministic', () => {
       db.close();
     }
   });
+
+  it('does not emit create event when pre-existing message is read after watch starts', async () => {
+    const db = openDb();
+    try {
+      // Create a message BEFORE watch starts.
+      const msg = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Pre-existing to be read',
+      });
+
+      const events: WatchEvent[] = [];
+      const handle = startWatch(db, {
+        pollIntervalMs: 50,
+        onEvent: (event) => events.push(event),
+      });
+
+      // Read the pre-existing message AFTER watch starts — this updates updated_at.
+      await new Promise((r) => setTimeout(r, 20));
+      readMessage(db, msg.id);
+
+      // Wait several poll cycles.
+      await new Promise((r) => setTimeout(r, 500));
+      handle.stop();
+      await handle.done;
+
+      // Should NOT emit message_created for a pre-existing message.
+      const createEvents = events.filter((e) => e.event_type === 'message_created');
+      expect(createEvents.length).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not emit create event when pre-existing message is acked after watch starts', async () => {
+    const db = openDb();
+    try {
+      // Create and read a message BEFORE watch starts.
+      const msg = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Pre-existing to be acked',
+      });
+      readMessage(db, msg.id);
+
+      const events: WatchEvent[] = [];
+      const handle = startWatch(db, {
+        pollIntervalMs: 50,
+        onEvent: (event) => events.push(event),
+      });
+
+      // Ack the pre-existing message AFTER watch starts — this updates updated_at.
+      await new Promise((r) => setTimeout(r, 20));
+      ackMessage(db, msg.id);
+
+      // Wait several poll cycles.
+      await new Promise((r) => setTimeout(r, 500));
+      handle.stop();
+      await handle.done;
+
+      // Should emit message_acked (the ack happened at runtime),
+      // but should NOT emit message_created (it was pre-existing).
+      const createEvents = events.filter((e) => e.event_type === 'message_created');
+      const ackEvents = events.filter((e) => e.event_type === 'message_acked');
+      expect(createEvents.length).toBe(0);
+      expect(ackEvents.length).toBe(1);
+      expect(ackEvents[0].message_id).toBe(msg.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('does not emit create event when pre-existing reply is updated after watch starts', async () => {
+    const db = openDb();
+    try {
+      // Create a thread with a reply BEFORE watch starts.
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Parent message',
+      });
+      const reply = replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Pre-existing reply',
+      });
+
+      const events: WatchEvent[] = [];
+      const handle = startWatch(db, {
+        pollIntervalMs: 50,
+        onEvent: (event) => events.push(event),
+      });
+
+      // Read the pre-existing reply AFTER watch starts.
+      await new Promise((r) => setTimeout(r, 20));
+      readMessage(db, reply.id);
+
+      // Wait several poll cycles.
+      await new Promise((r) => setTimeout(r, 500));
+      handle.stop();
+      await handle.done;
+
+      // Should NOT emit reply_created or message_created for a pre-existing reply.
+      const createEvents = events.filter(
+        (e) => e.event_type === 'message_created' || e.event_type === 'reply_created'
+      );
+      expect(createEvents.length).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('emits runtime create but not historical create when mixing pre-existing and new messages', async () => {
+    const db = openDb();
+    try {
+      // Create a message BEFORE watch starts.
+      const preExisting = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Pre-existing message',
+      });
+
+      const events: WatchEvent[] = [];
+      const handle = startWatch(db, {
+        pollIntervalMs: 50,
+        onEvent: (event) => events.push(event),
+      });
+
+      // After watch starts: read the pre-existing message AND send a new one.
+      await new Promise((r) => setTimeout(r, 20));
+      readMessage(db, preExisting.id);
+      const newMsg = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'New message after watch',
+      });
+
+      // Wait several poll cycles.
+      await new Promise((r) => setTimeout(r, 500));
+      handle.stop();
+      await handle.done;
+
+      // Should only get message_created for the NEW message, not the pre-existing one.
+      const createEvents = events.filter((e) => e.event_type === 'message_created');
+      expect(createEvents.length).toBe(1);
+      expect(createEvents[0].message_id).toBe(newMsg.id);
+      // Pre-existing message should NOT appear as created.
+      expect(createEvents.some((e) => e.message_id === preExisting.id)).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

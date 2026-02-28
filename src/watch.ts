@@ -92,32 +92,37 @@ interface MessageRow {
  * @returns A WatchHandle for stopping the stream.
  */
 export function startWatch(db: BetterSqlite3.Database, options: WatchOptions): WatchHandle {
-  const {
-    pollIntervalMs = 500,
-    onEvent,
-    onShutdown,
-    signal,
-  } = options;
+  const { pollIntervalMs = 500, onEvent, onShutdown, signal } = options;
 
   // ── Determine startup high-water mark ─────────────────────────────
   // We capture the current max updated_at so that only events created
   // *after* this point are emitted. This ensures deterministic startup
   // (VAL-WATCH-003).
-  const startRow = db
-    .prepare('SELECT MAX(updated_at) as max_ts FROM messages')
-    .get() as { max_ts: string | null } | undefined;
+  const startRow = db.prepare('SELECT MAX(updated_at) as max_ts FROM messages').get() as
+    | { max_ts: string | null }
+    | undefined;
   let highWaterMark: string = startRow?.max_ts ?? new Date(0).toISOString();
 
   // ── Runtime dedupe set (VAL-WATCH-004) ────────────────────────────
   const emitted = new Set<string>();
 
-  // ── Track acked states at startup to avoid emitting for pre-existing acked messages ──
+  // ── Track all pre-existing messages at startup ────────────────────
+  // We record every message ID that exists before the watch starts so
+  // that updates to pre-existing rows (e.g. read, ack) do not falsely
+  // emit create events. Only ack events are tracked separately to
+  // allow runtime ack emissions on pre-existing messages that were not
+  // yet acked at startup.
+  const preExistingIds = new Set<string>();
   const preExistingAcked = new Set<string>();
-  const ackedRows = db
-    .prepare("SELECT id FROM messages WHERE state = 'acked'")
-    .all() as { id: string }[];
-  for (const row of ackedRows) {
-    preExistingAcked.add(row.id);
+  const existingRows = db.prepare('SELECT id, state FROM messages').all() as {
+    id: string;
+    state: string;
+  }[];
+  for (const row of existingRows) {
+    preExistingIds.add(row.id);
+    if (row.state === 'acked') {
+      preExistingAcked.add(row.id);
+    }
   }
 
   let stopped = false;
@@ -167,7 +172,7 @@ export function startWatch(db: BetterSqlite3.Database, options: WatchOptions): W
 
       for (const row of rows) {
         // Determine event type(s) for this row.
-        const events = classifyEvents(row, emitted, preExistingAcked);
+        const events = classifyEvents(row, emitted, preExistingIds, preExistingAcked);
 
         for (const evt of events) {
           const dedupeKey = `${evt.event_type}:${row.id}`;
@@ -213,24 +218,34 @@ export function startWatch(db: BetterSqlite3.Database, options: WatchOptions): W
 
 /**
  * Classify what events should be emitted for a given message row.
- * Uses the emitted set and pre-existing acked set to avoid duplicates.
+ *
+ * Pre-existing messages (those present in the DB before watch started) never
+ * produce create events, even when their `updated_at` advances due to read/ack
+ * operations. Only genuinely new messages (inserted after the watch subscription
+ * began) emit `message_created` or `reply_created`.
+ *
+ * Ack events are emitted for any message whose state transitions to `acked`
+ * at runtime, including pre-existing messages that were not yet acked at startup.
  */
 function classifyEvents(
   row: MessageRow,
   emitted: Set<string>,
-  preExistingAcked: Set<string>,
+  preExistingIds: Set<string>,
+  preExistingAcked: Set<string>
 ): { event_type: WatchEventType }[] {
   const events: { event_type: WatchEventType }[] = [];
 
-  // Determine if this is a new message or reply creation event.
-  const createKey = row.in_reply_to
-    ? `reply_created:${row.id}`
-    : `message_created:${row.id}`;
+  // Only emit create events for messages that did NOT exist at startup.
+  // Pre-existing messages that surface in polls (due to read/ack updating
+  // updated_at) must not produce spurious create events.
+  if (!preExistingIds.has(row.id)) {
+    const createKey = row.in_reply_to ? `reply_created:${row.id}` : `message_created:${row.id}`;
 
-  if (!emitted.has(createKey)) {
-    events.push({
-      event_type: row.in_reply_to ? 'reply_created' : 'message_created',
-    });
+    if (!emitted.has(createKey)) {
+      events.push({
+        event_type: row.in_reply_to ? 'reply_created' : 'message_created',
+      });
+    }
   }
 
   // Determine if this is an ack event.
