@@ -1,0 +1,45 @@
+{
+  "featureId": "native-auth-invite-session-core",
+  "reviewedAt": "2026-02-28T21:58:05Z",
+  "commitId": "4914680a056d14600bb23b322f84294b5ab3e9f7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds substantial native-auth coverage tests, but the underlying native token verification wiring is not safe/complete: relay verification defaults to an empty signing key while CLI login signs with a per-device random key, creating both a fail-open security posture and a client/relay key mismatch path.",
+    "issues": [
+      {
+        "file": "src/relay/index.ts",
+        "line": 32,
+        "severity": "blocking",
+        "description": "Relay token verification defaults to an empty signing key (`process.env['MORS_RELAY_SIGNING_KEY'] ?? ''`). This violates fail-closed auth expectations: if unset, tokens signed with the known empty key can be forged and accepted instead of producing an actionable prerequisite failure."
+      },
+      {
+        "file": "src/cli.ts",
+        "line": 1668,
+        "severity": "blocking",
+        "description": "`mors login` signs session tokens with a local randomly generated signing key (`loadSigningKey`/`generateSigningKey`/`saveSigningKey`), but relay verification uses `MORS_RELAY_SIGNING_KEY` from server env. There is no key coordination path or explicit remediation when these differ, so login-issued tokens are not reliably verifiable by the relay."
+      },
+      {
+        "file": "src/cli.ts",
+        "line": 2140,
+        "severity": "non_blocking",
+        "description": "CLI help text still says `login` authenticates with GitHub OAuth device flow, which conflicts with the hard-switch to mors-native auth and can mislead users during onboarding."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Shared architecture notes are stale for identity/auth and still describe GitHub OAuth device flow, despite mission and feature requirements being hard-switched to mors-native auth.",
+      "evidence": ".factory/library/architecture.md:13 says 'Identity/auth via GitHub OAuth Device Flow'; mission AGENTS requires native auth at /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/AGENTS.md:22"
+    },
+    {
+      "area": "knowledge",
+      "observation": "Environment documentation does not document relay signing-key requirements, which is now central to native token verification behavior and troubleshooting.",
+      "evidence": ".factory/library/environment.md:21 still lists GitHub device-flow vars; .env.example includes GITHUB_* placeholders (line 5) and no MORS_RELAY_SIGNING_KEY"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed feature native-auth-invite-session-core using feature metadata, handoff, commit diff, transcript skeleton, and skill guidance. Although validation tests were added successfully, blocking auth-key wiring flaws remain in production token verification/login issuance, so the feature does not yet safely satisfy the native auth hard-switch expectations."
+}

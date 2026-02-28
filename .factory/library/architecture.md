@@ -10,7 +10,7 @@ Architectural boundaries and invariants for `mors` global messaging evolution.
 
 - CLI-first user surface remains primary.
 - Hosted relay (same repo) provides remote async messaging + SSE realtime.
-- Identity/auth via GitHub OAuth Device Flow.
+- Identity/auth via mors-native auth (invite-token + device-key bootstrap). GitHub OAuth device flow has been removed.
 - E2EE scope is 1:1 only with per-device keypairs and key exchange.
 
 ## Invariants to preserve

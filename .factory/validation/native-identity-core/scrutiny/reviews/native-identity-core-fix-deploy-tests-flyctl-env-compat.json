@@ -1,0 +1,38 @@
+{
+  "featureId": "native-identity-core-fix-deploy-tests-flyctl-env-compat",
+  "reviewedAt": "2026-02-28T21:57:26Z",
+  "commitId": "659bc579589cb13e32c9f43cf794f43b58380d9e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix addresses the feature intent: deploy tests now handle flyctl-installed environments more reliably, JSON-output parsing is resilient to multi-object/pretty output, and CLI deploy uses the flyctl-compatible --primary-region flag. No blocking defects were found in the implementation for this feature scope.",
+    "issues": [
+      {
+        "file": "test/deploy/fly.test.ts",
+        "line": 195,
+        "severity": "non_blocking",
+        "description": "The remediation assertion now allows `flyctl` as an alternative (`/install|brew|curl|https:\/\/fly\.io|flyctl/`) immediately after a prior `contains('flyctl')` check, which weakens enforcement of explicit install/remediation guidance for the missing-flyctl path (VAL-DEPLOY-002)."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The assigned skill scope appears outdated for this mission: `mors-global-worker` says it is for relay/realtime/developer-launch-path milestones, but it is actively assigned to native-identity-core features.",
+      "evidence": "/Users/justen/Development/mors/.factory/skills/mors-global-worker/SKILL.md:12 lists only relay-foundation/global-async-messaging/realtime-watch/developer-launch-path; /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/features.json:1430-1433 assigns this native-identity-core feature to mors-global-worker."
+    },
+    {
+      "area": "skills",
+      "observation": "Strict red/green wording in the skill does not map cleanly to stabilization/fix features where failing tests already exist; worker marked followedProcedure=false for a justified stabilization deviation.",
+      "evidence": "Handoff for this feature documents deviation and requested skill update (/Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T21-53-11-091Z__native-identity-core-fix-deploy-tests-flyctl-env-compat__ff6e7560-0f0c-406b-a1a0-fcc7ccbd8999.json:50-56)."
+    },
+    {
+      "area": "knowledge",
+      "observation": "A useful environment caveat surfaced: node and flyctl can be co-located in the same bin directory (e.g., /opt/homebrew/bin), which can invalidate naive PATH-pruning test helpers. This does not appear captured in shared library docs.",
+      "evidence": "Handoff root-cause summary records the co-location issue (/Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T21-53-11-091Z__native-identity-core-fix-deploy-tests-flyctl-env-compat__ff6e7560-0f0c-406b-a1a0-fcc7ccbd8999.json:10-11); /Users/justen/Development/mors/.factory/library/environment.md contains related env notes but no flyctl PATH co-location guidance."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit 659bc57 for native-identity-core-fix-deploy-tests-flyctl-env-compat. The implementation is feature-complete and passes scrutiny for scope, with one non-blocking test-assertion-strength note and shared-state observations for skill/library alignment."
+}

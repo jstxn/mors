@@ -18,9 +18,11 @@ Environment variables, dependencies, and setup notes for global relay/auth messa
 Use `.env.example` as the source of required placeholders:
 
 - `MORS_RELAY_PORT`, `MORS_RELAY_BASE_URL`
-- `GITHUB_DEVICE_CLIENT_ID`, `GITHUB_DEVICE_SCOPE`, `GITHUB_DEVICE_ENDPOINT`, `GITHUB_TOKEN_ENDPOINT`
+- `MORS_RELAY_SIGNING_KEY` — signing key used by relay to verify native auth tokens. Must match the key used during token issuance. Empty/unset key creates a fail-open risk.
 - `MORS_AUTH_TOKEN_ISSUER`, `MORS_AUTH_AUDIENCE`
 - `FLY_APP_NAME`, `FLY_PRIMARY_REGION`, `FLY_ORG`
+
+Note: GitHub OAuth device flow placeholders (`GITHUB_DEVICE_CLIENT_ID`, etc.) are legacy from the pre-native-auth era and may still appear in `.env.example` but are no longer used for account authentication.
 
 Real credentials are intentionally deferred in this phase; workers must fail with actionable guidance when placeholders are unset.
 
@@ -33,6 +35,10 @@ Real credentials are intentionally deferred in this phase; workers must fail wit
 ## dist/ rebuild after source changes
 
 Some test suites (e.g., `test/auth/cli-auth-gating.test.ts`, `test/install.test.ts`) execute from `dist/` rather than TS source. After modifying TypeScript source files, run `npm run build` before the full test suite to avoid stale-`dist/` failures (missing exports, outdated behavior). This is especially relevant when editing relay or CLI entrypoint files.
+
+## flyctl PATH co-location caveat
+
+On macOS with Homebrew, `flyctl` and `node` may share the same bin directory (e.g., `/opt/homebrew/bin`). Test helpers that prune PATH to simulate missing `flyctl` must avoid naively removing directories that also contain `node`, or the test process itself will break.
 
 ## SQLCipher caveat (still applies)
 
