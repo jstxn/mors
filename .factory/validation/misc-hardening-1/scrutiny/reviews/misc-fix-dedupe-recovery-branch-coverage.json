@@ -1,0 +1,15 @@
+{
+  "featureId": "misc-fix-dedupe-recovery-branch-coverage",
+  "reviewedAt": "2026-02-28T07:10:52Z",
+  "commitId": "381bb2f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "This fix directly addresses the prior blocking gap by adding deterministic fault-injection tests that force dedupe-check SELECT misses, trigger INSERT UNIQUE conflicts, and then assert recovery behavior from the catch/recovery branches in both sendMessage and replyMessage.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/misc-hardening-1/scrutiny/reviews/misc-hardening-dedupe-concurrency-and-race-tests.json",
+  "summary": "Pass. I reviewed the prior failed feature diff and the fix diff, plus the fix worker transcript skeleton and handoff. The new tests in test/message.test.ts and test/thread.test.ts use db.prepare stubbing to force the pre-INSERT dedupe SELECT to miss, which causes INSERT UNIQUE conflicts and executes recoverCanonicalSend/recoverCanonicalReply paths. Assertions on recoveryReached, canonical IDs/metadata, and no raw SQLITE_CONSTRAINT leakage confirm the previously untested catch/recovery branches are now explicitly and reproducibly exercised for both send and reply flows."
+}

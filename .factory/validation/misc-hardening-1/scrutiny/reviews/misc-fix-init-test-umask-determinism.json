@@ -1,0 +1,21 @@
+{
+  "featureId": "misc-fix-init-test-umask-determinism",
+  "reviewedAt": "2026-02-28T07:09:29Z",
+  "commitId": "1ab19d3482eb59f05357a1866c15e345ddc50588",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The change fully addresses the feature intent: the umask-regression init permission test now establishes its precondition with explicit chmod, removing dependence on ambient process umask. The diff is minimal and test-only, with no production-code regressions introduced.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Mission shared guidance does not currently document that `mkdirSync(..., { mode })` is umask-masked and therefore unsuitable for deterministic permission preconditions in tests.",
+      "evidence": "AGENTS.md testing guidance does not mention umask-sensitive setup; this feature had to harden preconditions in-code via `chmodSync(configDir, 0o755)` (test/init.test.ts:720-723) with an explanatory comment."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, transcript skeleton, skill, and commit 1ab19d3. The test setup now deterministically sets directory mode to 0o755 before running init assertions, so the test remains meaningful under varying umask values. No blocking or non-blocking code issues found."
+}

@@ -1,0 +1,34 @@
+{
+  "featureId": "misc-fix-true-overlap-contention-tests",
+  "reviewedAt": "2026-02-28T07:10:30Z",
+  "commitId": "3906f0a50cee4d597b36fff09e63e2b861bf851b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fix removes the prior single-handle pattern, but the updated contention tests still execute synchronous looped calls (`Array.from` / `for`) against sync APIs, so they do not create true overlapping/parallel contention. This does not fully resolve the original blocking failure for thread and integration overlap validation.",
+    "issues": [
+      {
+        "file": "test/thread.test.ts",
+        "line": 1120,
+        "severity": "blocking",
+        "description": "The updated reply contention cases now rotate across multiple DB handles, but they still run synchronously in-process via `Array.from(... => replyMessage(...))` using sync `replyMessage` calls. Without multi-process/worker overlap or deterministic fault injection for these paths, this remains sequential execution rather than true overlap contention."
+      },
+      {
+        "file": "test/integration.test.ts",
+        "line": 1221,
+        "severity": "blocking",
+        "description": "The integration 'true overlapping' tests similarly use synchronous `Array.from` / `for` loops (`sendMessage`/`replyMessage` are sync functions) and therefore do not create real parallel overlap/lock contention despite using multiple handles. This leaves the original overlap-contention requirement unmet for integration coverage."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "`mors-worker` guidance can steer workers toward claiming overlap from in-process multi-handle loops, which conflicts with architecture guidance for true overlap in this codebase.",
+      "evidence": "`.factory/skills/mors-worker/SKILL.md` allows 'fault injection/mocking/multi-handle overlap as needed', while `.factory/library/architecture.md` states true overlapping contention for better-sqlite3 requires multi-process tests or deterministic fault injection; transcript skeleton for this fix explicitly chose multi-handle interleaving as 'most authentic for true contention'."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/misc-hardening-1/scrutiny/reviews/misc-hardening-dedupe-concurrency-and-race-tests.json",
+  "summary": "Reviewed feature metadata, handoff, transcript skeleton, prior failed review, and both diffs (`4a2ecdaf...` and `3906f0a...`). The fix changed single-handle loops to multi-handle loops, but contention execution is still synchronous in-process, so the prior blocking issue about true overlapping contention remains unresolved in both thread and integration tests."
+}
