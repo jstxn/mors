@@ -55,6 +55,7 @@ import { getConfigDir } from './identity.js';
 import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 import { RelayClient, RelayClientError, type RelayMessageResponse } from './relay/client.js';
+import { connectRemoteWatch, type RemoteWatchEvent } from './remote-watch.js';
 
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
@@ -1294,6 +1295,14 @@ function runThread(args: string[], configDir: string): void {
 function runWatch(args: string[], configDir: string): void {
   const { flags } = parseArgs(args);
   const json = 'json' in flags;
+  const remote = 'remote' in flags;
+
+  // ── Remote mode: connect to relay SSE stream ─────────────────────
+  if (remote) {
+    runRemoteWatch(configDir, json);
+    return;
+  }
+
   const pollInterval =
     typeof flags['poll-interval'] === 'string' ? parseInt(flags['poll-interval'], 10) : 500;
 
@@ -1358,6 +1367,147 @@ function runWatch(args: string[], configDir: string): void {
       process.exitCode = 0;
     }
   });
+}
+
+/**
+ * Run remote watch: connect to relay SSE /events endpoint with auth.
+ *
+ * Establishes an authenticated SSE connection for realtime event streaming.
+ * When SSE is unavailable (connection refused, auth failure, server error),
+ * displays explicit degraded fallback indication and exits cleanly.
+ *
+ * Reconnect with cursor/Last-Event-ID is supported through the underlying
+ * connectRemoteWatch module.
+ *
+ * Covers:
+ * - VAL-STREAM-001: watch --remote connects to relay SSE with auth session
+ * - VAL-STREAM-003: Remote watch reconnect uses cursor/Last-Event-ID path
+ * - VAL-STREAM-007: When SSE is unavailable, CLI displays explicit fallback/degraded mode
+ */
+function runRemoteWatch(configDir: string, json: boolean): void {
+  // Validate prerequisites: session + relay URL
+  const session = loadSession(configDir);
+  if (!session) {
+    process.exitCode = 1;
+    handleRemoteError(new NotAuthenticatedError(), json);
+    return;
+  }
+
+  const relayBaseUrl = process.env['MORS_RELAY_BASE_URL'];
+  if (!relayBaseUrl) {
+    process.exitCode = 1;
+    handleRemoteError(
+      new RemoteUnavailableError(
+        'MORS_RELAY_BASE_URL is not set. Configure the relay base URL to use remote watch.'
+      ),
+      json
+    );
+    return;
+  }
+
+  if (!json) {
+    console.log('Connecting to remote watch stream... (press Ctrl+C to stop)');
+  }
+
+  const handle = connectRemoteWatch({
+    baseUrl: relayBaseUrl,
+    token: session.accessToken,
+    onEvent: (event: RemoteWatchEvent) => {
+      if (json) {
+        console.log(
+          JSON.stringify({
+            event: event.event,
+            ...(event.id ? { event_id: event.id } : {}),
+            ...event.data,
+          })
+        );
+      } else {
+        formatRemoteWatchEvent(event);
+      }
+    },
+    onStateChange: (newState, reason) => {
+      if (newState === 'fallback') {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'degraded',
+              mode: 'fallback',
+              reason: reason ?? 'SSE unavailable',
+            })
+          );
+        } else {
+          console.log(`\n⚠️  Degraded mode: ${reason ?? 'SSE unavailable'}`);
+          console.log(
+            'Realtime events are not available. Use "mors inbox --remote" to check for new messages.'
+          );
+        }
+      }
+    },
+  });
+
+  // ── SIGINT handling for clean shutdown ──────────────────────────
+  const onSigint = (): void => {
+    handle.stop();
+    process.removeListener('SIGINT', onSigint);
+    if (!json) {
+      console.log('\nRemote watch stopped.');
+    }
+  };
+  process.on('SIGINT', onSigint);
+
+  // Keep the process alive until done resolves.
+  handle.done.then(() => {
+    process.removeListener('SIGINT', onSigint);
+    if (!process.exitCode) {
+      process.exitCode = 0;
+    }
+  });
+}
+
+/**
+ * Format a remote watch event for human-readable CLI output.
+ */
+function formatRemoteWatchEvent(event: RemoteWatchEvent): void {
+  if (event.event === 'connected') {
+    const login = event.data.github_login ?? 'unknown';
+    console.log(`✓ Connected to remote watch as ${login}`);
+    return;
+  }
+
+  if (event.event === 'auth_expired') {
+    const detail = event.data.detail ?? 'Token expired';
+    console.log(`\n⚠️  Auth expired: ${detail}`);
+    console.log('Run "mors login" to re-authenticate, then restart watch.');
+    return;
+  }
+
+  if (event.event === 'fallback') {
+    // Already handled by onStateChange callback
+    return;
+  }
+
+  const typeLabel =
+    event.event === 'message_created'
+      ? '📨 New message'
+      : event.event === 'reply_created'
+        ? '↩️  Reply'
+        : event.event === 'message_acked'
+          ? '✅ Acked'
+          : event.event;
+
+  const timestamp = (event.data.timestamp as string) ?? new Date().toISOString();
+  const messageId = (event.data.message_id as string) ?? 'unknown';
+  const threadId = (event.data.thread_id as string) ?? 'unknown';
+  const senderId = event.data.sender_id ?? 'unknown';
+  const recipientId = event.data.recipient_id ?? 'unknown';
+  const inReplyTo = event.data.in_reply_to as string | null;
+
+  console.log(`[${timestamp}] ${typeLabel}`);
+  console.log(`  Message: ${messageId}  Thread: ${threadId}`);
+  console.log(`  From: ${senderId} → To: ${recipientId}`);
+  if (inReplyTo) {
+    console.log(`  In reply to: ${inReplyTo}`);
+  }
 }
 
 function formatWatchEvent(event: WatchEvent): void {
@@ -1928,8 +2078,10 @@ Thread:
 
 Watch:
   mors watch [--json] [--poll-interval <ms>]
+  mors watch --remote [--json]
   --json                 Output JSON (one event per line)
-  --poll-interval <ms>   Polling interval in ms (default: 500, min: 10)
+  --remote               Watch via relay SSE stream (requires auth + MORS_RELAY_BASE_URL)
+  --poll-interval <ms>   Polling interval in ms (default: 500, min: 10; local only)
 
 Login:
   mors login [--json]
