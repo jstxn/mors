@@ -19,7 +19,14 @@ import {
 import { startWatch } from './watch.js';
 import type { WatchEvent } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
-import { MorsError, NotInitializedError, SqlCipherUnavailableError } from './errors.js';
+import {
+  MorsError,
+  NotInitializedError,
+  SqlCipherUnavailableError,
+  DeviceNotBootstrappedError,
+} from './errors.js';
+import { assertDeviceBootstrapped } from './e2ee/bootstrap-guard.js';
+import { getDeviceKeysDir } from './e2ee/device-keys.js';
 import { ContractValidationError } from './contract/errors.js';
 import { saveSession, loadSession, clearSession, markAuthEnabled } from './auth/session.js';
 import {
@@ -227,6 +234,7 @@ function parseArgs(args: string[]): { positional: string[]; flags: Record<string
 function runSend(args: string[], configDir: string): void {
   const { flags } = parseArgs(args);
   const json = 'json' in flags;
+  const secure = 'secure' in flags;
   const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
   const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
   const subject = typeof flags['subject'] === 'string' ? flags['subject'] : undefined;
@@ -243,6 +251,31 @@ function runSend(args: string[], configDir: string): void {
     formatError('send requires --body <message>', json);
     process.exitCode = 1;
     return;
+  }
+
+  // ── E2EE bootstrap guard (VAL-E2EE-001) ──────────────────────────
+  // When --secure is requested, verify device keys exist before proceeding.
+  if (secure) {
+    try {
+      assertDeviceBootstrapped(getDeviceKeysDir(configDir));
+    } catch (err: unknown) {
+      if (err instanceof DeviceNotBootstrappedError) {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'error',
+              error: 'device_not_bootstrapped',
+              message: err.message,
+            })
+          );
+        } else {
+          console.error(`Error: ${err.message}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
   }
 
   // Default sender to "local" if not specified.
@@ -431,6 +464,7 @@ function runAck(args: string[], configDir: string): void {
 function runReply(args: string[], configDir: string): void {
   const { positional, flags } = parseArgs(args);
   const json = 'json' in flags;
+  const secure = 'secure' in flags;
   const parentId = positional[0];
   const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
   const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
@@ -448,6 +482,31 @@ function runReply(args: string[], configDir: string): void {
     formatError('reply requires --body <message>', json);
     process.exitCode = 1;
     return;
+  }
+
+  // ── E2EE bootstrap guard (VAL-E2EE-001) ──────────────────────────
+  // When --secure is requested, verify device keys exist before proceeding.
+  if (secure) {
+    try {
+      assertDeviceBootstrapped(getDeviceKeysDir(configDir));
+    } catch (err: unknown) {
+      if (err instanceof DeviceNotBootstrappedError) {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'error',
+              error: 'device_not_bootstrapped',
+              message: err.message,
+            })
+          );
+        } else {
+          console.error(`Error: ${err.message}`);
+        }
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
   }
 
   // Default sender to "local" if not specified.

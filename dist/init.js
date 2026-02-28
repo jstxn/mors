@@ -5,18 +5,20 @@
  * - SQLCipher preflight validation
  * - Ed25519 identity keypair generation
  * - Encrypted database creation
+ * - E2EE device key bootstrap (X25519 + Ed25519 keypairs)
  * - Atomic failure handling (cleanup on partial failure)
  * - Safe re-run behavior (non-destructive)
  * - Concurrent init safety via lock file
  * - Output redaction of secret material
  *
- * Fulfills: VAL-INIT-001 through VAL-INIT-007, VAL-SEC-002
+ * Fulfills: VAL-INIT-001 through VAL-INIT-007, VAL-SEC-002, VAL-E2EE-001
  */
 import { join } from 'node:path';
 import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, unlinkSync, chmodSync, } from 'node:fs';
 import { generateIdentity, persistIdentity, isInitialized, loadIdentity, getConfigDir, } from './identity.js';
 import { generateKey, persistKey } from './key-management.js';
 import { openEncryptedDb, verifySqlCipherAvailable, initializeSchema } from './store.js';
+import { generateDeviceKeys, persistDeviceKeys, isDeviceBootstrapped, getDeviceKeysDir, } from './e2ee/device-keys.js';
 import { MorsError, NotInitializedError } from './errors.js';
 /** Sentinel file name that marks successful initialization. */
 const INIT_SENTINEL = '.initialized';
@@ -76,9 +78,10 @@ export async function initCommand(options) {
     // This ensures that even if a failure occurs mid-creation of any
     // artifact, the cleanup function covers all possible partial writes.
     // This includes SQLite WAL/SHM journal files that may be created
-    // alongside the database file.
+    // alongside the database file, and E2EE key artifacts.
     const dbKeyPath = join(configDir, DB_KEY_FILE);
     const dbPath = join(configDir, DB_FILE);
+    const e2eeKeysDir = getDeviceKeysDir(configDir);
     const expectedArtifacts = [
         join(configDir, 'identity.json'),
         join(configDir, 'identity.key'),
@@ -88,6 +91,8 @@ export async function initCommand(options) {
         `${dbPath}-shm`,
         sentinelPath,
     ];
+    /** E2EE directory is cleaned as a tree (not individual files). */
+    const expectedDirs = [e2eeKeysDir];
     try {
         // ── SQLCipher preflight (VAL-INIT-003) ──────────────────────────
         verifySqlCipherAvailable(options?.simulateSqlCipherUnavailable ?? false);
@@ -117,6 +122,14 @@ export async function initCommand(options) {
         finally {
             db.close();
         }
+        // ── E2EE device key bootstrap (VAL-E2EE-001) ─────────────────
+        // Generate and persist per-device encryption keys (X25519 for key
+        // exchange, Ed25519 for signing) so that secure messaging is available
+        // immediately after init.
+        if (!isDeviceBootstrapped(e2eeKeysDir)) {
+            const deviceKeys = generateDeviceKeys();
+            persistDeviceKeys(e2eeKeysDir, deviceKeys);
+        }
         // ── Write sentinel (marks successful init) ──────────────────────
         writeSentinel(sentinelPath, identity.fingerprint);
         return {
@@ -131,6 +144,7 @@ export async function initCommand(options) {
         // left in a half-initialized state. Pre-registration ensures
         // coverage even for partially written files.
         cleanupArtifacts(expectedArtifacts);
+        cleanupDirs(expectedDirs);
         // Re-throw with original error context.
         throw err;
     }
@@ -235,6 +249,18 @@ function cleanupArtifacts(artifacts) {
         try {
             if (existsSync(artifact)) {
                 rmSync(artifact, { force: true });
+            }
+        }
+        catch {
+            // Best-effort cleanup — don't mask the original error.
+        }
+    }
+}
+function cleanupDirs(dirs) {
+    for (const dir of dirs) {
+        try {
+            if (existsSync(dir)) {
+                rmSync(dir, { recursive: true, force: true });
             }
         }
         catch {

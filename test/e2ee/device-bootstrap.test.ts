@@ -23,9 +23,10 @@ import {
   chmodSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 
 import {
   generateDeviceKeys,
@@ -40,6 +41,8 @@ import {
   requireDeviceBootstrap,
   assertDeviceBootstrapped,
 } from '../../src/e2ee/bootstrap-guard.js';
+
+import { initCommand } from '../../src/init.js';
 
 import { DeviceKeyError, DeviceNotBootstrappedError } from '../../src/errors.js';
 
@@ -450,5 +453,311 @@ describe('E2EE device key bootstrap', () => {
       const files = readdirSync(keysDir).sort();
       expect(files).toEqual(['device-keys.json', 'ed25519.key', 'x25519.key']);
     });
+  });
+
+  // ── Init runtime integration (VAL-E2EE-001) ──────────────────────
+
+  describe('mors init provisions E2EE device keys', () => {
+    it('mors init creates E2EE key material in config directory', async () => {
+      const configDir = join(tempDir, 'init-e2ee');
+      await initCommand({ configDir });
+
+      const keysDir = getDeviceKeysDir(configDir);
+      expect(isDeviceBootstrapped(keysDir)).toBe(true);
+
+      // Key files should exist
+      expect(existsSync(join(keysDir, 'device-keys.json'))).toBe(true);
+      expect(existsSync(join(keysDir, 'x25519.key'))).toBe(true);
+      expect(existsSync(join(keysDir, 'ed25519.key'))).toBe(true);
+    });
+
+    it('mors init creates loadable device key bundle', async () => {
+      const configDir = join(tempDir, 'init-e2ee-load');
+      await initCommand({ configDir });
+
+      const keysDir = getDeviceKeysDir(configDir);
+      const bundle = loadDeviceKeys(keysDir);
+      expect(bundle.deviceId).toMatch(/^device_/);
+      expect(bundle.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+      expect(bundle.x25519PublicKey.length).toBe(32);
+      expect(bundle.ed25519PublicKey.length).toBe(32);
+    });
+
+    it('re-running init preserves existing device keys', async () => {
+      const configDir = join(tempDir, 'init-e2ee-rerun');
+      await initCommand({ configDir });
+
+      const keysDir = getDeviceKeysDir(configDir);
+      const firstBundle = loadDeviceKeys(keysDir);
+
+      // Re-run init
+      await initCommand({ configDir });
+
+      const secondBundle = loadDeviceKeys(keysDir);
+      expect(secondBundle.deviceId).toBe(firstBundle.deviceId);
+      expect(secondBundle.fingerprint).toBe(firstBundle.fingerprint);
+    });
+
+    it('E2EE key files have hardened permissions after init', async () => {
+      const configDir = join(tempDir, 'init-e2ee-perms');
+      await initCommand({ configDir });
+
+      const keysDir = getDeviceKeysDir(configDir);
+      const x25519Stat = statSync(join(keysDir, 'x25519.key'));
+      const ed25519Stat = statSync(join(keysDir, 'ed25519.key'));
+
+      expect(x25519Stat.mode & 0o777).toBe(0o600);
+      expect(ed25519Stat.mode & 0o777).toBe(0o600);
+    });
+
+    it('bootstrap guard passes after mors init', async () => {
+      const configDir = join(tempDir, 'init-e2ee-guard');
+      await initCommand({ configDir });
+
+      const keysDir = getDeviceKeysDir(configDir);
+      expect(() => assertDeviceBootstrapped(keysDir)).not.toThrow();
+
+      const bundle = requireDeviceBootstrap(keysDir);
+      expect(bundle.deviceId).toMatch(/^device_/);
+    });
+
+    it('E2EE private keys are not leaked in init result metadata', async () => {
+      const configDir = join(tempDir, 'init-e2ee-noleak');
+      const result = await initCommand({ configDir });
+
+      // The result should not contain private key data
+      const resultStr = JSON.stringify(result);
+      const keysDir = getDeviceKeysDir(configDir);
+      const bundle = loadDeviceKeys(keysDir);
+
+      expect(resultStr).not.toContain(bundle.x25519PrivateKey.toString('hex'));
+      expect(resultStr).not.toContain(bundle.ed25519PrivateKey.toString('hex'));
+    });
+
+    it('E2EE key artifacts are cleaned up on init failure', async () => {
+      const configDir = join(tempDir, 'init-e2ee-failure');
+
+      // Use simulation hook that fails after identity creation but before sentinel
+      await expect(
+        initCommand({ configDir, simulateFailureAfterIdentity: true })
+      ).rejects.toThrow();
+
+      const keysDir = getDeviceKeysDir(configDir);
+      expect(isDeviceBootstrapped(keysDir)).toBe(false);
+    });
+  });
+
+  // ── Secure command bootstrap guard integration ────────────────────
+
+  describe('bootstrap guard blocks secure operations without keys', () => {
+    it('requireDeviceBootstrap fails when init has not been run', () => {
+      const configDir = join(tempDir, 'no-init');
+      const keysDir = getDeviceKeysDir(configDir);
+
+      expect(() => requireDeviceBootstrap(keysDir)).toThrow(DeviceNotBootstrappedError);
+    });
+
+    it('DeviceNotBootstrappedError message provides bootstrap guidance', () => {
+      const configDir = join(tempDir, 'no-init-msg');
+      const keysDir = getDeviceKeysDir(configDir);
+
+      try {
+        requireDeviceBootstrap(keysDir);
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(DeviceNotBootstrappedError);
+        const msg = (err as Error).message;
+        // Must mention init or bootstrap
+        expect(msg).toMatch(/mors init/i);
+        // Must mention device
+        expect(msg).toMatch(/device/i);
+      }
+    });
+
+    it('assertDeviceBootstrapped fails when E2EE keys removed after init', async () => {
+      const configDir = join(tempDir, 'init-then-remove');
+      await initCommand({ configDir });
+
+      const keysDir = getDeviceKeysDir(configDir);
+      expect(() => assertDeviceBootstrapped(keysDir)).not.toThrow();
+
+      // Simulate key removal (e.g. accidental deletion)
+      rmSync(keysDir, { recursive: true, force: true });
+
+      expect(() => assertDeviceBootstrapped(keysDir)).toThrow(DeviceNotBootstrappedError);
+    });
+  });
+});
+
+// ── CLI-level bootstrap guard integration ─────────────────────────────
+
+describe('CLI bootstrap guard on real command paths', () => {
+  const ROOT = resolve(import.meta.dirname, '../..');
+  const CLI = join(ROOT, 'dist', 'index.js');
+
+  let cliTempDir: string;
+
+  beforeEach(() => {
+    cliTempDir = mkdtempSync(join(tmpdir(), 'mors-cli-e2ee-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(cliTempDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Simulate a minimally-initialized mors config directory WITHOUT E2EE keys.
+   * This creates identity/sentinel files so init gate passes, but omits E2EE
+   * keys to exercise the bootstrap guard.
+   */
+  function simulateInitWithoutE2EE(configDir: string): void {
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, 'identity.json'),
+      JSON.stringify({
+        publicKey: 'a'.repeat(64),
+        fingerprint: 'b'.repeat(64),
+        createdAt: new Date().toISOString(),
+      })
+    );
+    writeFileSync(join(configDir, 'identity.key'), Buffer.alloc(32, 0xaa), { mode: 0o600 });
+    writeFileSync(join(configDir, '.initialized'), '');
+    // Also create auth session so auth gate passes
+    const authDir = join(configDir, 'auth');
+    mkdirSync(authDir, { recursive: true });
+    writeFileSync(
+      join(authDir, 'session.json'),
+      JSON.stringify({
+        accessToken: 'gho_test_token',
+        tokenType: 'bearer',
+        scope: 'read:user',
+        githubUserId: 12345,
+        githubLogin: 'testuser',
+        deviceId: 'device-001',
+        createdAt: new Date().toISOString(),
+      })
+    );
+    writeFileSync(join(authDir, '.auth-enabled'), '');
+  }
+
+  function runCli(
+    args: string,
+    opts?: { configDir?: string; expectFailure?: boolean }
+  ): { stdout: string; exitCode: number } {
+    const env: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+    };
+    if (opts?.configDir) {
+      env['MORS_CONFIG_DIR'] = opts.configDir;
+    }
+    try {
+      const stdout = execSync(`node ${CLI} ${args}`, {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env,
+        timeout: 15_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return { stdout, exitCode: 0 };
+    } catch (err: unknown) {
+      if (opts?.expectFailure) {
+        const e = err as { stdout?: string; stderr?: string; status?: number };
+        return {
+          stdout: (e.stdout ?? '') + (e.stderr ?? ''),
+          exitCode: e.status ?? 1,
+        };
+      }
+      throw err;
+    }
+  }
+
+  it('send --secure fails with bootstrap guidance when E2EE keys are absent', () => {
+    simulateInitWithoutE2EE(cliTempDir);
+
+    const result = runCli('send --to agent-b --body "hello" --secure --json', {
+      configDir: cliTempDir,
+      expectFailure: true,
+    });
+
+    expect(result.exitCode).toBe(1);
+    const output = JSON.parse(result.stdout.trim());
+    expect(output.status).toBe('error');
+    expect(output.error).toBe('device_not_bootstrapped');
+    expect(output.message).toMatch(/mors init/i);
+    expect(output.message).toMatch(/device/i);
+  });
+
+  it('reply --secure fails with bootstrap guidance when E2EE keys are absent', () => {
+    simulateInitWithoutE2EE(cliTempDir);
+
+    const result = runCli('reply msg_fake --body "reply" --secure --json', {
+      configDir: cliTempDir,
+      expectFailure: true,
+    });
+
+    expect(result.exitCode).toBe(1);
+    const output = JSON.parse(result.stdout.trim());
+    expect(output.status).toBe('error');
+    expect(output.error).toBe('device_not_bootstrapped');
+    expect(output.message).toMatch(/mors init/i);
+  });
+
+  it('send --secure succeeds (passes bootstrap guard) after mors init', () => {
+    // Run full init which provisions E2EE keys
+    runCli('init --json', { configDir: cliTempDir });
+
+    // Simulate auth session
+    const authDir = join(cliTempDir, 'auth');
+    mkdirSync(authDir, { recursive: true });
+    writeFileSync(
+      join(authDir, 'session.json'),
+      JSON.stringify({
+        accessToken: 'gho_test_token',
+        tokenType: 'bearer',
+        scope: 'read:user',
+        githubUserId: 12345,
+        githubLogin: 'testuser',
+        deviceId: 'device-001',
+        createdAt: new Date().toISOString(),
+      })
+    );
+    writeFileSync(join(authDir, '.auth-enabled'), '');
+
+    // send --secure should pass bootstrap guard and proceed (DB open will work since init ran)
+    const result = runCli('send --to agent-b --body "secure hello" --secure --json', {
+      configDir: cliTempDir,
+    });
+
+    const output = JSON.parse(result.stdout.trim());
+    expect(output.status).toBe('sent');
+    expect(output.id).toMatch(/^msg_/);
+  });
+
+  it('send without --secure does NOT require E2EE keys (no guard)', () => {
+    simulateInitWithoutE2EE(cliTempDir);
+
+    // Without --secure, the bootstrap guard should not be triggered.
+    // It will fail for other reasons (no DB) but not with bootstrap error.
+    const result = runCli('send --to agent-b --body "hello" --json', {
+      configDir: cliTempDir,
+      expectFailure: true,
+    });
+
+    // Should NOT get bootstrap error
+    const output = result.stdout.trim();
+    expect(output).not.toContain('device_not_bootstrapped');
+  });
+
+  it('send --secure fails with text error when --json not used', () => {
+    simulateInitWithoutE2EE(cliTempDir);
+
+    const result = runCli('send --to agent-b --body "hello" --secure', {
+      configDir: cliTempDir,
+      expectFailure: true,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toMatch(/mors init/i);
+    expect(result.stdout).toMatch(/device/i);
   });
 });

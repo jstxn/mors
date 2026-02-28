@@ -5,12 +5,13 @@
  * - SQLCipher preflight validation
  * - Ed25519 identity keypair generation
  * - Encrypted database creation
+ * - E2EE device key bootstrap (X25519 + Ed25519 keypairs)
  * - Atomic failure handling (cleanup on partial failure)
  * - Safe re-run behavior (non-destructive)
  * - Concurrent init safety via lock file
  * - Output redaction of secret material
  *
- * Fulfills: VAL-INIT-001 through VAL-INIT-007, VAL-SEC-002
+ * Fulfills: VAL-INIT-001 through VAL-INIT-007, VAL-SEC-002, VAL-E2EE-001
  */
 export interface InitResult {
     alreadyInitialized: boolean;
