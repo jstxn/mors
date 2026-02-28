@@ -21,6 +21,18 @@ import type { WatchEvent } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError } from './errors.js';
 import { ContractValidationError } from './contract/errors.js';
+import { saveSession, loadSession, clearSession } from './auth/session.js';
+import {
+  requestDeviceCode,
+  pollForToken,
+  fetchGitHubUser,
+  validateAuthConfig,
+  authConfigFromEnv,
+  DeviceFlowError,
+  TokenExpiredError,
+} from './auth/device-flow.js';
+import { getConfigDir } from './identity.js';
+import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 
 /** Commands that require initialization before use. */
@@ -49,6 +61,21 @@ export function run(args: string[]): void {
 
   if (command === 'setup-shell') {
     runSetupShellCommand(args.slice(1));
+    return;
+  }
+
+  if (command === 'login') {
+    runLogin(args.slice(1));
+    return;
+  }
+
+  if (command === 'logout') {
+    runLogout(args.slice(1));
+    return;
+  }
+
+  if (command === 'status') {
+    runStatus(args.slice(1));
     return;
   }
 
@@ -613,6 +640,236 @@ function runSetupShellCommand(_args: string[]): void {
     });
 }
 
+// ── Login command (VAL-AUTH-001, VAL-AUTH-002, VAL-AUTH-007) ─────────
+
+function runLogin(_args: string[]): void {
+  const { flags } = parseArgs(_args);
+  const json = 'json' in flags;
+
+  const configDir = getConfigDir();
+
+  // Check for existing session
+  const existing = loadSession(configDir);
+  if (existing) {
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'already_authenticated',
+          github_user_id: existing.githubUserId,
+          github_login: existing.githubLogin,
+          device_id: existing.deviceId,
+        })
+      );
+    } else {
+      console.log(`Already logged in as ${existing.githubLogin} (ID: ${existing.githubUserId})`);
+      console.log('Run "mors logout" first to switch accounts.');
+    }
+    return;
+  }
+
+  // Validate OAuth config (VAL-AUTH-007)
+  const authConfig = authConfigFromEnv();
+  const validation = validateAuthConfig(authConfig);
+
+  if (!validation.valid) {
+    process.exitCode = 1;
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'error',
+          error: 'missing_oauth_config',
+          missing: validation.missing,
+          message:
+            'Required OAuth configuration is missing. Set the following environment variables: ' +
+            validation.missing.join(', '),
+        })
+      );
+    } else {
+      console.error('Error: Required OAuth configuration is missing.');
+      console.error('Set the following environment variables:');
+      for (const m of validation.missing) {
+        console.error(`  - ${m}`);
+      }
+    }
+    return;
+  }
+
+  // Start device flow
+  runDeviceFlow(authConfig, configDir, json);
+}
+
+function runDeviceFlow(
+  authConfig: ReturnType<typeof authConfigFromEnv>,
+  configDir: string,
+  json: boolean
+): void {
+  requestDeviceCode(authConfig)
+    .then((deviceCode) => {
+      // Display verification info to user (VAL-AUTH-001)
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'awaiting_authorization',
+            verification_uri: deviceCode.verification_uri,
+            user_code: deviceCode.user_code,
+            expires_in: deviceCode.expires_in,
+          })
+        );
+      } else {
+        console.log('\n🔐 GitHub Device Authorization');
+        console.log('─'.repeat(40));
+        console.log(`Open: ${deviceCode.verification_uri}`);
+        console.log(`Code: ${deviceCode.user_code}`);
+        console.log(
+          `\nWaiting for authorization (expires in ${Math.floor(deviceCode.expires_in / 60)}m)...`
+        );
+      }
+
+      // Poll for token (VAL-AUTH-001)
+      return pollForToken(authConfig, deviceCode.device_code, {
+        intervalMs: deviceCode.interval * 1000,
+        expiresInMs: deviceCode.expires_in * 1000,
+        onPoll: (state) => {
+          if (!json && state === 'pending') {
+            process.stdout.write('.');
+          }
+        },
+      });
+    })
+    .then(async (tokenResponse) => {
+      if (!json) {
+        console.log('\n✓ Authorization received. Fetching account info...');
+      }
+
+      // Fetch GitHub user for stable identity binding (VAL-AUTH-008)
+      const user = await fetchGitHubUser(tokenResponse.access_token);
+
+      // Generate device ID for this installation (VAL-AUTH-009)
+      const deviceId = `device-${randomUUID()}`;
+
+      // Persist session (VAL-AUTH-002)
+      saveSession(configDir, {
+        accessToken: tokenResponse.access_token,
+        tokenType: tokenResponse.token_type,
+        scope: tokenResponse.scope,
+        githubUserId: user.id,
+        githubLogin: user.login,
+        deviceId,
+        createdAt: new Date().toISOString(),
+      });
+
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'authenticated',
+            github_user_id: user.id,
+            github_login: user.login,
+            device_id: deviceId,
+          })
+        );
+      } else {
+        console.log(`\n✅ Logged in as ${user.login} (ID: ${user.id})`);
+        console.log(`Device: ${deviceId}`);
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      if (err instanceof DeviceFlowError || err instanceof TokenExpiredError) {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'error',
+              error: err.name,
+              message: err.message,
+            })
+          );
+        } else {
+          console.error(`Error: ${err.message}`);
+        }
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'error',
+              error: 'unknown',
+              message: msg,
+            })
+          );
+        } else {
+          console.error(`Error: ${msg}`);
+        }
+      }
+    });
+}
+
+// ── Logout command (VAL-AUTH-005) ────────────────────────────────────
+
+function runLogout(_args: string[]): void {
+  const { flags } = parseArgs(_args);
+  const json = 'json' in flags;
+
+  const configDir = getConfigDir();
+  const existing = loadSession(configDir);
+
+  clearSession(configDir);
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        status: 'logged_out',
+        had_session: existing !== null,
+      })
+    );
+  } else {
+    if (existing) {
+      console.log(`Logged out (was: ${existing.githubLogin}).`);
+    } else {
+      console.log('No active session. Already logged out.');
+    }
+  }
+}
+
+// ── Status command (VAL-AUTH-002, VAL-AUTH-006) ──────────────────────
+
+function runStatus(_args: string[]): void {
+  const { flags } = parseArgs(_args);
+  const json = 'json' in flags;
+
+  const configDir = getConfigDir();
+  const session = loadSession(configDir);
+
+  if (!session) {
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'not_authenticated',
+          message: 'No active session. Run "mors login" to authenticate.',
+        })
+      );
+    } else {
+      console.log('Not authenticated. Run "mors login" to authenticate.');
+    }
+    return;
+  }
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        status: 'authenticated',
+        github_user_id: session.githubUserId,
+        github_login: session.githubLogin,
+        device_id: session.deviceId,
+        created_at: session.createdAt,
+      })
+    );
+  } else {
+    console.log(`Authenticated as ${session.githubLogin} (ID: ${session.githubUserId})`);
+    console.log(`Device: ${session.deviceId}`);
+    console.log(`Session created: ${session.createdAt}`);
+  }
+}
+
 // ── Init command ─────────────────────────────────────────────────────
 
 function runInit(_args: string[]): void {
@@ -724,6 +981,9 @@ Usage:
 
 Commands:
   init         Initialize identity and encrypted store
+  login        Authenticate with GitHub (OAuth device flow)
+  logout       Clear local auth session
+  status       Show current auth status
   send         Send a message
   inbox        List messages
   read         Read a message
@@ -771,6 +1031,18 @@ Watch:
   mors watch [--json] [--poll-interval <ms>]
   --json                 Output JSON (one event per line)
   --poll-interval <ms>   Polling interval in ms (default: 500, min: 10)
+
+Login:
+  mors login [--json]
+  --json                 Output JSON
+
+Logout:
+  mors logout [--json]
+  --json                 Output JSON
+
+Status:
+  mors status [--json]
+  --json                 Output JSON
 
 Setup Shell:
   mors setup-shell [--json] [--confirm] [--decline]
