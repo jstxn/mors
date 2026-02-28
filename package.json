@@ -14,7 +14,8 @@
     "prepare": "if test -x node_modules/.bin/tsc; then node_modules/.bin/tsc -p tsconfig.build.json; fi",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "relay:dev": "npx tsx src/relay/index.ts"
   },
   "engines": {
     "node": ">=20"

@@ -1,0 +1,44 @@
+/**
+ * HTTP server scaffold for the mors relay service.
+ *
+ * Provides:
+ * - Health endpoint for readiness checks
+ * - SSE baseline endpoint for future event streaming
+ * - Deterministic startup/shutdown with clean process lifecycle
+ * - Configurable logger for test observability
+ *
+ * Uses Node.js built-in http module (no external framework dependency).
+ */
+import type { RelayConfig } from './config.js';
+/** Logger function type. */
+export type RelayLogger = (message: string) => void;
+/** Options for creating the relay server. */
+export interface RelayServerOptions {
+    /** Custom logger. Defaults to console.log. */
+    logger?: RelayLogger;
+}
+/** Relay server handle with lifecycle methods. */
+export interface RelayServer {
+    /** Start listening. Resolves when the server is bound and ready. */
+    start(): Promise<void>;
+    /** Gracefully close the server. Resolves when all connections are terminated. */
+    close(): Promise<void>;
+    /** Whether the server is currently listening. */
+    readonly listening: boolean;
+    /** The port the server is bound to (valid after start). */
+    readonly port: number;
+}
+/**
+ * Create a relay server instance.
+ *
+ * The server exposes:
+ * - GET /health — readiness check endpoint
+ * - GET /events — SSE baseline endpoint
+ * - All other routes return 404
+ *
+ * @param config - Relay configuration.
+ * @param options - Optional server options (logger, etc.).
+ * @returns A RelayServer handle for lifecycle management.
+ */
+export declare function createRelayServer(config: RelayConfig, options?: RelayServerOptions): RelayServer;
+//# sourceMappingURL=server.d.ts.map
