@@ -1,0 +1,21 @@
+{
+  "featureId": "misc-hardening-2-test-port-helper-consolidation",
+  "reviewedAt": "2026-02-28T16:20:06Z",
+  "commitId": "611c055",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation matches the feature scope: 11 duplicated local getTestPort() helpers in relay/auth/e2ee tests were replaced with imports from test/helpers/test-port.ts, and the shared helper preserves identical behavior (return 0 for OS-assigned ephemeral ports), so determinism/collision mitigation behavior is unchanged.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-global-worker skill mandates strict red/green TDD for all features, but this refactor-only feature had no behavioral change and did not use a true red phase; guidance should explicitly define/refine exceptions for pure infrastructure refactors.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md (Work Procedure step 2) requires strict red/green; transcript skeleton for workerSessionId eec09fcf-282e-4486-a17b-d9b56f28412b shows baseline tests then edits (no failing-test-first step); handoff.skillFeedback.suggestedChanges explicitly notes TDD not applicable for this refactor."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The commit cleanly consolidates duplicated test port helpers to the shared helper with no functional drift and no code-level issues found. One shared-state skill-guidance gap was noted around strict TDD expectations for pure refactor tasks."
+}
