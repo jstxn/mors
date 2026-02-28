@@ -4,7 +4,9 @@
  * Provides a client-side abstraction for relay HTTP API calls with:
  * - Automatic retry with exponential backoff for transient failures
  *   (network errors, timeouts, 5xx server errors)
- * - Offline queue for buffering operations when relay is unreachable
+ * - Durable offline queue for buffering operations when relay is unreachable
+ *   (persisted to disk so queued sends survive process restart)
+ * - Flush reconciliation with bounded retry/backoff for each queued entry
  * - Dedupe key generation for idempotent send convergence
  * - Observable/deterministic retry logging for CLI output
  *
@@ -36,6 +38,19 @@ export interface RelayClientOptions {
     logger?: ClientLogger;
     /** Custom fetch implementation for testing. */
     fetchFn?: FetchFn;
+    /**
+     * Path to a JSON file for durable offline queue persistence.
+     * When set, the queue is loaded from this file on construction and
+     * saved after every queue mutation (send queued, flush success/fail).
+     * Enables offline queued sends to survive process restart.
+     */
+    queueStorePath?: string;
+    /** Maximum number of retry attempts per entry during flush. Default: 0 (single attempt). */
+    flushRetries?: number;
+    /** Initial delay in ms before first flush retry. Default: 500. */
+    flushRetryDelayMs?: number;
+    /** Multiplier for exponential backoff between flush retries. Default: 2. */
+    flushRetryBackoffMultiplier?: number;
 }
 /** Payload for a send operation queued offline. */
 export interface SendPayload {
@@ -122,6 +137,10 @@ export declare class RelayClient {
     private readonly logger;
     private readonly fetchFn;
     private readonly offlineQueue;
+    private readonly queueStorePath;
+    private readonly flushRetries;
+    private readonly flushRetryDelayMs;
+    private readonly flushRetryBackoffMultiplier;
     constructor(options: RelayClientOptions);
     /** Number of entries waiting in the offline queue. */
     get queueSize(): number;
@@ -145,9 +164,11 @@ export declare class RelayClient {
     /**
      * Flush the offline queue by sending all queued entries to the relay.
      *
-     * Each entry is attempted once per flush call (no extra retries within flush).
-     * Successfully sent entries are removed from the queue; failed entries remain
-     * for a subsequent flush attempt.
+     * Each entry is attempted with bounded retry/backoff for transient failures.
+     * Non-transient errors (4xx) are not retried. Successfully sent entries are
+     * removed from the queue; failed entries remain for a subsequent flush attempt.
+     *
+     * The queue is persisted to disk after flush completes (if queueStorePath is set).
      */
     flush(): Promise<FlushResult>;
     /**
@@ -178,6 +199,22 @@ export declare class RelayClient {
      */
     private requestWithRetry;
     /**
+     * Perform a send request with bounded retry/backoff for flush reconciliation.
+     *
+     * Retries transient failures (network errors, 5xx) up to flushRetries times
+     * with exponential backoff. Non-transient errors (4xx) are not retried.
+     */
+    private doSendWithFlushRetry;
+    /**
+     * Check if an error from flush send is non-transient (should not be retried).
+     * 4xx responses result in errors containing status codes in the 400-499 range.
+     */
+    private isNonTransientFlushError;
+    /**
+     * Persist the offline queue to disk (if queueStorePath is configured).
+     */
+    private persistQueue;
+    /**
      * Perform a single send request without retry logic (used by flush).
      */
     private doSend;
@@ -186,4 +223,30 @@ export declare class RelayClient {
     /** Delay for the given number of milliseconds. */
     private delay;
 }
+/**
+ * Save offline queue entries to a JSON file.
+ *
+ * Creates the parent directory if it doesn't exist.
+ * Uses owner-only permissions to prevent credential leakage
+ * (queue entries may contain auth-adjacent context).
+ *
+ * @param filePath - Path to the queue JSON file.
+ * @param entries - Queue entries to persist.
+ */
+export declare function saveOfflineQueue(filePath: string, entries: ReadonlyArray<OfflineQueueEntry>): void;
+/**
+ * Load offline queue entries from a JSON file.
+ *
+ * Returns an empty array if:
+ * - The file does not exist
+ * - The file contains invalid JSON
+ * - The file contents are not an array
+ *
+ * Graceful degradation ensures corrupt queue files do not
+ * prevent the client from starting.
+ *
+ * @param filePath - Path to the queue JSON file.
+ * @returns Array of queue entries, or empty array on failure.
+ */
+export declare function loadOfflineQueue(filePath: string): OfflineQueueEntry[];
 //# sourceMappingURL=client.d.ts.map

@@ -4,7 +4,9 @@
  * Provides a client-side abstraction for relay HTTP API calls with:
  * - Automatic retry with exponential backoff for transient failures
  *   (network errors, timeouts, 5xx server errors)
- * - Offline queue for buffering operations when relay is unreachable
+ * - Durable offline queue for buffering operations when relay is unreachable
+ *   (persisted to disk so queued sends survive process restart)
+ * - Flush reconciliation with bounded retry/backoff for each queued entry
  * - Dedupe key generation for idempotent send convergence
  * - Observable/deterministic retry logging for CLI output
  *
@@ -15,6 +17,8 @@
  * - VAL-RELAY-007: Transient relay failure recovery preserves single logical delivery
  */
 
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { generateDedupeKey } from '../contract/ids.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -43,6 +47,19 @@ export interface RelayClientOptions {
   logger?: ClientLogger;
   /** Custom fetch implementation for testing. */
   fetchFn?: FetchFn;
+  /**
+   * Path to a JSON file for durable offline queue persistence.
+   * When set, the queue is loaded from this file on construction and
+   * saved after every queue mutation (send queued, flush success/fail).
+   * Enables offline queued sends to survive process restart.
+   */
+  queueStorePath?: string;
+  /** Maximum number of retry attempts per entry during flush. Default: 0 (single attempt). */
+  flushRetries?: number;
+  /** Initial delay in ms before first flush retry. Default: 500. */
+  flushRetryDelayMs?: number;
+  /** Multiplier for exponential backoff between flush retries. Default: 2. */
+  flushRetryBackoffMultiplier?: number;
 }
 
 /** Payload for a send operation queued offline. */
@@ -152,6 +169,10 @@ export class RelayClient {
   private readonly logger: ClientLogger;
   private readonly fetchFn: FetchFn;
   private readonly offlineQueue: OfflineQueueEntry[] = [];
+  private readonly queueStorePath: string | undefined;
+  private readonly flushRetries: number;
+  private readonly flushRetryDelayMs: number;
+  private readonly flushRetryBackoffMultiplier: number;
 
   constructor(options: RelayClientOptions) {
     this.baseUrl = options.baseUrl;
@@ -162,6 +183,16 @@ export class RelayClient {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10000;
     this.logger = options.logger ?? (() => {});
     this.fetchFn = options.fetchFn ?? fetch;
+    this.queueStorePath = options.queueStorePath;
+    this.flushRetries = options.flushRetries ?? 0;
+    this.flushRetryDelayMs = options.flushRetryDelayMs ?? 500;
+    this.flushRetryBackoffMultiplier = options.flushRetryBackoffMultiplier ?? 2;
+
+    // Load persisted queue from disk if queueStorePath is configured
+    if (this.queueStorePath) {
+      const loaded = loadOfflineQueue(this.queueStorePath);
+      this.offlineQueue.push(...loaded);
+    }
   }
 
   /** Number of entries waiting in the offline queue. */
@@ -213,6 +244,7 @@ export class RelayClient {
         payload,
         queuedAt: new Date().toISOString(),
       });
+      this.persistQueue();
       this.logger(`send queued offline (dedupe_key=${dedupeKey}): ${this.describeError(err)}`);
       return { queued: true, dedupeKey };
     }
@@ -221,9 +253,11 @@ export class RelayClient {
   /**
    * Flush the offline queue by sending all queued entries to the relay.
    *
-   * Each entry is attempted once per flush call (no extra retries within flush).
-   * Successfully sent entries are removed from the queue; failed entries remain
-   * for a subsequent flush attempt.
+   * Each entry is attempted with bounded retry/backoff for transient failures.
+   * Non-transient errors (4xx) are not retried. Successfully sent entries are
+   * removed from the queue; failed entries remain for a subsequent flush attempt.
+   *
+   * The queue is persisted to disk after flush completes (if queueStorePath is set).
    */
   async flush(): Promise<FlushResult> {
     let sent = 0;
@@ -232,7 +266,7 @@ export class RelayClient {
 
     for (const entry of this.offlineQueue) {
       try {
-        await this.doSend(entry.payload);
+        await this.doSendWithFlushRetry(entry.payload);
         sent++;
         this.logger(`flush: delivered queued message (dedupe_key=${entry.payload.dedupeKey})`);
       } catch {
@@ -243,6 +277,7 @@ export class RelayClient {
 
     this.offlineQueue.length = 0;
     this.offlineQueue.push(...remaining);
+    this.persistQueue();
 
     return { sent, failed };
   }
@@ -378,6 +413,70 @@ export class RelayClient {
   }
 
   /**
+   * Perform a send request with bounded retry/backoff for flush reconciliation.
+   *
+   * Retries transient failures (network errors, 5xx) up to flushRetries times
+   * with exponential backoff. Non-transient errors (4xx) are not retried.
+   */
+  private async doSendWithFlushRetry(payload: SendPayload): Promise<RelayMessageResponse> {
+    let lastError: unknown;
+    let delayMs = this.flushRetryDelayMs;
+
+    for (let attempt = 0; attempt <= this.flushRetries; attempt++) {
+      if (attempt > 0) {
+        this.logger(
+          `flush: retry attempt ${attempt}/${this.flushRetries} for dedupe_key=${payload.dedupeKey} (delay=${delayMs}ms)`
+        );
+        await this.delay(delayMs);
+        delayMs = Math.round(delayMs * this.flushRetryBackoffMultiplier);
+      }
+
+      try {
+        return await this.doSend(payload);
+      } catch (err: unknown) {
+        // Non-transient errors (4xx) should not be retried
+        if (this.isNonTransientFlushError(err)) {
+          throw err;
+        }
+
+        lastError = err;
+        if (attempt < this.flushRetries) {
+          this.logger(
+            `flush: send failed for dedupe_key=${payload.dedupeKey}: ${this.describeError(err)}, will retry`
+          );
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  /**
+   * Check if an error from flush send is non-transient (should not be retried).
+   * 4xx responses result in errors containing status codes in the 400-499 range.
+   */
+  private isNonTransientFlushError(err: unknown): boolean {
+    if (err instanceof Error) {
+      // The doSend method throws "Send failed: <status>" for non-ok responses
+      const match = err.message.match(/Send failed: (\d+)/);
+      if (match) {
+        const status = parseInt(match[1], 10);
+        return status >= 400 && status < 500;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Persist the offline queue to disk (if queueStorePath is configured).
+   */
+  private persistQueue(): void {
+    if (this.queueStorePath) {
+      saveOfflineQueue(this.queueStorePath, this.offlineQueue);
+    }
+  }
+
+  /**
    * Perform a single send request without retry logic (used by flush).
    */
   private async doSend(payload: SendPayload): Promise<RelayMessageResponse> {
@@ -417,4 +516,80 @@ export class RelayClient {
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+}
+
+// ── Durable Queue Persistence ───────────────────────────────────────
+
+/** Owner-only file permissions for queue persistence. */
+const QUEUE_FILE_MODE = 0o600;
+/** Owner-only directory permissions. */
+const QUEUE_DIR_MODE = 0o700;
+
+/**
+ * Save offline queue entries to a JSON file.
+ *
+ * Creates the parent directory if it doesn't exist.
+ * Uses owner-only permissions to prevent credential leakage
+ * (queue entries may contain auth-adjacent context).
+ *
+ * @param filePath - Path to the queue JSON file.
+ * @param entries - Queue entries to persist.
+ */
+export function saveOfflineQueue(
+  filePath: string,
+  entries: ReadonlyArray<OfflineQueueEntry>
+): void {
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true, mode: QUEUE_DIR_MODE });
+  const data = JSON.stringify(entries, null, 2) + '\n';
+  writeFileSync(filePath, data, { mode: QUEUE_FILE_MODE });
+  chmodSync(filePath, QUEUE_FILE_MODE);
+}
+
+/**
+ * Load offline queue entries from a JSON file.
+ *
+ * Returns an empty array if:
+ * - The file does not exist
+ * - The file contains invalid JSON
+ * - The file contents are not an array
+ *
+ * Graceful degradation ensures corrupt queue files do not
+ * prevent the client from starting.
+ *
+ * @param filePath - Path to the queue JSON file.
+ * @returns Array of queue entries, or empty array on failure.
+ */
+export function loadOfflineQueue(filePath: string): OfflineQueueEntry[] {
+  if (!existsSync(filePath)) {
+    return [];
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+
+  // Basic structural validation: ensure each entry has required fields
+  return parsed.filter(
+    (entry: unknown): entry is OfflineQueueEntry =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      'type' in entry &&
+      'payload' in entry &&
+      'queuedAt' in entry
+  );
 }
