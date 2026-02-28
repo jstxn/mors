@@ -24,3 +24,7 @@ fi
 if [ -f package.json ]; then
   npm install
 fi
+
+if [ -f .env.example ] && [ ! -f .env ]; then
+  cp .env.example .env
+fi

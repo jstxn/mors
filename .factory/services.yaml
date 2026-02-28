@@ -4,5 +4,13 @@ commands:
   typecheck: npm run typecheck
   test: npm run test -- --maxConcurrency=7
   build: npm run build
+  relay_dev: PORT=3100 npm run relay:dev
+  relay_test: npx vitest run test/relay --maxConcurrency=7
 
-services: {}
+services:
+  relay:
+    start: PORT=3100 npm run relay:dev
+    stop: pids=$(lsof -ti :3100); if [ -n "$pids" ]; then kill $pids; fi
+    healthcheck: curl -sf http://localhost:3100/health
+    port: 3100
+    depends_on: []
