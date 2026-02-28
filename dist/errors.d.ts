@@ -42,6 +42,10 @@ export declare class KeyExchangeNotCompleteError extends MorsError {
 export declare class GroupE2EEUnsupportedError extends MorsError {
     constructor(conversationType: string);
 }
+/** Thrown when E2EE encryption or decryption fails (tampered ciphertext, wrong key, malformed payload). */
+export declare class CipherError extends MorsError {
+    constructor(message: string);
+}
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export declare class DedupeConflictError extends MorsError {
     readonly dedupeKey: string;

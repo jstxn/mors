@@ -28,3 +28,5 @@ export {
   type KeyExchangeSession,
   type ConversationType,
 } from './key-exchange.js';
+
+export { encryptMessage, decryptMessage, type EncryptedPayload } from './cipher.js';

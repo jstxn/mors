@@ -78,6 +78,13 @@ export class GroupE2EEUnsupportedError extends MorsError {
         this.name = 'GroupE2EEUnsupportedError';
     }
 }
+/** Thrown when E2EE encryption or decryption fails (tampered ciphertext, wrong key, malformed payload). */
+export class CipherError extends MorsError {
+    constructor(message) {
+        super(message);
+        this.name = 'CipherError';
+    }
+}
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export class DedupeConflictError extends MorsError {
     dedupeKey;
