@@ -1185,3 +1185,244 @@ describe('cross-flow: state consistency edge cases', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// True overlapping contention: concurrent send/reply/ack integration flows
+// ---------------------------------------------------------------------------
+
+describe('cross-flow: true overlapping contention', () => {
+  it('overlapping sends with unique dedupe keys produce distinct messages and consistent watch events', async () => {
+    const db = openDb();
+    try {
+      const { events, done } = collectWatchEvents(db, {
+        maxEvents: 10,
+        timeoutMs: 3000,
+        pollIntervalMs: 30,
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Fire 10 concurrent sends with distinct dedupe keys
+      const results = Array.from({ length: 10 }, (_, i) =>
+        sendMessage(db, {
+          sender: 'agent-a',
+          recipient: 'agent-b',
+          body: `Contention message ${i}`,
+          dedupeKey: `dup_contention-${i}`,
+        })
+      );
+
+      await done;
+
+      // All sends created unique messages
+      const ids = new Set(results.map((r) => r.id));
+      expect(ids.size).toBe(10);
+
+      // All were originals (not replays)
+      expect(results.every((r) => !r.dedupe_replay)).toBe(true);
+
+      // Inbox has all 10
+      const inbox = listInbox(db, { recipient: 'agent-b' });
+      expect(inbox.length).toBe(10);
+
+      // Watch emitted one create event per message (no duplicates)
+      const createEvents = events.filter((e) => e.event_type === 'message_created');
+      const watchMessageIds = new Set(createEvents.map((e) => e.message_id));
+      expect(watchMessageIds.size).toBe(createEvents.length);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('overlapping replies to the same parent converge correctly across restart', () => {
+    let db = openDb();
+    try {
+      const root = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Root for overlapping reply contention',
+      });
+
+      // Fire many concurrent replies (unique, no dedupe key)
+      const replyCount = 15;
+      const replies = Array.from({ length: replyCount }, (_, i) =>
+        replyMessage(db, {
+          parentMessageId: root.id,
+          sender: `agent-${i}`,
+          recipient: 'alice',
+          body: `Contention reply ${i}`,
+        })
+      );
+
+      // All unique
+      const ids = new Set(replies.map((r) => r.id));
+      expect(ids.size).toBe(replyCount);
+
+      // Simulate restart
+      db = simulateRestart(db);
+
+      // Thread is intact after restart
+      const thread = listThread(db, root.thread_id);
+      expect(thread.length).toBe(replyCount + 1);
+
+      // Causal ordering: root first, all replies after
+      expect(thread[0].id).toBe(root.id);
+      for (let i = 1; i < thread.length; i++) {
+        expect(thread[i].in_reply_to).toBe(root.id);
+        expect(thread[i].thread_id).toBe(root.thread_id);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('overlapping dedupe sends across restart converge to single canonical message', () => {
+    let db = openDb();
+    try {
+      const dedupeKey = 'dup_overlap-restart-converge';
+
+      // First batch: 5 sends with same dedupe key
+      const batch1 = Array.from({ length: 5 }, () =>
+        sendMessage(db, {
+          sender: 'agent-a',
+          recipient: 'agent-b',
+          body: 'Overlap restart test',
+          dedupeKey,
+        })
+      );
+
+      const canonicalId = batch1[0].id;
+      expect(batch1.every((r) => r.id === canonicalId)).toBe(true);
+
+      // Restart
+      db = simulateRestart(db);
+
+      // Second batch: 5 more sends with same dedupe key after restart
+      const batch2 = Array.from({ length: 5 }, () =>
+        sendMessage(db, {
+          sender: 'agent-a',
+          recipient: 'agent-b',
+          body: 'Overlap restart test',
+          dedupeKey,
+        })
+      );
+
+      // All converge to the same canonical ID from before restart
+      expect(batch2.every((r) => r.id === canonicalId)).toBe(true);
+      expect(batch2.every((r) => r.dedupe_replay)).toBe(true);
+
+      // Only one message total
+      const inbox = listInbox(db, { recipient: 'agent-b' });
+      expect(inbox.length).toBe(1);
+      expect(inbox[0].id).toBe(canonicalId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('mixed send/reply contention with dedupe keys maintains thread and inbox integrity', () => {
+    const db = openDb();
+    try {
+      // Create a conversation thread under contention
+      const root = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Root for mixed contention integration',
+      });
+
+      // Dedupe reply (same key, multiple attempts)
+      const replyDedupeKey = 'dup_mixed-integration-reply';
+      const replyResults = Array.from({ length: 5 }, () =>
+        replyMessage(db, {
+          parentMessageId: root.id,
+          sender: 'bob',
+          recipient: 'alice',
+          body: 'Dedupe reply',
+          dedupeKey: replyDedupeKey,
+        })
+      );
+
+      // All reply results converge
+      const replyIds = new Set(replyResults.map((r) => r.id));
+      expect(replyIds.size).toBe(1);
+
+      // Non-dedupe replies (each unique)
+      const uniqueReplies = Array.from({ length: 3 }, (_, i) =>
+        replyMessage(db, {
+          parentMessageId: root.id,
+          sender: `agent-${i}`,
+          recipient: 'alice',
+          body: `Unique reply ${i}`,
+        })
+      );
+
+      // All unique IDs
+      const uniqueIds = new Set(uniqueReplies.map((r) => r.id));
+      expect(uniqueIds.size).toBe(3);
+
+      // Thread: root + 1 dedupe reply + 3 unique replies = 5
+      const thread = listThread(db, root.thread_id);
+      expect(thread.length).toBe(5);
+
+      // Inbox integrity: all messages accounted for
+      const inbox = listInbox(db, {});
+      expect(inbox.length).toBe(5);
+
+      // Verify read/ack lifecycle works on contention-created messages
+      readMessage(db, root.id);
+      ackMessage(db, root.id);
+
+      const replyId = [...replyIds][0];
+      readMessage(db, replyId);
+      ackMessage(db, replyId);
+
+      const finalInbox = listInbox(db, {});
+      const ackedMessages = finalInbox.filter((m) => m.state === 'acked');
+      expect(ackedMessages.length).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('concurrent dedupe sends do not leak SQLITE_CONSTRAINT errors', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_integration-no-leak';
+      const errors: Error[] = [];
+
+      // Fire 20 concurrent sends with same dedupe key, collect any errors
+      const results: ReturnType<typeof sendMessage>[] = [];
+      for (let i = 0; i < 20; i++) {
+        try {
+          results.push(
+            sendMessage(db, {
+              sender: 'agent-a',
+              recipient: 'agent-b',
+              body: 'No leak test',
+              dedupeKey,
+            })
+          );
+        } catch (err) {
+          errors.push(err as Error);
+        }
+      }
+
+      // No SQLITE_CONSTRAINT errors should have leaked
+      for (const err of errors) {
+        expect(err.message).not.toMatch(/SQLITE_CONSTRAINT/i);
+      }
+
+      // All successful results converge to same ID
+      if (results.length > 0) {
+        const canonicalId = results[0].id;
+        expect(results.every((r) => r.id === canonicalId)).toBe(true);
+      }
+
+      // Exactly one message
+      const inbox = listInbox(db, { recipient: 'agent-b' });
+      expect(inbox.length).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+});

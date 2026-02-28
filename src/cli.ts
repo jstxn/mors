@@ -702,8 +702,8 @@ Send options:
   --body <message>       Message body (required)
   --from <sender>        Sender identity (default: "local")
   --subject <subject>    Message subject
-  --dedupe-key <key>     Dedupe key for idempotent sends
-  --trace-id <id>        Trace ID for observability
+  --dedupe-key <key>     Dedupe key for idempotent sends (must start with "dup_")
+  --trace-id <id>        Trace ID for observability (must start with "trc_")
   --json                 Output JSON
 
 Inbox options:
@@ -720,8 +720,8 @@ Reply:
   --to <recipient>       Recipient identity (default: "local")
   --from <sender>        Sender identity (default: "local")
   --subject <subject>    Reply subject
-  --dedupe-key <key>     Dedupe key for idempotent replies
-  --trace-id <id>        Trace ID for observability
+  --dedupe-key <key>     Dedupe key for idempotent replies (must start with "dup_")
+  --trace-id <id>        Trace ID for observability (must start with "trc_")
   --json                 Output JSON
 
 Thread:

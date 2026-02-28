@@ -211,24 +211,34 @@ export function sendMessage(db: BetterSqlite3.Database, options: SendOptions): S
   // Local delivery: messages are immediately delivered.
   const state = 'delivered';
 
-  db.prepare(
-    `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    threadId,
-    null, // in_reply_to: null for new messages
-    sender,
-    recipient,
-    subject ?? null,
-    body,
-    dedupeKey ?? null,
-    traceId ?? null,
-    state,
-    null, // read_at: null on send
-    now,
-    now
-  );
+  try {
+    db.prepare(
+      `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      threadId,
+      null, // in_reply_to: null for new messages
+      sender,
+      recipient,
+      subject ?? null,
+      body,
+      dedupeKey ?? null,
+      traceId ?? null,
+      state,
+      null, // read_at: null on send
+      now,
+      now
+    );
+  } catch (err: unknown) {
+    // Race-condition recovery: if a concurrent operation inserted a record
+    // with the same dedupe_key between our SELECT check and this INSERT,
+    // recover the canonical message instead of leaking SQLITE_CONSTRAINT.
+    if (dedupeKey && isUniqueConstraintError(err)) {
+      return recoverCanonicalSend(db, dedupeKey);
+    }
+    throw err;
+  }
 
   return {
     id,
@@ -375,6 +385,135 @@ export function ackMessage(db: BetterSqlite3.Database, messageId: string): AckRe
     thread_id: row.thread_id,
     state: 'acked',
     updated_at: now,
+  };
+}
+
+// ── Dedupe race-condition recovery helpers ─────────────────────────────
+
+/**
+ * Check if an error is a SQLite UNIQUE constraint violation.
+ * Used to detect dedupe_key race conditions where a concurrent operation
+ * inserted a record between our SELECT check and INSERT attempt.
+ */
+function isUniqueConstraintError(err: unknown): boolean {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code: string }).code;
+    return code === 'SQLITE_CONSTRAINT_UNIQUE' || code === 'SQLITE_CONSTRAINT';
+  }
+  return false;
+}
+
+/**
+ * Recover the canonical message after a dedupe_key UNIQUE constraint conflict
+ * during sendMessage. Re-fetches the winning record and returns it as a replay.
+ *
+ * @throws DedupeConflictError if the canonical record has incompatible causal context.
+ * @throws MorsError if the canonical record cannot be found (should not happen).
+ */
+function recoverCanonicalSend(db: BetterSqlite3.Database, dedupeKey: string): SendResult {
+  const canonical = db
+    .prepare(
+      'SELECT id, thread_id, in_reply_to, sender, recipient, state, created_at, dedupe_key, trace_id FROM messages WHERE dedupe_key = ?'
+    )
+    .get(dedupeKey) as
+    | {
+        id: string;
+        thread_id: string;
+        in_reply_to: string | null;
+        sender: string;
+        recipient: string;
+        state: string;
+        created_at: string;
+        dedupe_key: string | null;
+        trace_id: string | null;
+      }
+    | undefined;
+
+  if (!canonical) {
+    throw new MorsError(
+      `Dedupe race recovery failed: no canonical message found for key "${dedupeKey}".`
+    );
+  }
+
+  // Causal linkage check: a top-level send must match a top-level record.
+  if (canonical.in_reply_to !== null) {
+    throw new DedupeConflictError(
+      dedupeKey,
+      canonical.id,
+      `Expected a top-level message (in_reply_to: null) but found a reply (in_reply_to: "${canonical.in_reply_to}").`
+    );
+  }
+
+  return {
+    id: canonical.id,
+    thread_id: canonical.thread_id,
+    sender: canonical.sender,
+    recipient: canonical.recipient,
+    state: canonical.state,
+    created_at: canonical.created_at,
+    dedupe_key: canonical.dedupe_key,
+    trace_id: canonical.trace_id,
+    dedupe_replay: true,
+  };
+}
+
+/**
+ * Recover the canonical reply after a dedupe_key UNIQUE constraint conflict
+ * during replyMessage. Re-fetches the winning record and returns it as a replay.
+ *
+ * @throws DedupeConflictError if the canonical record has incompatible causal context.
+ * @throws MorsError if the canonical record cannot be found (should not happen).
+ */
+function recoverCanonicalReply(
+  db: BetterSqlite3.Database,
+  dedupeKey: string,
+  expectedParentId: string
+): ReplyResult {
+  const canonical = db
+    .prepare(
+      'SELECT id, thread_id, in_reply_to, sender, recipient, state, created_at, dedupe_key, trace_id FROM messages WHERE dedupe_key = ?'
+    )
+    .get(dedupeKey) as
+    | {
+        id: string;
+        thread_id: string;
+        in_reply_to: string | null;
+        sender: string;
+        recipient: string;
+        state: string;
+        created_at: string;
+        dedupe_key: string | null;
+        trace_id: string | null;
+      }
+    | undefined;
+
+  if (!canonical) {
+    throw new MorsError(
+      `Dedupe race recovery failed: no canonical reply found for key "${dedupeKey}".`
+    );
+  }
+
+  // Causal linkage check: the canonical record must be a reply to the expected parent.
+  if (canonical.in_reply_to !== expectedParentId) {
+    const existingReplyTo = canonical.in_reply_to ?? 'null (top-level message)';
+    throw new DedupeConflictError(
+      dedupeKey,
+      canonical.id,
+      `Expected in_reply_to="${expectedParentId}" but found in_reply_to="${existingReplyTo}".`
+    );
+  }
+
+  return {
+    id: canonical.id,
+    thread_id: canonical.thread_id,
+    in_reply_to: canonical.in_reply_to,
+    sender: canonical.sender,
+    recipient: canonical.recipient,
+    state: canonical.state,
+    created_at: canonical.created_at,
+    dedupe_key: canonical.dedupe_key,
+    trace_id: canonical.trace_id,
+    dedupe_replay: true,
   };
 }
 
@@ -557,24 +696,34 @@ export function replyMessage(db: BetterSqlite3.Database, options: ReplyOptions):
   const now = new Date().toISOString();
   const state = 'delivered'; // Local delivery: immediately delivered
 
-  db.prepare(
-    `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    threadId,
-    parentMessageId, // in_reply_to: always the immediate parent
-    sender,
-    recipient,
-    subject ?? null,
-    body,
-    dedupeKey ?? null,
-    traceId ?? null,
-    state,
-    null, // read_at: null on creation
-    now,
-    now
-  );
+  try {
+    db.prepare(
+      `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      id,
+      threadId,
+      parentMessageId, // in_reply_to: always the immediate parent
+      sender,
+      recipient,
+      subject ?? null,
+      body,
+      dedupeKey ?? null,
+      traceId ?? null,
+      state,
+      null, // read_at: null on creation
+      now,
+      now
+    );
+  } catch (err: unknown) {
+    // Race-condition recovery: if a concurrent operation inserted a record
+    // with the same dedupe_key between our SELECT check and this INSERT,
+    // recover the canonical reply instead of leaking SQLITE_CONSTRAINT.
+    if (dedupeKey && isUniqueConstraintError(err)) {
+      return recoverCanonicalReply(db, dedupeKey, parentMessageId);
+    }
+    throw err;
+  }
 
   return {
     id,

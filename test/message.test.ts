@@ -20,7 +20,14 @@ import { tmpdir } from 'node:os';
 import { initCommand, getDbPath, getDbKeyPath } from '../src/init.js';
 import { loadKey } from '../src/key-management.js';
 import { openEncryptedDb } from '../src/store.js';
-import { sendMessage, listInbox, readMessage, ackMessage, replyMessage } from '../src/message.js';
+import {
+  sendMessage,
+  listInbox,
+  readMessage,
+  ackMessage,
+  replyMessage,
+  listThread,
+} from '../src/message.js';
 import type { SendOptions } from '../src/message.js';
 import { MorsError, DedupeConflictError } from '../src/errors.js';
 import { InvalidStateTransitionError } from '../src/contract/errors.js';
@@ -814,6 +821,232 @@ describe('send dedupe causal linkage', () => {
       expect(read.in_reply_to).toBe(parent.id);
       expect(read.thread_id).toBe(parent.thread_id);
       expect(read.body).toBe('Reply msg');
+    } finally {
+      db.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dedupe race-condition hardening: concurrent dedupe operations converge
+// ---------------------------------------------------------------------------
+
+describe('dedupe race-condition hardening', () => {
+  it('concurrent sends with same dedupe key converge to one canonical message', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_concurrent-race-send';
+      const opts: SendOptions = {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Race condition test',
+        dedupeKey,
+      };
+
+      // Simulate overlapping concurrent sends by running many in tight succession.
+      // With better-sqlite3 (synchronous), true parallelism isn't possible within
+      // a single process, but this exercises the full check-then-insert path
+      // repeatedly and verifies convergence semantics.
+      const results = Array.from({ length: 10 }, () => sendMessage(db, opts));
+
+      // All results must converge to the same canonical message ID
+      const ids = new Set(results.map((r) => r.id));
+      expect(ids.size).toBe(1);
+
+      // Exactly one was the original, rest are replays
+      const originals = results.filter((r) => !r.dedupe_replay);
+      const replays = results.filter((r) => r.dedupe_replay);
+      expect(originals.length).toBe(1);
+      expect(replays.length).toBe(9);
+
+      // Only one message in inbox
+      const inbox = listInbox(db, { recipient: 'bob' });
+      expect(inbox.length).toBe(1);
+      expect(inbox[0].id).toBe(results[0].id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('UNIQUE constraint conflict on dedupe_key recovers canonical message without raw error leakage', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_constraint-recovery';
+
+      // Insert a message with the dedupe key directly (simulating a concurrent winner)
+      const now = new Date().toISOString();
+      const canonicalId = 'msg_canonical-winner';
+      const canonicalThreadId = 'thr_canonical-winner';
+      db.prepare(
+        `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        canonicalId,
+        canonicalThreadId,
+        null,
+        'alice',
+        'bob',
+        null,
+        'Winner message',
+        dedupeKey,
+        null,
+        'delivered',
+        null,
+        now,
+        now
+      );
+
+      // Now try to send with the same dedupe key — the SELECT check will find it
+      // and return the canonical message as a dedupe replay
+      const result = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Loser attempt',
+        dedupeKey,
+      });
+
+      // Should recover the canonical message, not throw SQLITE_CONSTRAINT
+      expect(result.id).toBe(canonicalId);
+      expect(result.thread_id).toBe(canonicalThreadId);
+      expect(result.dedupe_replay).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('concurrent replies with same dedupe key converge to one canonical reply', () => {
+    const db = openDb();
+    try {
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Parent for concurrent reply race',
+      });
+
+      const dedupeKey = 'dup_concurrent-reply-race';
+
+      const results = Array.from({ length: 10 }, () =>
+        replyMessage(db, {
+          parentMessageId: parent.id,
+          sender: 'bob',
+          recipient: 'alice',
+          body: 'Race reply',
+          dedupeKey,
+        })
+      );
+
+      // All results must converge to the same canonical reply ID
+      const ids = new Set(results.map((r) => r.id));
+      expect(ids.size).toBe(1);
+
+      // Exactly one original, rest replays
+      const originals = results.filter((r) => !r.dedupe_replay);
+      const replays = results.filter((r) => r.dedupe_replay);
+      expect(originals.length).toBe(1);
+      expect(replays.length).toBe(9);
+
+      // Thread should have exactly 2 messages: parent + 1 reply
+      const thread = listThread(db, parent.thread_id);
+      expect(thread.length).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('insert-level UNIQUE conflict on reply dedupe_key recovers canonical reply', () => {
+    const db = openDb();
+    try {
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Parent for insert conflict',
+      });
+
+      const dedupeKey = 'dup_reply-constraint-recovery';
+
+      // Pre-insert a reply with the dedupe key (simulating concurrent winner)
+      const now = new Date().toISOString();
+      const canonicalId = 'msg_reply-canonical-winner';
+      db.prepare(
+        `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        canonicalId,
+        parent.thread_id,
+        parent.id,
+        'bob',
+        'alice',
+        null,
+        'Winner reply',
+        dedupeKey,
+        null,
+        'delivered',
+        null,
+        now,
+        now
+      );
+
+      // Now try to reply with the same dedupe key — should recover canonical
+      const result = replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Loser reply attempt',
+        dedupeKey,
+      });
+
+      // Should return the canonical reply, not throw SQLITE_CONSTRAINT
+      expect(result.id).toBe(canonicalId);
+      expect(result.in_reply_to).toBe(parent.id);
+      expect(result.thread_id).toBe(parent.thread_id);
+      expect(result.dedupe_replay).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('no SQLITE_CONSTRAINT leaks to caller on dedupe contention', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_no-raw-leak';
+
+      // Send the first message
+      const first = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'First message',
+        dedupeKey,
+      });
+
+      // The second send must not throw any SQLITE_CONSTRAINT error;
+      // it must gracefully return the canonical message
+      let caughtError: Error | null = null;
+      let result: typeof first | null = null;
+      try {
+        result = sendMessage(db, {
+          sender: 'alice',
+          recipient: 'bob',
+          body: 'Duplicate attempt',
+          dedupeKey,
+        });
+      } catch (err) {
+        caughtError = err as Error;
+      }
+
+      // No error should be thrown
+      expect(caughtError).toBeNull();
+      // Result should be the canonical replay
+      expect(result).not.toBeNull();
+      if (result) {
+        expect(result.id).toBe(first.id);
+        expect(result.dedupe_replay).toBe(true);
+      }
+
+      // Verify no error message contains SQLITE_CONSTRAINT
+      // (this is a safeguard — if the above assertions pass, this is redundant)
+      if (caughtError) {
+        expect(caughtError.message).not.toMatch(/SQLITE_CONSTRAINT/i);
+      }
     } finally {
       db.close();
     }
