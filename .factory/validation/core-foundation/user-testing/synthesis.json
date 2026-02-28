@@ -1,0 +1,36 @@
+{
+  "milestone": "core-foundation",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-INIT-001",
+    "VAL-INIT-002",
+    "VAL-INIT-003",
+    "VAL-INIT-004",
+    "VAL-INIT-005",
+    "VAL-INIT-006",
+    "VAL-INIT-007",
+    "VAL-SEC-001",
+    "VAL-SEC-002",
+    "VAL-SEC-003",
+    "VAL-SEC-004",
+    "VAL-SEC-005"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance: CLI section with isolation rules, CLI invocation patterns, testing hooks, key file layout, and evidence collection instructions",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "notes": "All 12 assertions for core-foundation milestone passed. Subagent spawning failed with permission issues, so all testing was performed inline by the validator directly. VAL-SEC-002 and VAL-SEC-003 were tested at store-level since CLI data commands (send/inbox/read) are not yet implemented (local-cli-flows milestone). All 200 unit tests pass (41 init + 32 security + 123 contract + 4 baseline). Minor non-blocking observation: config directory gets 755 permissions instead of intended 700 due to macOS mkdirSync+umask interaction, but key files are correctly 600."
+}

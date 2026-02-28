@@ -1,0 +1,44 @@
+{
+  "flowId": "init-assertions",
+  "milestone": "core-foundation",
+  "assertions": [
+    {
+      "id": "VAL-INIT-001",
+      "status": "pass",
+      "evidence": "Fresh `mors init --json` in isolated temp dir exited 0, output: {\"status\":\"initialized\",\"fingerprint\":\"...\",\"configDir\":\"...\"}. Filesystem shows: .initialized, identity.json, identity.key (600), db.key (600), mors.db (28672 bytes, SQLCipher-encrypted). DB header is not plaintext SQLite. After init, `mors inbox` passes init gating (gets 'not yet implemented' rather than 'not initialized'), confirming identity and store are provisioned. Note: inbox command itself is not yet implemented (local-cli-flows milestone)."
+    },
+    {
+      "id": "VAL-INIT-002",
+      "status": "pass",
+      "evidence": "Second `mors init --json` returns {\"status\":\"already_initialized\"} with same fingerprint. File inodes, mtimes, and fingerprint are identical before and after re-run. No files were rewritten or overwritten."
+    },
+    {
+      "id": "VAL-INIT-003",
+      "status": "pass",
+      "evidence": "`mors init --simulate-sqlcipher-unavailable --json` exits 1 with {\"status\":\"error\",\"error\":\"sqlcipher_unavailable\",\"message\":\"SQLCipher is not available. Install SQLCipher and rebuild native modules....\"}. Config dir has 0 artifacts after failure. Clear remediation guidance provided."
+    },
+    {
+      "id": "VAL-INIT-004",
+      "status": "pass",
+      "evidence": "Captured stdout and stderr from `mors init --json`. stdout contains only JSON with status, fingerprint (SHA-256 of public key, safe), and configDir. stderr is empty. Verified private key hex bytes not present in stdout or identity.json. DB encryption key hex not present in stdout. identity.json publicKey field is redacted (shows asterisks). No raw key material in any CLI output."
+    },
+    {
+      "id": "VAL-INIT-005",
+      "status": "pass",
+      "evidence": "Tested all 6 gated commands (send, inbox, read, reply, ack, watch) in uninitialized temp dir. All exit with code 1 and message: \"Error: mors is not initialized. Run 'mors init' to set up identity and encrypted store.\" Clear actionable guidance."
+    },
+    {
+      "id": "VAL-INIT-006",
+      "status": "pass",
+      "evidence": "`mors init --simulate-failure-after-identity --json` exits 1 with simulated failure error. Config dir has 0 artifacts after failure (atomic cleanup). Follow-up `mors inbox` correctly reports 'not initialized', confirming no half-initialized state."
+    },
+    {
+      "id": "VAL-INIT-007",
+      "status": "pass",
+      "evidence": "Two concurrent `mors init` processes launched simultaneously. Process 1 succeeded (exit 0, initialized). Process 2 failed (exit 1, 'Another init process appears to be running'). Final state has exactly one coherent identity. Re-running init confirms already_initialized with stable fingerprint. Lock file mechanism prevents corruption."
+    }
+  ],
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js (direct CLI)", "shell (bash)", "stat", "xxd", "strings"]
+}

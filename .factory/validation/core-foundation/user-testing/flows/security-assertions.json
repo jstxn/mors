@@ -1,0 +1,43 @@
+{
+  "flowId": "security-assertions",
+  "milestone": "core-foundation",
+  "assertions": [
+    {
+      "id": "VAL-SEC-001",
+      "status": "pass",
+      "evidence": "After `mors init`, DB file (mors.db, 28672 bytes) header does NOT start with 'SQLite format 3'. xxd shows encrypted binary content. `strings mors.db` does not contain the fingerprint canary string. No plaintext schema strings ('CREATE TABLE', 'sqlite_master') found. No WAL/SHM journal files present. Database is encrypted at rest."
+    },
+    {
+      "id": "VAL-SEC-002",
+      "status": "pass",
+      "evidence": "After init, re-running `mors init --json` returns {\"status\":\"already_initialized\"} with same fingerprint, confirming store reopens with persisted identity/key material. Gated commands pass init gating on subsequent runs (identity.json and identity.key intact, sentinel present). Note: full message read-back test not possible until local-cli-flows milestone implements send/inbox/read."
+    },
+    {
+      "id": "VAL-SEC-003",
+      "status": "pass",
+      "evidence": "Store-level testing: openEncryptedDb with wrong 32-byte key throws 'Failed to decrypt database: wrong encryption key or corrupted database. Verify that the correct key file is being used.' openEncryptedDb with empty key throws 'Invalid encryption key: expected 32-byte Buffer, got 0-byte.' At CLI level, wrong/missing db.key does not expose data (gated commands fail). 32 security unit tests all pass covering wrong key, missing key, corrupt key, wrong-size key scenarios. Note: CLI-level wrong-key error message is 'not yet implemented' for inbox because the command doesn't open the DB yet — store-level tests confirm fail-closed behavior."
+    },
+    {
+      "id": "VAL-SEC-004",
+      "status": "pass",
+      "evidence": "After corrupting db.key with random bytes, only original mors.db remains (1 file). After removing db.key entirely, still only original mors.db (1 file). No plaintext fallback DB created in either scenario. Unit tests confirm no fallback path exists at store level."
+    },
+    {
+      "id": "VAL-SEC-005",
+      "status": "pass",
+      "evidence": "identity.key permissions: 600 (owner-only). db.key permissions: 600 (owner-only). Private key hex bytes not found in identity.json, stdout, or stderr. DB encryption key hex not found in stdout. identity.json publicKey field is redacted in output. Minor note: config directory is 755 instead of intended 700 due to macOS umask with mkdirSync recursive — this does not affect key artifact security since the key files themselves are 600."
+    }
+  ],
+  "frictions": [
+    {
+      "description": "Config directory permissions are 755 instead of intended 700 due to Node.js mkdirSync with recursive:true on macOS respecting umask. Key files are correctly 600.",
+      "severity": "low"
+    },
+    {
+      "description": "VAL-SEC-002 and VAL-SEC-003 cannot be fully tested at CLI user surface level because send/inbox/read commands are not implemented yet (local-cli-flows milestone). Store-level and unit test evidence confirms behavior.",
+      "severity": "low"
+    }
+  ],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js (direct CLI)", "node -e (store-level)", "shell (bash)", "stat", "xxd", "strings", "vitest"]
+}
