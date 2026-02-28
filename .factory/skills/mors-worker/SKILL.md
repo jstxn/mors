@@ -26,10 +26,11 @@ Use for `mors` CLI, schema, storage, security, and integration-test features in 
    - Thread linkage uses `thread_id` + `in_reply_to`.
 4. For CLI behavior, provide deterministic outputs and non-zero exits for failures; include `--json` where required for validation evidence.
 5. Run feature-level verification first (targeted tests/commands), then full validators from services manifest.
-6. Perform manual CLI sanity checks for touched command paths and capture observed behavior.
+6. Perform manual CLI sanity checks for touched command paths and capture observed behavior (use patterns in `.factory/library/user-testing.md`, including `MORS_CONFIG_DIR`-scoped runs).
 7. Ensure no long-running orphan processes remain (especially `mors watch` test runs).
 8. Set handoff `skillFeedback.followedProcedure` accurately: if strict red/green order was not followed (outside scaffold exception), set it to false and list deviations.
-9. Commit only feature-related project files; return thorough handoff with concrete evidence.
+9. If adding catch/recovery/error-handling branches, add tests that explicitly exercise those branches (fault injection/mocking/multi-handle overlap as needed), not only nearby happy paths.
+10. Commit only feature-related project files; return thorough handoff with concrete evidence.
 
 ## Example Handoff
 
