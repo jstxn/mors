@@ -1,0 +1,56 @@
+{
+  "milestone": "realtime-watch",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-STREAM-001",
+    "VAL-STREAM-002",
+    "VAL-STREAM-003",
+    "VAL-STREAM-004",
+    "VAL-STREAM-005",
+    "VAL-STREAM-006",
+    "VAL-STREAM-007",
+    "VAL-CROSS-002",
+    "VAL-CROSS-003",
+    "VAL-CROSS-004"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added 'Flow Validator Guidance: SSE Realtime Streaming (realtime-watch)' section with test file mappings, curl validation patterns, and isolation rules for stream assertions",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "validationMethod": "inline",
+  "validationMethodReason": "Known infrastructure issue: user-testing-flow-validator subagent sessions can fail with environment permission errors (documented in AGENTS.md). Ran flow checks inline as documented workaround.",
+  "evidence": {
+    "vitest": {
+      "testFiles": [
+        "test/stream/connect-shape.test.ts (12 tests pass)",
+        "test/stream/resume-dedupe.test.ts (18 tests pass)",
+        "test/stream/auth-fallback.test.ts (12 tests pass)",
+        "test/stream/cli-watch-remote.test.ts (11 tests pass)",
+        "test/cross/async-stream-consistency.test.ts (20 tests pass)"
+      ],
+      "totalTests": 73,
+      "totalPassed": 73,
+      "totalFailed": 0
+    },
+    "curlValidation": {
+      "healthEndpoint": "GET /health → 200 with {\"status\":\"ok\"}",
+      "sseNoAuth": "GET /events (no auth) → 401 with {\"error\":\"unauthorized\"}",
+      "sseInvalidAuth": "GET /events (Bearer invalid-token-xyz) → 401",
+      "apiNoAuth": "GET /messages (no auth) → 401",
+      "apiInvalidAuth": "GET /messages (Bearer bad-token) → 401"
+    }
+  }
+}

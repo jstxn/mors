@@ -1,0 +1,53 @@
+{
+  "group": "stream-assertions",
+  "milestone": "realtime-watch",
+  "assertions": [
+    "VAL-STREAM-001",
+    "VAL-STREAM-002",
+    "VAL-STREAM-003",
+    "VAL-STREAM-004",
+    "VAL-STREAM-005",
+    "VAL-STREAM-006",
+    "VAL-STREAM-007"
+  ],
+  "results": [
+    {
+      "id": "VAL-STREAM-001",
+      "status": "pass",
+      "evidence": "test/stream/connect-shape.test.ts: 12 tests pass — validates authenticated SSE connection succeeds with correct headers (text/event-stream, Cache-Control: no-cache), returns 200 with keep-alive. test/stream/cli-watch-remote.test.ts: validates connectRemoteWatch establishes authenticated SSE connection with auth token. curl against running relay confirms /events returns 401 without auth (auth guard enforced)."
+    },
+    {
+      "id": "VAL-STREAM-002",
+      "status": "pass",
+      "evidence": "test/stream/connect-shape.test.ts: validates SSE events include event type, event ID (monotonic cursor), message ID, thread_id, and in_reply_to fields. Tests verify 'message_created', 'message_read', 'message_acked' event types with complete metadata including sender, recipient, timestamp."
+    },
+    {
+      "id": "VAL-STREAM-003",
+      "status": "pass",
+      "evidence": "test/stream/resume-dedupe.test.ts: 18 tests pass — validates reconnect with Last-Event-ID header resumes from cursor position with no missing logical events. Tests verify gap detection, correct event replay after cursor, and reconnect with unknown Last-Event-ID falls back safely. test/stream/cli-watch-remote.test.ts: validates remote watch reconnect uses cursor/Last-Event-ID path."
+    },
+    {
+      "id": "VAL-STREAM-004",
+      "status": "pass",
+      "evidence": "test/stream/resume-dedupe.test.ts: validates watch startup does not emit historical create events for pre-existing messages on fresh connect. Tests 'does not emit historical create events for pre-existing messages on fresh connect' and 'concurrent initial connections do not receive historical create events' both pass."
+    },
+    {
+      "id": "VAL-STREAM-005",
+      "status": "pass",
+      "evidence": "test/stream/resume-dedupe.test.ts: validates at-least-once stream deliveries are deduped to exactly-once user-visible state transitions. Tests verify duplicate event replay produces stable state without duplicate transitions."
+    },
+    {
+      "id": "VAL-STREAM-006",
+      "status": "pass",
+      "evidence": "test/stream/auth-fallback.test.ts: 12 tests pass — validates mid-stream auth expiry handling. Uses controllable token verifier to expire token during active SSE connection; server sends auth_expired event and closes connection. Tests verify client receives auth error event and can recover after re-auth."
+    },
+    {
+      "id": "VAL-STREAM-007",
+      "status": "pass",
+      "evidence": "test/stream/auth-fallback.test.ts + test/stream/cli-watch-remote.test.ts: validate fallback mode when SSE is unavailable. When SSE cannot connect, CLI enters documented fallback mode with explicit degraded realtime behavior indication. Tests verify fallback activation, user-visible degraded state messaging, and continued operation."
+    }
+  ],
+  "toolsUsed": ["vitest", "curl"],
+  "frictions": [],
+  "blockers": []
+}

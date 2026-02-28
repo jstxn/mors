@@ -112,3 +112,38 @@ Since the relay uses in-memory storage and GitHub OAuth is placeholder-first (no
 - vitest output showing test names and pass/fail status
 - curl transcripts for relay API auth guard checks
 - For E2EE: canary plaintext absence verification in relay store/log artifacts
+
+---
+
+## Flow Validator Guidance: SSE Realtime Streaming (realtime-watch)
+
+**Testing tool:** vitest test suite + `curl` against relay on port 3100.
+
+**Test approach:**
+SSE streaming assertions are best validated through the existing integration test suite which uses real relay servers with in-memory stores, stub auth, and raw HTTP SSE connections. The tests exercise:
+- Authenticated SSE connection setup with proper headers (text/event-stream, Cache-Control: no-cache)
+- Event shape validation (event type, event ID, message ID, thread ID, in_reply_to)
+- Last-Event-ID cursor resume with gap detection
+- Startup determinism (no historical create spam)
+- Duplicate replay deduplication to exactly-once transitions
+- Mid-stream auth expiry with auth_expired event and clean disconnect
+- Fallback mode when SSE is unavailable (explicit degraded indication)
+
+**Test files covering stream assertions:**
+- `test/stream/connect-shape.test.ts` → VAL-STREAM-001, VAL-STREAM-002
+- `test/stream/resume-dedupe.test.ts` → VAL-STREAM-003, VAL-STREAM-004, VAL-STREAM-005
+- `test/stream/auth-fallback.test.ts` → VAL-STREAM-006, VAL-STREAM-007
+- `test/stream/cli-watch-remote.test.ts` → VAL-STREAM-001, VAL-STREAM-003, VAL-STREAM-007 (CLI integration)
+- `test/cross/async-stream-consistency.test.ts` → VAL-CROSS-002, VAL-CROSS-003, VAL-CROSS-004
+
+**curl validation against running relay:**
+- `GET /health` (public, expect 200) validates relay is up
+- `GET /events` without auth header → 401 with `{"error":"unauthorized"}` confirms auth guard on SSE
+- `GET /events` with invalid Bearer token → 401 confirms token validation
+- `GET /messages` without/with invalid auth → 401 confirms consistent auth across async and realtime surfaces (VAL-CROSS-002)
+
+**Isolation rules:**
+- Tests use ephemeral OS-assigned ports (port 0) for relay servers
+- Each test creates its own RelayMessageStore and token verifier
+- Stub tokens: token-alice (userId=1001), token-bob (userId=1002)
+- No shared state between test files

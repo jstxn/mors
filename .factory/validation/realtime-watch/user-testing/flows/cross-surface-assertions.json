@@ -1,0 +1,29 @@
+{
+  "group": "cross-surface-assertions",
+  "milestone": "realtime-watch",
+  "assertions": [
+    "VAL-CROSS-002",
+    "VAL-CROSS-003",
+    "VAL-CROSS-004"
+  ],
+  "results": [
+    {
+      "id": "VAL-CROSS-002",
+      "status": "pass",
+      "evidence": "test/cross/async-stream-consistency.test.ts: 20 tests pass — validates auth enforcement is consistent across async and realtime surfaces. Invalid auth fails both relay APIs (401 on /messages, /inbox) and SSE endpoint (401 on /events); valid auth succeeds both. curl validation against running relay confirmed 401 for /events and /messages with missing/invalid auth headers."
+    },
+    {
+      "id": "VAL-CROSS-003",
+      "status": "pass",
+      "evidence": "test/cross/async-stream-consistency.test.ts: validates retry/idempotency converges consistently across relay and stream. Tests 'multiple deduped sends + ack retries produce clean convergent state' confirms retries/replays converge to one logical outcome and both stream and inbox agree on final state."
+    },
+    {
+      "id": "VAL-CROSS-004",
+      "status": "pass",
+      "evidence": "test/cross/async-stream-consistency.test.ts: validates stream reconnect and inbox pull converge after interruption. After SSE disconnection, resumed stream with Last-Event-ID and inbox query converge to same complete state with no missing events."
+    }
+  ],
+  "toolsUsed": ["vitest", "curl"],
+  "frictions": [],
+  "blockers": []
+}
