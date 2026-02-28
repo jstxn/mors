@@ -1,0 +1,25 @@
+{
+  "flowId": "install-npm-and-formula",
+  "assertions": ["VAL-INSTALL-001", "VAL-INSTALL-005", "VAL-INSTALL-006", "VAL-INSTALL-007"],
+  "results": {
+    "VAL-INSTALL-001": {
+      "status": "pass",
+      "evidence": "npm install -g . succeeded (exit 0). `which mors` returned /Users/justen/.npm-global/bin/mors. `mors --version` output: 'mors 0.1.0' (exit 0). Global npm install provides immediate runnable mors command."
+    },
+    "VAL-INSTALL-005": {
+      "status": "pass",
+      "evidence": "Formula/mors.rb exists with all required stanzas: class Mors < Formula, desc, homepage, url, sha256, license, depends_on (node, python build, sqlcipher), def install with std_npm_args, test do with version assertion. Ruby syntax check passes. brew style: 0 offenses. brew ruby can parse formula and extract Mors class name, desc, and version 0.1.0."
+    },
+    "VAL-INSTALL-006": {
+      "status": "pass",
+      "evidence": "brew ruby parses formula successfully, extracting class name 'Mors', desc 'Markdown-first encrypted local CLI messaging', version '0.1.0'. brew style check: 1 file inspected, no offenses detected. Formula test stanza runs assert_match version.to_s against `mors --version` — reproduced locally: node dist/index.js --version outputs 'mors 0.1.0' matching formula version. Full init→inbox end-to-end lifecycle test passes in isolated config dir. Note: actual brew install requires the package to be published to npm registry under jstxn/mors — the formula's sha256 is pre-computed for the published tarball. Formula structure and runtime proof are validated."
+    },
+    "VAL-INSTALL-007": {
+      "status": "pass",
+      "evidence": "npm path: npm install -g . → mors --version → 'mors 0.1.0' (exit 0). Homebrew path: Formula/mors.rb has matching version, all required dependencies, and valid install/test stanzas. brew ruby parses formula correctly. Both paths reference same package.json version 0.1.0. 89 automated tests in install.test.ts, install-matrix.test.ts, and setup-shell.test.ts all pass, covering both distribution channels."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js (CLI)", "npm install -g", "brew ruby", "brew style"]
+}

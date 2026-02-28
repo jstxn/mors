@@ -1,0 +1,21 @@
+{
+  "flowId": "setup-shell-flows",
+  "assertions": ["VAL-INSTALL-002", "VAL-INSTALL-003", "VAL-INSTALL-004"],
+  "results": {
+    "VAL-INSTALL-002": {
+      "status": "pass",
+      "evidence": "Running `mors setup-shell --decline` with isolated HOME shows preview text: 'mors setup-shell will add the following to <home>/.zshrc: export PATH=\"/usr/local/bin:$PATH\" # mors' followed by 'This adds the mors binary directory to your PATH'. The command previews the edit BEFORE requiring confirmation. JSON output with --decline shows status:declined with shell, rcFile, binDir metadata. Exit code 0."
+    },
+    "VAL-INSTALL-003": {
+      "status": "pass",
+      "evidence": "Created .zshrc with known content, computed MD5 before. Ran `mors setup-shell --decline`. After decline: .zshrc MD5 identical to before. JSON output confirms status:declined, applied:false. Terminal output says 'No changes applied.' Exit code 0."
+    },
+    "VAL-INSTALL-004": {
+      "status": "pass",
+      "evidence": "First confirm run: JSON status:applied, applied:true. .zshrc updated with single line 'export PATH=\"<bindir>:$PATH\" # mors'. Second confirm run: JSON status:already_configured with message 'PATH is already configured for mors. No changes needed.' .zshrc content identical after second run. grep -c '# mors' shows exactly 1 line — idempotent. Exit code 0 for both runs."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js setup-shell (CLI)", "md5 (file comparison)"]
+}

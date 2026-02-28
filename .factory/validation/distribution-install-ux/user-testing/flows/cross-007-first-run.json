@@ -1,0 +1,13 @@
+{
+  "flowId": "cross-007-first-run",
+  "assertions": ["VAL-CROSS-007"],
+  "results": {
+    "VAL-CROSS-007": {
+      "status": "pass",
+      "evidence": "End-to-end first-run flow from global npm install: (1) npm install -g . → exit 0, (2) mors --version → 'mors 0.1.0' exit 0, (3) setup-shell --decline --json → status:declined, RC file unchanged, (4) mors init --json → status:initialized with fingerprint, exit 0, (5) mors inbox --json → status:ok count:0, exit 0, (6) mors send --to agent-test --body 'Integration test' --json → status:sent with message ID, exit 0. All commands succeed in sequence. Separate confirm path test: setup-shell --confirm applies only approved edit, then init and inbox still work. 37 automated tests in install-matrix.test.ts cover both decline and confirm first-run flows."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["mors (global npm install)", "node dist/index.js (CLI)"]
+}
