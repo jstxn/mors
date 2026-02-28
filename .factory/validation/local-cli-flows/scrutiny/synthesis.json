@@ -1,0 +1,72 @@
+{
+  "milestone": "local-cli-flows",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "npm run test -- --maxConcurrency=7",
+      "exitCode": 0,
+      "detail": "9 test files, 343 tests passed in 11.88s"
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "npm run typecheck",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "npm run lint",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 5,
+    "passed": 3,
+    "failed": 2,
+    "failedFeatures": [
+      "cli-reply-and-thread-navigation",
+      "cli-watch-stream-reliability"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "cli-reply-and-thread-navigation",
+      "severity": "blocking",
+      "description": "replyMessage dedupe replay returns non-reply records as replies when a shared dedupe key was previously used by a root send, breaking causal linkage metadata (VAL-THREAD-001). In src/message.ts around line 498, replay by dedupe_key does not verify the existing row is a compatible reply, then fabricates in_reply_to via existing.in_reply_to ?? parentMessageId. Fix: validate that the replayed row's thread_id and in_reply_to match the intended reply context, or reject the replay with an error if the dedupe key was used for a different message type."
+    },
+    {
+      "featureId": "cli-watch-stream-reliability",
+      "severity": "blocking",
+      "description": "Watch emits historical message_created/reply_created events for pre-existing messages when those messages are updated (e.g., acked) after subscription starts, violating deterministic startup semantics (VAL-WATCH-003). In src/watch.ts around line 230, classifyEvents always emits a create event the first time a row is seen, regardless of whether it existed before watch start. Fix: record or query message creation timestamps at subscription start and suppress create events for messages that existed before the subscription began."
+    }
+  ],
+  "nonBlockingIssues": [
+    {
+      "featureId": "cli-send-inbox-read-ack-flows",
+      "severity": "non_blocking",
+      "description": "Dedupe replay in src/message.ts:161 uses check-then-insert without handling unique-constraint conflicts on concurrent insert, which could cause SQLITE_CONSTRAINT errors instead of returning the canonical existing message under contention."
+    },
+    {
+      "featureId": "cli-reply-and-thread-navigation",
+      "severity": "non_blocking",
+      "description": "Concurrent reply tests in test/thread.test.ts:273 execute replies sequentially rather than with parallel/process-level contention, leaving a coverage gap for true concurrency behavior (VAL-THREAD-003)."
+    },
+    {
+      "featureId": "integration-cross-flow-reliability-suite",
+      "severity": "non_blocking",
+      "description": "Integration concurrency tests in test/integration.test.ts:1057 are sequential on a single DB handle rather than exercising true overlapping execution, so they validate multi-operation consistency but not race conditions."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add guidance: 'Workers must accurately report skillFeedback.followedProcedure in handoffs. If strict red/green TDD was not followed (e.g., implementation written before first failing test run), set followedProcedure to false and document deviations. Inaccurate compliance signals undermine review trust.'",
+      "evidence": "Three independent features (cli-send-inbox-read-ack-flows session ea440dfb, cli-watch-stream-reliability session 008ae1ec, integration-cross-flow-reliability-suite session 0c458585) all show transcript evidence of implementation-before-test ordering while handoff reports followedProcedure=true. This is a systemic pattern across multiple workers in this milestone.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

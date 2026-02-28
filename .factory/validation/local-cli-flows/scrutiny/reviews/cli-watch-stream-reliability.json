@@ -1,0 +1,28 @@
+{
+  "featureId": "cli-watch-stream-reliability",
+  "reviewedAt": "2026-02-28T05:40:41Z",
+  "commitId": "74e94f2c12a0a1467f952ffea828297837cd818f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The watch command implementation is substantial and well-tested, but it violates deterministic startup semantics for lifecycle emissions when pre-existing messages transition after subscription begins.",
+    "issues": [
+      {
+        "file": "src/watch.ts",
+        "line": 230,
+        "severity": "blocking",
+        "description": "`classifyEvents` always emits a create event (`message_created`/`reply_created`) the first time a row is seen, even when that message existed before watch start and was only updated later (e.g., ack). Because polling is based on `updated_at > highWaterMark` (line 163), acking a pre-existing delivered message after startup emits both a historical create event and `message_acked`, violating VAL-WATCH-003 ('only post-subscription events') and producing incorrect lifecycle output."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker transcript does not follow the mors-worker skill's strict TDD sequence ('add failing tests first'); implementation was created before tests, and skillFeedback still marked followedProcedure=true.",
+      "evidence": "Transcript skeleton for session 008ae1ec-2ee8-4344-960e-aa02869a2d5f shows `Tool: Create /src/watch.ts` followed by `Tool: Create /test/watch.test.ts`, with the first targeted test run occurring only afterward. Skill file .factory/skills/mors-worker/SKILL.md requires strict red-green TDD."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: watch startup determinism is broken for pre-existing messages that transition after watch starts, causing historical create events to be emitted during runtime transitions."
+}

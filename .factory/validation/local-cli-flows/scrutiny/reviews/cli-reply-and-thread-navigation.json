@@ -1,0 +1,28 @@
+{
+  "featureId": "cli-reply-and-thread-navigation",
+  "reviewedAt": "2026-02-28T05:42:05Z",
+  "commitId": "373154905d9da5d8853b82b12499c98a44d37747",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds reply/thread functionality with broad test coverage, but a dedupe replay edge case breaks causal linkage guarantees by returning impossible reply metadata.",
+    "issues": [
+      {
+        "file": "src/message.ts",
+        "line": 498,
+        "severity": "blocking",
+        "description": "`replyMessage` replays any existing row by `dedupe_key` without ensuring it is a compatible reply, then fabricates `in_reply_to` via `existing.in_reply_to ?? parentMessageId`. If the dedupe key was previously used by a root `send`, reply returns that root message ID while reporting it as a reply (including self-referential linkage in practice), violating VAL-THREAD-001 causal linkage correctness. Repro: send with `--dedupe-key dup_shared`, then reply to that message with the same dedupe key; returned JSON shows the original message ID with `dedupe_replay:true` and invalid reply linkage semantics."
+      },
+      {
+        "file": "test/thread.test.ts",
+        "line": 273,
+        "severity": "non_blocking",
+        "description": "The suite section named 'concurrent replies' executes replies sequentially (no parallel/process-level contention), so it does not meaningfully validate concurrency behavior under race conditions. This leaves a coverage gap for the explicit concurrency requirement in VAL-THREAD-003."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking dedupe replay bug in `replyMessage` that can return non-reply records as replies and break causal linkage metadata."
+}

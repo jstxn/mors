@@ -1,0 +1,28 @@
+{
+  "featureId": "cli-send-inbox-read-ack-flows",
+  "reviewedAt": "2026-02-28T05:41:02Z",
+  "commitId": "7c6ae2a685f502f325eef4dd5dd73239415a8112",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation covers the requested send/inbox/read/ack behavior, JSON output, read-vs-ack separation, lifecycle visibility, clear invalid-target errors, and sequential idempotency for read/ack. One non-blocking reliability gap remains in dedupe replay handling under concurrent sends.",
+    "issues": [
+      {
+        "file": "src/message.ts",
+        "line": 161,
+        "severity": "non_blocking",
+        "description": "Dedupe replay uses a check-then-insert pattern without handling unique-constraint conflicts on insert. If two processes send with the same dedupe key concurrently, one can fail with SQLITE_CONSTRAINT instead of returning the canonical existing message, which weakens deterministic replay behavior under contention."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker skill requires strict red/green TDD, but the transcript shows tests were created and implementation code was written before the first targeted test execution; handoff skillFeedback still reports followedProcedure=true. The skill/procedure compliance signal is therefore unreliable for this run.",
+      "evidence": "worker-transcripts.jsonl (session ea440dfb-78b0-4e8b-a0ef-eaa92bad0a7a), skeleton lines 222-260: created test/message.test.ts (line 229), then created src/message.ts (line 246), then first ran npx vitest run test/message.test.ts at line 260; handoff.skillFeedback.followedProcedure is true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit 7c6ae2a685f502f325eef4dd5dd73239415a8112 for cli-send-inbox-read-ack-flows. The feature meets scope and expected behavior overall, with one non-blocking concurrent dedupe edge-case and one shared-state observation about skill procedure tracking fidelity."
+}
