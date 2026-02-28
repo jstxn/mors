@@ -26,10 +26,19 @@ import { RelayMessageStore } from './message-store.js';
  * @returns RelayServerOptions with tokenVerifier, participantStore, and messageStore.
  */
 export function createProductionServerOptions(): RelayServerOptions {
-  // Wire production auth dependencies — fail-closed by default.
+  // Wire production auth dependencies — fail-closed by design.
   // Token verification uses HMAC-signed native session tokens.
-  // The signing key is loaded from environment or defaults to a generated key.
-  const signingKey = process.env['MORS_RELAY_SIGNING_KEY'] ?? '';
+  // The signing key MUST be explicitly configured — an empty/missing key
+  // would allow trivial token forgery, so we fail at startup instead.
+  const signingKey = (process.env['MORS_RELAY_SIGNING_KEY'] ?? '').trim();
+  if (!signingKey) {
+    throw new Error(
+      'MORS_RELAY_SIGNING_KEY is not set or is empty. ' +
+        'The relay cannot start without a signing key — an empty key would allow token forgery. ' +
+        'Set MORS_RELAY_SIGNING_KEY to a secure random value. ' +
+        "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+    );
+  }
   const tokenVerifier = createNativeTokenVerifier(signingKey);
 
   // Wire the in-memory message store for async messaging routes.

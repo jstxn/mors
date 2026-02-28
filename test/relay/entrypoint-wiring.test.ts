@@ -10,13 +10,14 @@
  * - ParticipantStore uses the message store for authorization
  */
 
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, afterAll, beforeAll } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig } from '../../src/relay/config.js';
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 import { createProductionServerOptions } from '../../src/relay/index.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
 import { getTestPort } from '../helpers/test-port.js';
+import { generateSigningKey } from '../../src/auth/native.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
@@ -69,6 +70,21 @@ async function relayFetch(
 describe('relay entrypoint wiring', () => {
   let server: RelayServer | null = null;
   let port: number;
+  let originalSigningKey: string | undefined;
+
+  beforeAll(() => {
+    originalSigningKey = process.env['MORS_RELAY_SIGNING_KEY'];
+    // createProductionServerOptions requires a non-empty signing key (fail-closed)
+    process.env['MORS_RELAY_SIGNING_KEY'] = generateSigningKey();
+  });
+
+  afterAll(() => {
+    if (originalSigningKey === undefined) {
+      delete process.env['MORS_RELAY_SIGNING_KEY'];
+    } else {
+      process.env['MORS_RELAY_SIGNING_KEY'] = originalSigningKey;
+    }
+  });
 
   beforeEach(() => {
     port = getTestPort();

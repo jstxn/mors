@@ -123,13 +123,19 @@ export function parseConversationRoute(url) {
 export function createNativeTokenVerifier(signingKey) {
     // Lazy import to avoid circular dependency at module level
     let _verifySessionToken = null;
+    // Fail-closed: an empty or whitespace-only signing key must never verify tokens.
+    // This prevents token forgery by ensuring HMAC verification always uses a real key.
+    const effectiveKey = signingKey.trim();
     return async (token) => {
+        // Reject all tokens when the signing key is empty — fail-closed guard.
+        if (!effectiveKey)
+            return null;
         try {
             if (!_verifySessionToken) {
                 const mod = await import('../auth/native.js');
                 _verifySessionToken = mod.verifySessionToken;
             }
-            const payload = _verifySessionToken(token, signingKey);
+            const payload = _verifySessionToken(token, effectiveKey);
             if (!payload)
                 return null;
             return {
