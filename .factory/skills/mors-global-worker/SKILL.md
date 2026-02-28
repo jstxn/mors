@@ -28,9 +28,9 @@ Use for features in milestones `relay-foundation`, `global-async-messaging`, `re
 5. For SSE features, verify reconnect/cursor behavior and startup determinism with explicit event traces.
 6. For E2EE features, verify key-exchange preconditions, decrypt success path, stale/revoked failure paths, and tamper detection.
 7. Run targeted checks first, then full validators from `.factory/services.yaml` (`lint`, `typecheck`, `test`).
-8. Perform manual CLI/API/SSE sanity checks when the feature changes a user-facing surface; for internal-only primitives, document why manual checks are not applicable.
+8. Perform manual CLI/API/SSE sanity checks when the feature changes a user-facing surface; for internal-only primitives, explicitly document why manual checks are not applicable in the handoff.
 9. Ensure no long-running orphan processes remain (especially relay dev server and watch streams).
-10. Report handoff with concrete commands, observations, tests added, and discovered issues.
+10. Report handoff with concrete commands, observations, tests added, and discovered issues; if manual checks are skipped without rationale, set `skillFeedback.followedProcedure=false`.
 
 ## Example Handoff
 
