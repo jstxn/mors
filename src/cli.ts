@@ -53,7 +53,7 @@ import {
 } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
 import { randomUUID } from 'node:crypto';
-import { execSync as execSyncImport } from 'node:child_process';
+import { execFileSync as execFileSyncImport } from 'node:child_process';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 import { RelayClient, RelayClientError, type RelayMessageResponse } from './relay/client.js';
 import { connectRemoteWatch, type RemoteWatchEvent } from './remote-watch.js';
@@ -2122,8 +2122,9 @@ Prerequisites:
   }
 
   try {
-    const deployOutput = execSyncImport(
-      `${deployConfig.flyctlPath} deploy --app ${deployConfig.appName} --region ${deployConfig.primaryRegion}`,
+    const deployOutput = execFileSyncImport(
+      deployConfig.flyctlPath,
+      ['deploy', '--app', deployConfig.appName, '--region', deployConfig.primaryRegion],
       {
         cwd: process.cwd(),
         encoding: 'utf8',

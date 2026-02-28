@@ -9,7 +9,7 @@
  *
  * Validates VAL-DEPLOY-001, VAL-DEPLOY-002, VAL-DEPLOY-003.
  */
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 /** Secrets and token patterns that must never appear in deploy output. */
 const SECRET_ENV_KEYS = [
     'FLY_ACCESS_TOKEN',
@@ -122,14 +122,16 @@ function resolveFlyctl(env) {
         return override;
     }
     try {
-        const result = execSync('which flyctl', {
+        // Use argv-based execFileSync to avoid shell injection.
+        // flyctl --version is used to verify the binary exists and is executable;
+        // the PATH lookup is performed by execFileSync itself (no shell needed).
+        execFileSync('flyctl', ['--version'], {
             encoding: 'utf8',
             timeout: 5_000,
             env: env,
             stdio: ['pipe', 'pipe', 'pipe'],
         });
-        const path = result.trim();
-        return path || undefined;
+        return 'flyctl';
     }
     catch {
         return undefined;
@@ -142,7 +144,7 @@ function resolveFlyctl(env) {
  */
 function checkFlyctlAuth(flyctlPath) {
     try {
-        execSync(`${flyctlPath} auth whoami`, {
+        execFileSync(flyctlPath, ['auth', 'whoami'], {
             encoding: 'utf8',
             timeout: 10_000,
             stdio: ['pipe', 'pipe', 'pipe'],

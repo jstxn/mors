@@ -20,7 +20,7 @@ import { requestDeviceCode, pollForToken, fetchGitHubUser, validateAuthConfig, a
 import { requireAuth, verifyTokenLiveness, NotAuthenticatedError, TokenLivenessError, } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
 import { randomUUID } from 'node:crypto';
-import { execSync as execSyncImport } from 'node:child_process';
+import { execFileSync as execFileSyncImport } from 'node:child_process';
 import { RelayClient, RelayClientError } from './relay/client.js';
 import { connectRemoteWatch } from './remote-watch.js';
 import { runDeployPreflight, formatDeployIssues, formatDeployResultJson, redactSecrets, } from './deploy.js';
@@ -1869,7 +1869,7 @@ Prerequisites:
         console.log(`Deploying to Fly.io (app: ${deployConfig.appName}, region: ${deployConfig.primaryRegion})...`);
     }
     try {
-        const deployOutput = execSyncImport(`${deployConfig.flyctlPath} deploy --app ${deployConfig.appName} --region ${deployConfig.primaryRegion}`, {
+        const deployOutput = execFileSyncImport(deployConfig.flyctlPath, ['deploy', '--app', deployConfig.appName, '--region', deployConfig.primaryRegion], {
             cwd: process.cwd(),
             encoding: 'utf8',
             timeout: 300_000,
