@@ -28,6 +28,11 @@ import {
   send403,
   parseConversationRoute,
 } from './auth-middleware.js';
+import {
+  RelayMessageStore,
+  RelayMessageNotFoundError,
+  RelayUnauthorizedError,
+} from './message-store.js';
 
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
@@ -48,6 +53,11 @@ export interface RelayServerOptions {
   participantStore?: ParticipantStore;
   /** Optional callback invoked on successful conversation access (for testing/observability). */
   onConversationAccess?: (principal: AuthPrincipal) => void;
+  /**
+   * Message store for relay async messaging.
+   * When provided, enables /messages, /inbox, and /messages/:id routes.
+   */
+  messageStore?: RelayMessageStore;
 }
 
 /** Relay server handle with lifecycle methods. */
@@ -60,6 +70,60 @@ export interface RelayServer {
   readonly listening: boolean;
   /** The port the server is bound to (valid after start). */
   readonly port: number;
+}
+
+/**
+ * Read and parse JSON body from a request.
+ * Returns null if body is empty or cannot be parsed.
+ */
+async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (!raw.trim()) {
+        resolve(null);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          resolve(parsed as Record<string, unknown>);
+        } else {
+          resolve(null);
+        }
+      } catch {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/** Parse a message action route: /messages/:id, /messages/:id/read, /messages/:id/ack */
+interface MessageRoute {
+  messageId: string;
+  action: 'get' | 'read' | 'ack' | null;
+}
+
+function parseMessageRoute(url: string, method: string): MessageRoute | null {
+  // POST /messages (send) — handled separately
+  if (url === '/messages' && method === 'POST') return null;
+
+  // /messages/:id/read
+  const readMatch = url.match(/^\/messages\/([^/]+)\/read$/);
+  if (readMatch) return { messageId: readMatch[1], action: 'read' };
+
+  // /messages/:id/ack
+  const ackMatch = url.match(/^\/messages\/([^/]+)\/ack$/);
+  if (ackMatch) return { messageId: ackMatch[1], action: 'ack' };
+
+  // /messages/:id (get single message)
+  const getMatch = url.match(/^\/messages\/([^/]+)$/);
+  if (getMatch) return { messageId: getMatch[1], action: 'get' };
+
+  return null;
 }
 
 /**
@@ -92,6 +156,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
   const tokenVerifier = options?.tokenVerifier;
   const participantStore = options?.participantStore;
   const onConversationAccess = options?.onConversationAccess;
+  const messageStore = options?.messageStore;
   const startTime = Date.now();
 
   // Track active SSE connections for clean shutdown
@@ -163,6 +228,127 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       });
 
       return;
+    }
+
+    // ── Messaging routes (require messageStore) ─────────────────────
+
+    // Route: POST /messages (send a message)
+    if (url === '/messages' && method === 'POST' && messageStore) {
+      const body = await readJsonBody(req);
+      if (!body) {
+        sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+        return;
+      }
+
+      const recipientId = body['recipient_id'];
+      const messageBody = body['body'];
+      const subject = body['subject'];
+      const inReplyTo = body['in_reply_to'];
+
+      if (typeof recipientId !== 'number') {
+        sendJson(res, 400, {
+          error: 'validation_error',
+          detail: 'recipient_id is required and must be a number.',
+        });
+        return;
+      }
+      if (typeof messageBody !== 'string' || messageBody.trim().length === 0) {
+        sendJson(res, 400, {
+          error: 'validation_error',
+          detail: 'body is required and must be a non-empty string.',
+        });
+        return;
+      }
+
+      const message = messageStore.send(principal.githubUserId, principal.githubLogin, {
+        recipientId,
+        body: messageBody,
+        subject: typeof subject === 'string' ? subject : undefined,
+        inReplyTo: typeof inReplyTo === 'string' ? inReplyTo : undefined,
+      });
+
+      sendJson(res, 201, message);
+      return;
+    }
+
+    // Route: GET /inbox (list inbox for authenticated user)
+    if ((url === '/inbox' || url.startsWith('/inbox?')) && method === 'GET' && messageStore) {
+      const urlObj = new URL(url, `http://localhost`);
+      const unreadOnly = urlObj.searchParams.get('unread') === 'true';
+
+      const messages = messageStore.inbox(principal.githubUserId, { unreadOnly });
+      sendJson(res, 200, { count: messages.length, messages });
+      return;
+    }
+
+    // Routes: /messages/:id, /messages/:id/read, /messages/:id/ack
+    if (messageStore) {
+      const msgRoute = parseMessageRoute(url, method);
+      if (msgRoute) {
+        const { messageId, action } = msgRoute;
+
+        if (action === 'read') {
+          if (method !== 'POST') {
+            sendJson(res, 405, { error: 'method_not_allowed', allowed: ['POST'] });
+            return;
+          }
+          try {
+            const result = messageStore.read(messageId, principal.githubUserId);
+            sendJson(res, 200, { message: result.message, first_read: result.firstRead });
+          } catch (err: unknown) {
+            if (err instanceof RelayMessageNotFoundError) {
+              sendJson(res, 404, { error: 'not_found', detail: err.message });
+            } else if (err instanceof RelayUnauthorizedError) {
+              send403(res, err.message);
+            } else {
+              throw err;
+            }
+          }
+          return;
+        }
+
+        if (action === 'ack') {
+          if (method !== 'POST') {
+            sendJson(res, 405, { error: 'method_not_allowed', allowed: ['POST'] });
+            return;
+          }
+          try {
+            const result = messageStore.ack(messageId, principal.githubUserId);
+            sendJson(res, 200, { message: result.message, first_ack: result.firstAck });
+          } catch (err: unknown) {
+            if (err instanceof RelayMessageNotFoundError) {
+              sendJson(res, 404, { error: 'not_found', detail: err.message });
+            } else if (err instanceof RelayUnauthorizedError) {
+              send403(res, err.message);
+            } else {
+              throw err;
+            }
+          }
+          return;
+        }
+
+        if (action === 'get') {
+          if (method !== 'GET') {
+            sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
+            return;
+          }
+
+          const message = messageStore.get(messageId);
+          if (!message) {
+            sendJson(res, 404, { error: 'not_found', detail: `Message not found: ${messageId}` });
+            return;
+          }
+
+          // Authorization: only sender or recipient can view
+          if (!messageStore.isMessageParticipant(messageId, principal.githubUserId)) {
+            send403(res, 'Not a participant of this conversation. Access denied.');
+            return;
+          }
+
+          sendJson(res, 200, { message });
+          return;
+        }
+      }
     }
 
     // Route: /conversations/:conversationId/... (auth + participant required)

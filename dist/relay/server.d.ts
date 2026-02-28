@@ -17,6 +17,7 @@
  */
 import type { RelayConfig } from './config.js';
 import { type TokenVerifier, type ParticipantStore, type AuthPrincipal } from './auth-middleware.js';
+import { RelayMessageStore } from './message-store.js';
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
 /** Options for creating the relay server. */
@@ -35,6 +36,11 @@ export interface RelayServerOptions {
     participantStore?: ParticipantStore;
     /** Optional callback invoked on successful conversation access (for testing/observability). */
     onConversationAccess?: (principal: AuthPrincipal) => void;
+    /**
+     * Message store for relay async messaging.
+     * When provided, enables /messages, /inbox, and /messages/:id routes.
+     */
+    messageStore?: RelayMessageStore;
 }
 /** Relay server handle with lifecycle methods. */
 export interface RelayServer {
