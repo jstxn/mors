@@ -265,6 +265,14 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         return;
       }
 
+      // Auto-register device identity on SSE connection (VAL-AUTH-009).
+      // SSE connections return early before the general auto-registration path,
+      // so we must register the device explicitly here to ensure watch-only
+      // clients are represented in device listings.
+      if (accountStore) {
+        accountStore.registerDevice(principal.accountId, principal.deviceId);
+      }
+
       // Extract Last-Event-ID from header for reconnect resume (VAL-STREAM-003)
       const lastEventId = req.headers['last-event-id'] as string | undefined;
 

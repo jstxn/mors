@@ -565,3 +565,117 @@ describe('SSE watch connection and event shape', () => {
     });
   });
 });
+
+// ── SSE device auto-registration ─────────────────────────────────────
+// Validates that SSE-authenticated connections also perform device
+// auto-registration so watch-only clients appear in device listings.
+
+import { AccountStore } from '../../src/relay/account-store.js';
+
+describe('SSE device auto-registration', () => {
+  let server: RelayServer;
+  let messageStore: RelayMessageStore;
+  let accountStore: AccountStore;
+
+  beforeEach(async () => {
+    messageStore = new RelayMessageStore();
+    accountStore = new AccountStore();
+    const opts: RelayServerOptions = {
+      logger: () => {},
+      tokenVerifier: stubTokenVerifier(),
+      messageStore,
+      accountStore,
+    };
+    server = createRelayServer(testConfig(), opts);
+    await server.start();
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('SSE connection auto-registers the device in account device listing', async () => {
+    // Before SSE connection, no devices registered for Alice
+    expect(accountStore.listDevices('acct_1001')).toHaveLength(0);
+
+    const sse = openSSE(server.port, 'token-alice');
+    try {
+      // Wait for connected event to confirm SSE session is established
+      await sse.waitForEvents(1);
+
+      // The SSE connection should have auto-registered Alice's device
+      const devices = accountStore.listDevices('acct_1001');
+      expect(devices).toHaveLength(1);
+      expect(devices[0].deviceId).toBe('device-alice');
+    } finally {
+      sse.close();
+    }
+  });
+
+  it('SSE-only device appears in GET /accounts/me/devices', async () => {
+    const sse = openSSE(server.port, 'token-alice');
+    try {
+      await sse.waitForEvents(1);
+
+      // Query the device listing API
+      const resp = await rawRequest(server.port, '/accounts/me/devices', {
+        headers: { Authorization: 'Bearer token-alice' },
+      });
+
+      expect(resp.statusCode).toBe(200);
+      const body = JSON.parse(resp.body) as Record<string, unknown>;
+      const devices = body['devices'] as Array<Record<string, unknown>>;
+
+      // Alice's SSE device should appear (plus the API request device — same device)
+      const deviceIds = devices.map((d) => d['device_id']);
+      expect(deviceIds).toContain('device-alice');
+    } finally {
+      sse.close();
+    }
+  });
+
+  it('watch-only device and API-only device both appear in device listing', async () => {
+    // Bob connects only via SSE (watch-only)
+    const sseBob = openSSE(server.port, 'token-bob');
+    try {
+      await sseBob.waitForEvents(1);
+
+      // Alice connects via API only (triggers auto-registration through normal route)
+      await rawRequest(server.port, '/accounts/me/devices', {
+        headers: { Authorization: 'Bearer token-alice' },
+      });
+
+      // Verify Alice's devices
+      const aliceDevices = accountStore.listDevices('acct_1001');
+      expect(aliceDevices).toHaveLength(1);
+      expect(aliceDevices[0].deviceId).toBe('device-alice');
+
+      // Verify Bob's devices (SSE-only)
+      const bobDevices = accountStore.listDevices('acct_1002');
+      expect(bobDevices).toHaveLength(1);
+      expect(bobDevices[0].deviceId).toBe('device-bob');
+    } finally {
+      sseBob.close();
+    }
+  });
+
+  it('SSE device registration is idempotent with subsequent API requests', async () => {
+    // Connect via SSE first
+    const sse = openSSE(server.port, 'token-alice');
+    try {
+      await sse.waitForEvents(1);
+
+      // Then make an API request (which also auto-registers)
+      await rawRequest(server.port, '/accounts/me/devices', {
+        headers: { Authorization: 'Bearer token-alice' },
+      });
+
+      // Device should only appear once (idempotent registration)
+      const devices = accountStore.listDevices('acct_1001');
+      expect(devices).toHaveLength(1);
+      expect(devices[0].deviceId).toBe('device-alice');
+    } finally {
+      sse.close();
+    }
+  });
+});
