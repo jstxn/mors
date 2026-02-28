@@ -1,0 +1,34 @@
+{
+  "featureId": "developer-launch-install-and-shell-ux-regression-guard",
+  "reviewedAt": "2026-02-28T17:21:44Z",
+  "commitId": "5938405",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Commit 5938405 adds a dedicated VAL-LAUNCH regression suite (`test/launch-path.test.ts`) with 24 tests covering install-path guardrails, setup-shell prompt/decline/confirm behaviors, and first-run CLI flow checks. Coverage is strong and aligned with the feature intent, with only minor evidence-fidelity gaps in how two assertions are simulated.",
+    "issues": [
+      {
+        "file": "test/launch-path.test.ts",
+        "line": 94,
+        "severity": "non_blocking",
+        "description": "The test name claims `global tsc` is absent, but the setup only strips `node_modules` path entries and does not assert global `tsc` absence (`which tsc`/equivalent). This can overstate evidence for VAL-LAUNCH-001 in environments where a global TypeScript binary exists."
+      },
+      {
+        "file": "test/launch-path.test.ts",
+        "line": 170,
+        "severity": "non_blocking",
+        "description": "VAL-LAUNCH-005 is described as an installed-command-path workflow, but the tests execute `node dist/index.js` directly rather than invoking the installed `mors` shim. Existing suite coverage mitigates risk, but this specific file does not itself prove PATH-resolved installed-command execution."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `mors-global-worker` skill requires strict red/green TDD, but regression-guard features that add tests for already-correct behavior may not produce a natural red phase. Procedure language may need a carve-out for pure validation-contract regression additions.",
+      "evidence": "Transcript skeleton for session 7dd7aff0-504d-4aec-93b4-e21012862ee0 shows test file creation followed by first execution passing (`npx vitest run test/launch-path.test.ts`), while handoff marks `skillFeedback.followedProcedure=true`."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review passed. The feature adds robust launch-path regression coverage mapped to VAL-LAUNCH-001..005, and no blocking defects were found. Two non-blocking evidence-fidelity gaps were noted, plus one skill-procedure observation for shared-state improvement."
+}

@@ -1,0 +1,39 @@
+{
+  "featureId": "fly-deploy-artifacts-and-safe-placeholder-failures",
+  "reviewedAt": "2026-02-28T17:22:07Z",
+  "commitId": "01f2d94",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature largely satisfies its intended behavior (Fly artifacts, preflight remediation paths, and deploy redaction checks), but it introduces a blocking shell-command injection risk by interpolating env-derived values directly into execSync command strings.",
+    "issues": [
+      {
+        "file": "src/cli.ts",
+        "line": 2126,
+        "severity": "blocking",
+        "description": "`mors deploy` builds a shell command string using `${deployConfig.flyctlPath}`, `${deployConfig.appName}`, and `${deployConfig.primaryRegion}` and executes it via `execSync`. These values are env-derived (including `FLY_APP_NAME` and `MORS_DEPLOY_FLYCTL_PATH`) and are not quoted/escaped, enabling shell injection and arbitrary local command execution when crafted values are present."
+      },
+      {
+        "file": "src/deploy.ts",
+        "line": 190,
+        "severity": "blocking",
+        "description": "Preflight auth check executes `execSync(`${flyctlPath} auth whoami`)` with an unvalidated `flyctlPath` that may come from `MORS_DEPLOY_FLYCTL_PATH`. Because this is passed as a shell string, metacharacters in the path can execute unintended commands during preflight."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker marked `skillFeedback.followedProcedure=true`, but the skill requires manual CLI/API sanity checks for user-facing surfaces (or explicit rationale when skipped). This deploy feature added a user-facing CLI command, yet the handoff contains only automated commands and no manual-check rationale.",
+      "evidence": "Skill procedure step 8 in `.factory/skills/mors-global-worker/SKILL.md` requires manual checks for user-facing changes. Handoff `2026-02-28T17-09-22-775Z__fly-deploy-artifacts-and-safe-placeholder-failures__0ed0b0ac-6086-4a51-80ca-139456945c7a.json` lists only `commandsRun` and sets `skillFeedback.followedProcedure=true`."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission shared guidance documents do not explicitly codify safe subprocess invocation for env-derived values (e.g., avoid shell string interpolation and prefer argument-vector APIs).",
+      "evidence": "AGENTS security constraints emphasize secret leakage prevention, but this feature introduced shell-string `execSync` command assembly at `src/cli.ts:2126` and `src/deploy.ts:190` using env-derived inputs."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to blocking shell-injection vulnerabilities in deploy command execution and preflight auth checks. Functional coverage is otherwise strong for artifact presence, remediation messaging, and secret-redaction-focused tests."
+}

@@ -1,0 +1,33 @@
+{
+  "featureId": "cross-golden-path-multidevice-security-and-restart-integrity",
+  "reviewedAt": "2026-02-28T17:22:46Z",
+  "commitId": "232cb6a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds broad cross-area coverage in a new integration test file, but VAL-CROSS-008 restart/deploy assertions are not validated against a real restart boundary. The tests explicitly reuse the same in-memory RelayMessageStore instance across server re-creation, so they can pass even if actual process restart/deploy loses lifecycle state.",
+    "issues": [
+      {
+        "file": "test/cross/golden-path.test.ts",
+        "line": 1302,
+        "severity": "blocking",
+        "description": "VAL-CROSS-008 tests simulate restart by reusing the same in-memory messageStore (see `Shared message store survives \"restart\"` and subsequent `server = await createServer()` calls). This does not test true restart/deploy integrity because process-memory loss and store rehydration paths are never exercised."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Validation contract language for VAL-CROSS-008 implies restart/deploy integrity, but current coverage is a same-process simulation over shared memory. This limitation should be explicitly captured in shared state so future workers/validators do not over-interpret this evidence as process-level persistence validation.",
+      "evidence": "validation-contract.md:219-221 defines restart/deploy integrity; test/cross/golden-path.test.ts:1302 states it 'simulates persistent storage' via shared message store."
+    },
+    {
+      "area": "skills",
+      "observation": "Skill procedure requires manual-check rationale when manual CLI/API/SSE checks are skipped, but the handoff marks followedProcedure=true without interactiveChecks or an explicit skip rationale. Skill guidance may need clearer handling for test-only features.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31-33; handoff 2026-02-28T17-17-44-274Z...json lines 128-131 show followedProcedure=true with empty deviations and no interactiveChecks entry under verification."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking coverage gap: restart/deploy integrity is only simulated with a shared in-memory store, not validated across a true restart boundary."
+}
