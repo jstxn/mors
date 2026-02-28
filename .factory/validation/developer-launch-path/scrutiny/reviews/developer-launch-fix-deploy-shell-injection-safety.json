@@ -1,0 +1,21 @@
+{
+  "featureId": "developer-launch-fix-deploy-shell-injection-safety",
+  "reviewedAt": "2026-02-28T17:46:36Z",
+  "commitId": "fd2d44b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix commit adequately remediates the prior blocking shell-injection findings by replacing shell-string execSync usage with argv-based execFileSync calls in both preflight auth and deploy execution paths, while preserving deploy behavior via targeted and existing deploy tests.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker reported skill adherence as fully followed, but the skill procedure requires manual CLI/API sanity checks for user-facing changes (or explicit rationale when skipped). This deploy fix changed user-facing CLI behavior but the handoff only includes automated test commands and no manual-check rationale.",
+      "evidence": "`.factory/skills/mors-global-worker/SKILL.md` step 8 requires manual checks for user-facing surfaces; handoff `...__developer-launch-fix-deploy-shell-injection-safety__36e8364a-67f5-4a9d-aa42-3a7cc942e978.json` contains only `verification.commandsRun` entries and no interactive/manual section; transcript skeleton likewise shows only automated test/validator commands."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/developer-launch-path/scrutiny/reviews/fly-deploy-artifacts-and-safe-placeholder-failures.json",
+  "summary": "PASS. Reviewed transcript skeleton, prior failed review, and both diffs (01f2d94 and fd2d44b). The original shell-injection vectors in `src/deploy.ts` and `src/cli.ts` were converted to argv-based execution, so env-derived flyctl/app/region values are no longer interpreted by a shell. The fix resolves the prior blocking failure."
+}

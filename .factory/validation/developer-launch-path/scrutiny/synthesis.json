@@ -1,68 +1,33 @@
 {
   "milestone": "developer-launch-path",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
     "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
   },
   "reviewsSummary": {
-    "total": 3,
-    "passed": 1,
-    "failed": 2,
-    "failedFeatures": [
-      "fly-deploy-artifacts-and-safe-placeholder-failures",
-      "cross-golden-path-multidevice-security-and-restart-integrity"
-    ]
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "fly-deploy-artifacts-and-safe-placeholder-failures",
-      "severity": "blocking",
-      "description": "Shell command injection in deploy execution: `execSync` at src/cli.ts:2125 interpolates env-derived FLY_APP_NAME, FLY_PRIMARY_REGION, and flyctlPath into a shell command string without escaping or using an argument-vector API. Crafted env values can execute arbitrary commands. Fix: use execFileSync or spawnSync with argv array instead of shell string interpolation."
-    },
-    {
-      "featureId": "fly-deploy-artifacts-and-safe-placeholder-failures",
-      "severity": "blocking",
-      "description": "Shell command injection in preflight auth check: `execSync` at src/deploy.ts:190 interpolates flyctlPath (which may come from MORS_DEPLOY_FLYCTL_PATH env var) into a shell command string. Same risk as above. Fix: use execFileSync(flyctlPath, ['auth', 'whoami'], ...) instead."
-    },
-    {
-      "featureId": "cross-golden-path-multidevice-security-and-restart-integrity",
-      "severity": "blocking",
-      "description": "VAL-CROSS-008 restart/deploy integrity tests at test/cross/golden-path.test.ts:1302 reuse the same in-memory RelayMessageStore instance across simulated restarts. This tests server re-creation but not true process-level restart with store rehydration. The tests can pass even if restart actually loses state. Fix: use a persistence-backed store or at minimum create a new store instance initialized from serialized state to validate restart boundary."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
-      "target": "AGENTS.md",
-      "suggestion": "Add convention: 'Workers must never use shell string interpolation with env-derived or user-derived values in execSync/child_process calls. Use execFileSync or spawnSync with argument-vector arrays for all subprocess invocations involving dynamic values.'",
-      "evidence": "Feature fly-deploy-artifacts-and-safe-placeholder-failures introduced shell-string execSync at src/cli.ts:2125 and src/deploy.ts:190 using env-derived FLY_APP_NAME, FLY_PRIMARY_REGION, and flyctlPath without escaping. This was not caught by existing conventions.",
-      "isSystemic": true
-    },
-    {
       "target": "skills",
-      "suggestion": "Clarify mors-global-worker skill procedure for regression-guard and test-only features: (1) strict red/green TDD may not apply when adding tests for already-correct behavior — allow explicit carve-out with rationale; (2) require manual-check entries or explicit skip rationale in handoff for features that add user-facing commands or significant test coverage.",
-      "evidence": "Three workers in this milestone all reported followedProcedure=true despite: (a) launch-path regression tests passing immediately on first run (no red phase), (b) deploy feature adding user-facing CLI command without manual-check evidence, (c) cross-golden-path feature having no interactiveChecks entries. Pattern is systemic across all three workers.",
+      "suggestion": "Clarify mors-global-worker skill step 8 (manual check requirement): when a fix feature has no user-facing surface to manually test (e.g., internal test-only or security-hardening changes), the handoff should include an explicit non-applicability rationale rather than silently omitting the interactiveChecks section.",
+      "evidence": "Both fix features (developer-launch-fix-deploy-shell-injection-safety and developer-launch-fix-restart-integrity-persistence-boundary) reported followedProcedure=true but omitted manual checks without rationale. Both reviewers flagged this independently as a skill-procedure clarity gap.",
       "isSystemic": true
-    },
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Add knowledge note: 'VAL-CROSS-008 restart/deploy integrity tests currently use in-memory store simulation, not true process restart. Workers addressing this must use persistence-backed stores or serialized-state rehydration to validate restart boundary behavior.'",
-      "evidence": "test/cross/golden-path.test.ts:1302 explicitly documents 'Shared message store survives restart — simulates persistent storage' but this simulation does not exercise the real rehydration path. Future workers need to know this limitation exists.",
-      "isSystemic": false
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Skill-procedure gap for strict red/green TDD on regression-guard features (from install-ux reviewer)",
-      "reason": "Duplicate — already captured as systemic suggestion above covering all three features"
-    },
-    {
-      "observation": "Skill-procedure manual-check requirement clarity (from cross-golden-path reviewer)",
-      "reason": "Duplicate — merged into systemic skills suggestion above"
+      "observation": "Skill-procedure manual-check reporting gap (from restart-integrity reviewer)",
+      "reason": "duplicate — same observation from deploy-injection reviewer, consolidated into single suggestedGuidanceUpdates entry above"
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/developer-launch-path/scrutiny/synthesis-round1.json"
 }
