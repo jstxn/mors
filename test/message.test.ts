@@ -20,9 +20,9 @@ import { tmpdir } from 'node:os';
 import { initCommand, getDbPath, getDbKeyPath } from '../src/init.js';
 import { loadKey } from '../src/key-management.js';
 import { openEncryptedDb } from '../src/store.js';
-import { sendMessage, listInbox, readMessage, ackMessage } from '../src/message.js';
+import { sendMessage, listInbox, readMessage, ackMessage, replyMessage } from '../src/message.js';
 import type { SendOptions } from '../src/message.js';
-import { MorsError } from '../src/errors.js';
+import { MorsError, DedupeConflictError } from '../src/errors.js';
 import { InvalidStateTransitionError } from '../src/contract/errors.js';
 
 let testDir: string;
@@ -714,6 +714,106 @@ describe('message edge cases', () => {
         traceId: 'trc_custom-trace',
       });
       expect(result.trace_id).toBe('trc_custom-trace');
+    } finally {
+      db.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Send dedupe causal linkage: send replays must not collide with replies
+// ---------------------------------------------------------------------------
+
+describe('send dedupe causal linkage', () => {
+  it('dedupe key used for reply rejects when replayed as send', () => {
+    const db = openDb();
+    try {
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Parent',
+      });
+
+      // First: create a reply with a dedupe key
+      replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply with dedupe',
+        dedupeKey: 'dup_reply-then-send',
+      });
+
+      // Now try to use the same dedupe key to create a top-level send — must fail
+      // because the existing record is a reply (in_reply_to is set)
+      expect(() =>
+        sendMessage(db, {
+          sender: 'bob',
+          recipient: 'alice',
+          body: 'Conflict send',
+          dedupeKey: 'dup_reply-then-send',
+        })
+      ).toThrow(DedupeConflictError);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('send dedupe replay with matching context is accepted', () => {
+    const db = openDb();
+    try {
+      const first = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Send dedupe',
+        dedupeKey: 'dup_send-replay-ok',
+      });
+
+      const replay = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Send dedupe',
+        dedupeKey: 'dup_send-replay-ok',
+      });
+
+      expect(replay.dedupe_replay).toBe(true);
+      expect(replay.id).toBe(first.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('send dedupe conflict preserves original reply intact', () => {
+    const db = openDb();
+    try {
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Parent msg',
+      });
+
+      const reply = replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply msg',
+        dedupeKey: 'dup_preserve-reply',
+      });
+
+      // Conflict: try send with same key
+      expect(() =>
+        sendMessage(db, {
+          sender: 'bob',
+          recipient: 'alice',
+          body: 'Conflicting send',
+          dedupeKey: 'dup_preserve-reply',
+        })
+      ).toThrow(DedupeConflictError);
+
+      // Original reply remains intact
+      const read = readMessage(db, reply.id);
+      expect(read.in_reply_to).toBe(parent.id);
+      expect(read.thread_id).toBe(parent.thread_id);
+      expect(read.body).toBe('Reply msg');
     } finally {
       db.close();
     }

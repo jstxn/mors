@@ -7,7 +7,7 @@
 export class MorsError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "MorsError";
+    this.name = 'MorsError';
   }
 }
 
@@ -15,7 +15,7 @@ export class MorsError extends Error {
 export class StoreEncryptionError extends MorsError {
   constructor(message: string) {
     super(message);
-    this.name = "StoreEncryptionError";
+    this.name = 'StoreEncryptionError';
   }
 }
 
@@ -23,7 +23,7 @@ export class StoreEncryptionError extends MorsError {
 export class KeyError extends MorsError {
   constructor(message: string) {
     super(message);
-    this.name = "KeyError";
+    this.name = 'KeyError';
   }
 }
 
@@ -31,7 +31,7 @@ export class KeyError extends MorsError {
 export class NotInitializedError extends MorsError {
   constructor(message: string) {
     super(message);
-    this.name = "NotInitializedError";
+    this.name = 'NotInitializedError';
   }
 }
 
@@ -39,6 +39,21 @@ export class NotInitializedError extends MorsError {
 export class SqlCipherUnavailableError extends MorsError {
   constructor(message: string) {
     super(message);
-    this.name = "SqlCipherUnavailableError";
+    this.name = 'SqlCipherUnavailableError';
+  }
+}
+
+/** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
+export class DedupeConflictError extends MorsError {
+  readonly dedupeKey: string;
+  readonly existingMessageId: string;
+
+  constructor(dedupeKey: string, existingMessageId: string, detail: string) {
+    super(
+      `Dedupe conflict for key "${dedupeKey}": existing message ${existingMessageId} has incompatible causal context. ${detail}`
+    );
+    this.name = 'DedupeConflictError';
+    this.dedupeKey = dedupeKey;
+    this.existingMessageId = existingMessageId;
   }
 }

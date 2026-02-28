@@ -17,7 +17,7 @@ import { initCommand, getDbPath, getDbKeyPath } from '../src/init.js';
 import { loadKey } from '../src/key-management.js';
 import { openEncryptedDb } from '../src/store.js';
 import { sendMessage, readMessage, replyMessage, listThread, listInbox } from '../src/message.js';
-import { MorsError } from '../src/errors.js';
+import { MorsError, DedupeConflictError } from '../src/errors.js';
 import { ContractValidationError } from '../src/contract/errors.js';
 
 let testDir: string;
@@ -840,6 +840,258 @@ code block
       });
 
       expect(reply.trace_id).toBe('trc_reply-trace');
+    } finally {
+      db.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reply dedupe causal linkage: dedupe replays must match thread context
+// ---------------------------------------------------------------------------
+
+describe('reply dedupe causal linkage', () => {
+  it('dedupe replay with same parent is accepted', () => {
+    const db = openDb();
+    try {
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Original',
+      });
+
+      const reply1 = replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply',
+        dedupeKey: 'dup_causal-ok',
+      });
+
+      // Replay with same parent — should succeed as dedupe replay
+      const replay = replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply',
+        dedupeKey: 'dup_causal-ok',
+      });
+
+      expect(replay.dedupe_replay).toBe(true);
+      expect(replay.id).toBe(reply1.id);
+      expect(replay.thread_id).toBe(reply1.thread_id);
+      expect(replay.in_reply_to).toBe(parent.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('dedupe replay with different parent rejects with DedupeConflictError', () => {
+    const db = openDb();
+    try {
+      const msgA = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Message A',
+      });
+
+      const msgB = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Message B',
+      });
+
+      // Create reply to message A
+      replyMessage(db, {
+        parentMessageId: msgA.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply to A',
+        dedupeKey: 'dup_conflict-parent',
+      });
+
+      // Try replaying same dedupe key but targeting message B — must fail
+      expect(() =>
+        replyMessage(db, {
+          parentMessageId: msgB.id,
+          sender: 'bob',
+          recipient: 'alice',
+          body: 'Reply to B',
+          dedupeKey: 'dup_conflict-parent',
+        })
+      ).toThrow(DedupeConflictError);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('dedupe key used for send rejects when replayed as reply', () => {
+    const db = openDb();
+    try {
+      // First: create a top-level send with a dedupe key
+      sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Top-level message',
+        dedupeKey: 'dup_send-then-reply',
+      });
+
+      const parent = sendMessage(db, {
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Parent for reply',
+      });
+
+      // Now try to use the same dedupe key to create a reply — must fail
+      // because the existing record is a top-level send (in_reply_to is null)
+      expect(() =>
+        replyMessage(db, {
+          parentMessageId: parent.id,
+          sender: 'alice',
+          recipient: 'bob',
+          body: 'Conflict reply',
+          dedupeKey: 'dup_send-then-reply',
+        })
+      ).toThrow(DedupeConflictError);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('dedupe conflict preserves original message and thread integrity', () => {
+    const db = openDb();
+    try {
+      const parent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Original parent',
+      });
+
+      const otherParent = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Other parent',
+      });
+
+      const reply = replyMessage(db, {
+        parentMessageId: parent.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply to original',
+        dedupeKey: 'dup_integrity-check',
+      });
+
+      // Conflict attempt
+      expect(() =>
+        replyMessage(db, {
+          parentMessageId: otherParent.id,
+          sender: 'bob',
+          recipient: 'alice',
+          body: 'Conflicting reply',
+          dedupeKey: 'dup_integrity-check',
+        })
+      ).toThrow(DedupeConflictError);
+
+      // Verify original reply's thread linkage is intact
+      const thread = listThread(db, parent.thread_id);
+      expect(thread.length).toBe(2);
+      const replyEntry = thread.find((m) => m.id === reply.id);
+      expect(replyEntry).toBeDefined();
+      expect(replyEntry?.in_reply_to).toBe(parent.id);
+      expect(replyEntry?.thread_id).toBe(parent.thread_id);
+
+      // Other parent's thread is unaffected (no stray replies)
+      const otherThread = listThread(db, otherParent.thread_id);
+      expect(otherThread.length).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('dedupe replay of nested reply with correct parent is accepted', () => {
+    const db = openDb();
+    try {
+      const root = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Root',
+      });
+
+      const child = replyMessage(db, {
+        parentMessageId: root.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'First reply',
+      });
+
+      const nested = replyMessage(db, {
+        parentMessageId: child.id,
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Nested reply',
+        dedupeKey: 'dup_nested-ok',
+      });
+
+      // Replay with same parent — should succeed
+      const replay = replyMessage(db, {
+        parentMessageId: child.id,
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Nested reply',
+        dedupeKey: 'dup_nested-ok',
+      });
+
+      expect(replay.dedupe_replay).toBe(true);
+      expect(replay.id).toBe(nested.id);
+      expect(replay.thread_id).toBe(root.thread_id);
+      expect(replay.in_reply_to).toBe(child.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('dedupe replay of nested reply with wrong parent is rejected', () => {
+    const db = openDb();
+    try {
+      const root = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Root',
+      });
+
+      const childA = replyMessage(db, {
+        parentMessageId: root.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply A',
+      });
+
+      const childB = replyMessage(db, {
+        parentMessageId: root.id,
+        sender: 'bob',
+        recipient: 'alice',
+        body: 'Reply B',
+      });
+
+      // Create nested reply to childA
+      replyMessage(db, {
+        parentMessageId: childA.id,
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'Nested to A',
+        dedupeKey: 'dup_nested-conflict',
+      });
+
+      // Try replaying same dedupe key but targeting childB
+      expect(() =>
+        replyMessage(db, {
+          parentMessageId: childB.id,
+          sender: 'alice',
+          recipient: 'bob',
+          body: 'Nested to B',
+          dedupeKey: 'dup_nested-conflict',
+        })
+      ).toThrow(DedupeConflictError);
     } finally {
       db.close();
     }

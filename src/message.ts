@@ -21,7 +21,7 @@ import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 import { generateMessageId, generateThreadId, validateMessageId } from './contract/index.js';
 import { validateStateTransition } from './contract/states.js';
 import { ContractValidationError } from './contract/errors.js';
-import { MorsError } from './errors.js';
+import { MorsError, DedupeConflictError } from './errors.js';
 import { isValidId, isValidPrefixedId } from './contract/ids.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -162,12 +162,13 @@ export function sendMessage(db: BetterSqlite3.Database, options: SendOptions): S
   if (dedupeKey) {
     const existing = db
       .prepare(
-        'SELECT id, thread_id, sender, recipient, state, created_at, dedupe_key, trace_id FROM messages WHERE dedupe_key = ?'
+        'SELECT id, thread_id, in_reply_to, sender, recipient, state, created_at, dedupe_key, trace_id FROM messages WHERE dedupe_key = ?'
       )
       .get(dedupeKey) as
       | {
           id: string;
           thread_id: string;
+          in_reply_to: string | null;
           sender: string;
           recipient: string;
           state: string;
@@ -178,6 +179,16 @@ export function sendMessage(db: BetterSqlite3.Database, options: SendOptions): S
       | undefined;
 
     if (existing) {
+      // Causal linkage check: a top-level send must match a top-level record (in_reply_to is null).
+      // If the existing record is a reply, the dedupe key is incompatible with a send.
+      if (existing.in_reply_to !== null) {
+        throw new DedupeConflictError(
+          dedupeKey,
+          existing.id,
+          `Expected a top-level message (in_reply_to: null) but found a reply (in_reply_to: "${existing.in_reply_to}").`
+        );
+      }
+
       return {
         id: existing.id,
         thread_id: existing.thread_id,
@@ -492,10 +503,34 @@ export function replyMessage(db: BetterSqlite3.Database, options: ReplyOptions):
       | undefined;
 
     if (existing) {
+      // Causal linkage check: the existing record must be a reply to the same parent.
+      // If in_reply_to is null, the existing record is a top-level send — incompatible with a reply.
+      if (existing.in_reply_to !== parentMessageId) {
+        const existingReplyTo = existing.in_reply_to ?? 'null (top-level message)';
+        throw new DedupeConflictError(
+          dedupeKey,
+          existing.id,
+          `Expected in_reply_to="${parentMessageId}" but found in_reply_to="${existingReplyTo}".`
+        );
+      }
+
+      // Also verify thread_id matches — look up the parent to get its thread_id.
+      const parent = db
+        .prepare('SELECT thread_id FROM messages WHERE id = ?')
+        .get(parentMessageId) as { thread_id: string } | undefined;
+
+      if (parent && existing.thread_id !== parent.thread_id) {
+        throw new DedupeConflictError(
+          dedupeKey,
+          existing.id,
+          `Expected thread_id="${parent.thread_id}" but found thread_id="${existing.thread_id}".`
+        );
+      }
+
       return {
         id: existing.id,
         thread_id: existing.thread_id,
-        in_reply_to: existing.in_reply_to ?? parentMessageId,
+        in_reply_to: existing.in_reply_to,
         sender: existing.sender,
         recipient: existing.recipient,
         state: existing.state,
