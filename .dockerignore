@@ -1,0 +1,31 @@
+# Dependencies (rebuilt in Docker build stage)
+node_modules
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+
+# Build artifacts (rebuilt in Docker build stage)
+dist
+*.tsbuildinfo
+
+# Test files (not needed in production image)
+test
+vitest.config.ts
+
+# IDE / editor files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# Homebrew formula (not relevant to deploy)
+Formula
+
+# Factory mission infrastructure
+.factory

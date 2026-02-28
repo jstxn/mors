@@ -53,9 +53,16 @@ import {
 } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
 import { randomUUID } from 'node:crypto';
+import { execSync as execSyncImport } from 'node:child_process';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 import { RelayClient, RelayClientError, type RelayMessageResponse } from './relay/client.js';
 import { connectRemoteWatch, type RemoteWatchEvent } from './remote-watch.js';
+import {
+  runDeployPreflight,
+  formatDeployIssues,
+  formatDeployResultJson,
+  redactSecrets,
+} from './deploy.js';
 
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
@@ -111,6 +118,11 @@ export function run(args: string[]): void {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Error: ${msg}`);
     });
+    return;
+  }
+
+  if (command === 'deploy') {
+    runDeploy(args.slice(1));
     return;
   }
 
@@ -2012,6 +2024,142 @@ function formatError(message: string, json: boolean, errorType?: string): void {
   }
 }
 
+// ── Deploy command ───────────────────────────────────────────────────
+
+/**
+ * Run the deploy command.
+ *
+ * Validates Fly.io deploy prerequisites and optionally triggers deployment.
+ * All output is redacted for secrets before display.
+ *
+ * Flags:
+ *   --json      Output structured JSON
+ *   --dry-run   Validate prerequisites only (do not deploy)
+ *   --help      Show deploy usage
+ */
+function runDeploy(args: string[]): void {
+  const { flags } = parseArgs(args);
+  const isJson = 'json' in flags;
+  const isDryRun = 'dry-run' in flags;
+  const isHelp = 'help' in flags || 'h' in flags;
+
+  if (isHelp) {
+    console.log(`mors deploy — Deploy the mors relay to Fly.io
+
+Usage:
+  mors deploy [--json] [--dry-run]
+
+Options:
+  --json       Output structured JSON
+  --dry-run    Validate deploy prerequisites without deploying
+  --help       Show this help
+
+Required environment variables:
+  FLY_APP_NAME          Fly.io application name
+  FLY_ORG               Fly.io organization slug
+  FLY_PRIMARY_REGION    Primary region (default: iad)
+
+Authentication (one of):
+  FLY_ACCESS_TOKEN      Fly.io deploy token
+  flyctl auth login     Interactive authentication
+
+Prerequisites:
+  flyctl                Fly CLI tool (brew install flyctl or https://fly.io/install.sh)`);
+    return;
+  }
+
+  // Run pre-flight checks
+  const result = runDeployPreflight();
+
+  if (!result.ready) {
+    process.exitCode = 1;
+    if (isJson) {
+      console.log(formatDeployResultJson(result));
+    } else {
+      console.error(redactSecrets(formatDeployIssues(result.issues)));
+    }
+    return;
+  }
+
+  // Pre-flight passed — extract validated config
+  const deployConfig = result.config;
+  if (!deployConfig) {
+    // Should not happen after ready=true, but fail-closed
+    process.exitCode = 1;
+    console.error('Internal error: deploy config missing after pre-flight.');
+    return;
+  }
+
+  if (isDryRun) {
+    if (isJson) {
+      console.log(formatDeployResultJson(result));
+    } else {
+      console.log('Deploy pre-flight checks passed.');
+      console.log(`  App:    ${deployConfig.appName}`);
+      console.log(`  Region: ${deployConfig.primaryRegion}`);
+      console.log(`  Org:    ${deployConfig.org}`);
+      console.log('\nDry run complete. Run without --dry-run to deploy.');
+    }
+    return;
+  }
+
+  // Actual deploy — execute flyctl deploy
+  if (isJson) {
+    console.log(
+      JSON.stringify({
+        status: 'deploying',
+        config: {
+          appName: deployConfig.appName,
+          primaryRegion: deployConfig.primaryRegion,
+          org: deployConfig.org,
+        },
+      })
+    );
+  } else {
+    console.log(
+      `Deploying to Fly.io (app: ${deployConfig.appName}, region: ${deployConfig.primaryRegion})...`
+    );
+  }
+
+  try {
+    const deployOutput = execSyncImport(
+      `${deployConfig.flyctlPath} deploy --app ${deployConfig.appName} --region ${deployConfig.primaryRegion}`,
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        timeout: 300_000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
+
+    // Redact any secrets from deploy output before display
+    const safeOutput = redactSecrets(deployOutput);
+    if (isJson) {
+      console.log(JSON.stringify({ status: 'deployed', output: safeOutput }));
+    } else {
+      console.log(safeOutput);
+      console.log('Deploy complete.');
+    }
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    const e = err as { stdout?: string; stderr?: string; message?: string };
+    const rawOutput = (e.stdout ?? '') + (e.stderr ?? '') + (e.message ?? '');
+    const safeOutput = redactSecrets(rawOutput);
+
+    if (isJson) {
+      console.log(
+        JSON.stringify({
+          status: 'error',
+          error: 'deploy_failed',
+          message: safeOutput,
+        })
+      );
+    } else {
+      console.error(`Deploy failed:\n${safeOutput}`);
+    }
+  }
+}
+
 // ── Usage ────────────────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -2032,6 +2180,7 @@ Commands:
   ack          Acknowledge a message
   thread       View thread messages in causal order
   watch        Watch for new messages
+  deploy       Deploy relay to Fly.io
   setup-shell  Configure shell PATH for mors
 
 Options:
@@ -2095,6 +2244,11 @@ Status:
   mors status [--json] [--offline]
   --json                 Output JSON
   --offline              Skip token liveness check (report local session only)
+
+Deploy:
+  mors deploy [--json] [--dry-run]
+  --json                 Output JSON
+  --dry-run              Validate deploy prerequisites without deploying
 
 Setup Shell:
   mors setup-shell [--json] [--confirm] [--decline]

@@ -1,0 +1,34 @@
+# Fly.io deployment configuration for the mors relay service.
+#
+# App name is configured via FLY_APP_NAME environment variable at deploy time.
+# This file uses placeholder defaults that are detected and rejected by the
+# deploy command if not overridden with real values.
+#
+# Deploy: mors deploy (or flyctl deploy after setting secrets)
+# Secrets: flyctl secrets set GITHUB_DEVICE_CLIENT_ID=... (etc.)
+
+app = "replace-with-fly-app-name"
+primary_region = "iad"
+
+[build]
+
+[env]
+  PORT = "3100"
+
+[http_service]
+  internal_port = 3100
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
