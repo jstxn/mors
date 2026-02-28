@@ -1,0 +1,26 @@
+{
+  "featureId": "distribution-homebrew-tap-formula",
+  "reviewedAt": "2026-02-28T08:00:17Z",
+  "commitId": "069749d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation satisfies VAL-INSTALL-005/006: commit 069749d adds a tap-ready formula at Formula/mors.rb with required metadata, install/test stanzas, and dependency strategy (node, python build, sqlcipher), plus install-focused tests validating formula presence/structure and metadata alignment. Handoff evidence includes successful brew style/audit (with expected license exception), local brew install, brew test, and runnable mors --version output.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker skill scope appears outdated relative to actual mission usage: this feature used mors-worker in milestone distribution-install-ux, but SKILL.md says it is for core-foundation and local-cli-flows.",
+      "evidence": "Feature metadata: /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/features.json (distribution-homebrew-tap-formula milestone distribution-install-ux). Skill scope: /Users/justen/Development/mors/.factory/skills/mors-worker/SKILL.md, section 'When to Use This Skill'."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Homebrew audit behavior for this repo depends on an explicit license exception (--except=license) due Formula/mors.rb using UNLICENSED, but this caveat is not captured in shared mission/library guidance.",
+      "evidence": "Handoff verification for worker session 523fbef4-c0cc-4c1d-8145-b79b89dcdef2 records brew audit requiring '--except=license'; Formula license is UNLICENSED in /Users/justen/Development/mors/Formula/mors.rb."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed feature distribution-homebrew-tap-formula via features metadata, handoff, commit 069749d diff, transcript skeleton, and shared-state docs. The feature is correctly implemented for Homebrew tap formula readiness and runnable install behavior, with no blocking code issues identified."
+}

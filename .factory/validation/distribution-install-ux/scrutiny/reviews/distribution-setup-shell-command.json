@@ -1,0 +1,26 @@
+{
+  "featureId": "distribution-setup-shell-command",
+  "reviewedAt": "2026-02-28T08:01:25Z",
+  "commitId": "d732281",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation covers the required setup-shell behavior: preview + confirmation before edits, decline path with no mutation, confirm path applying a single PATH line, and idempotent re-runs. CLI routing and help wiring are present, and tests exercise prompt/decline/confirm/json/non-interactive paths.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker skill scope is outdated relative to actual mission usage. The skill says it is for core-foundation/local-cli-flows, but this reviewed feature (distribution-install-ux) also uses mors-worker.",
+      "evidence": ".factory/skills/mors-worker/SKILL.md:12 limits usage to `core-foundation` and `local-cli-flows`; mission features file shows distribution feature `distribution-setup-shell-command` with `skillName: mors-worker` at /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/features.json:748-750 (milestone distribution-install-ux at 769)."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared CLI user-testing guidance has not been updated to include the new `setup-shell` command/testing hook used in install UX validation.",
+      "evidence": ".factory/library/user-testing.md:12 lists primary commands but omits `mors setup-shell`; test/runtime usage relies on `MORS_SETUP_SHELL_BIN_DIR` in src/setup-shell.ts:165 and test/setup-shell.test.ts (multiple cases, e.g., line 231)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed feature distribution-setup-shell-command at commit d732281 and found it meets VAL-INSTALL-002/003/004 with no code defects identified in scope. Report includes two shared-state observations (skill scope drift and user-testing knowledge gap)."
+}

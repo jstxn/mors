@@ -1,0 +1,39 @@
+{
+  "featureId": "distribution-install-matrix-and-first-run-flow",
+  "reviewedAt": "2026-02-28T08:00:11.737380+00:00",
+  "commitId": "3b43eca1152286b2cfb3c02e5ef5ebb980c8980f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds broad automated coverage for local CLI first-run behavior, but it does not fully satisfy the install-matrix requirement because the Homebrew path is validated only by formula text assertions rather than an executable install/run flow.",
+    "issues": [
+      {
+        "file": "test/install-matrix.test.ts",
+        "line": 120,
+        "severity": "blocking",
+        "description": "VAL-INSTALL-007 requires both npm and Homebrew distribution paths to produce a working CLI entrypoint, but the Homebrew section only parses/regex-checks Formula/mors.rb (e.g., lines 120-174 and 186-196) and never executes a brewed mors command. This can pass even when real Homebrew install/runtime behavior is broken."
+      },
+      {
+        "file": "test/install-matrix.test.ts",
+        "line": 463,
+        "severity": "non_blocking",
+        "description": "Install-guidance assertions are shallow string checks (README contains 'MORS_CONFIG_DIR', 'node dist/index.js', etc.) and do not verify that user-facing install guidance for distribution channels maps to actual executable paths/commands end-to-end."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Shared user-testing guidance is heavily centered on `node dist/index.js` execution and does not document a standard way to capture npm/global and Homebrew install-path evidence for install-UX validations.",
+      "evidence": ".factory/library/user-testing.md (Flow Validator Guidance) prescribes `MORS_CONFIG_DIR=... node dist/index.js <command>` and says CLI is pre-built, with no corresponding guidance for validating installed `mors` entrypoints from npm/Homebrew."
+    },
+    {
+      "area": "skills",
+      "observation": "The skill mandates strict red/green TDD but lacks explicit handling guidance for validation-only features where new tests may intentionally pass against existing behavior without source changes.",
+      "evidence": ".factory/skills/mors-worker/SKILL.md step 2 requires strict TDD; transcript skeleton for session d09eb505-3cf2-41d8-b4cd-6ec7250dec87 shows `test/install-matrix.test.ts` was created and passed on first run with no production-code iteration."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: commit 3b43eca adds substantial first-run/install checks, but Homebrew validation is not end-to-end executable and therefore does not fully satisfy the install-matrix requirement for VAL-INSTALL-007."
+}

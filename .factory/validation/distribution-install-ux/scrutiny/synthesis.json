@@ -1,0 +1,57 @@
+{
+  "milestone": "distribution-install-ux",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
+    "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 3,
+    "failed": 1,
+    "failedFeatures": ["distribution-install-matrix-and-first-run-flow"]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "distribution-install-matrix-and-first-run-flow",
+      "severity": "blocking",
+      "description": "VAL-INSTALL-007 requires both npm and Homebrew distribution paths to produce a working CLI entrypoint, but test/install-matrix.test.ts Homebrew section only parses/regex-checks Formula/mors.rb content (lines 120-196) and never executes a brewed mors command. This can pass even when real Homebrew install/runtime behavior is broken. The install-matrix validation needs an executable Homebrew install+run flow to satisfy the assertion."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added .factory/library/homebrew-formula.md documenting the Homebrew audit --except=license caveat for the UNLICENSED formula.",
+      "sourceFeature": "distribution-homebrew-tap-formula"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update mors-worker skill scope to include distribution-install-ux milestone, since the skill was successfully used for all 4 features in this milestone despite SKILL.md limiting it to core-foundation and local-cli-flows.",
+      "evidence": "All 4 features in distribution-install-ux (distribution-github-npm-install-ready, distribution-setup-shell-command, distribution-homebrew-tap-formula, distribution-install-matrix-and-first-run-flow) used skillName: mors-worker. Flagged by 3/4 reviewers as scope drift.",
+      "isSystemic": true
+    },
+    {
+      "target": "skills",
+      "suggestion": "Add explicit guidance in mors-worker skill for validation-only / test-only features where new tests may intentionally pass against existing behavior without source changes, relaxing the strict red/green TDD requirement for these cases.",
+      "evidence": "Feature distribution-install-matrix-and-first-run-flow created test/install-matrix.test.ts that passed on first run against existing codebase with no production-code iteration. The strict TDD mandate in SKILL.md step 2 doesn't account for this pattern.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add user-testing guidance for validating installed mors entrypoints from npm global and Homebrew paths, not just local 'node dist/index.js' execution.",
+      "evidence": ".factory/library/user-testing.md prescribes 'MORS_CONFIG_DIR=... node dist/index.js <command>' for all CLI testing. No guidance exists for verifying installed binary entrypoints, which is essential for distribution-install-ux validation assertions (VAL-INSTALL-001, VAL-INSTALL-006, VAL-INSTALL-007).",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Shared CLI user-testing guidance has not been updated to include the new setup-shell command/testing hook used in install UX validation.",
+      "reason": "Redundant with the broader user-testing guidance suggestion already captured above; setup-shell is adequately covered by its own test suite and the user-testing validator will handle it separately."
+    }
+  ],
+  "previousRound": null
+}
