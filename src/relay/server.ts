@@ -275,14 +275,13 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         }),
       });
 
-      // Register the connected event's ID as a valid cursor position
-      // so clients can use it as Last-Event-ID on reconnect (VAL-STREAM-003/005)
-      if (messageStore) {
-        messageStore.registerCursorPosition(connectedEventId);
-      }
-
       // Track this connection
       sseConnections.add(res);
+
+      // Track the last event ID sent to this connection for auth expiry recovery.
+      // Initialized to the connected event ID; advances as replay and live events
+      // are delivered so the auth_expired event can report the correct resume cursor.
+      let lastSentEventId = connectedEventId;
 
       // Replay missed events from cursor (VAL-STREAM-003).
       // If no Last-Event-ID, this is a fresh connection — no replay (VAL-STREAM-004).
@@ -312,14 +311,22 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
               timestamp: streamEvent.timestamp,
             }),
           });
+
+          // Update lastSentEventId to track replayed events consistently
+          // so auth_expired recovery and cursor bookkeeping reflect the
+          // actual last delivered event, not just the connected event.
+          lastSentEventId = streamEvent.event_id;
         }
       }
 
-      // Track the last event ID sent to this connection for auth expiry recovery.
-      // The connected event ID is the initial cursor position; as events are
-      // delivered, this advances so the auth_expired event can include the
-      // last valid event ID for the client to resume from after re-auth.
-      let lastSentEventId = connectedEventId;
+      // Register the connected event's ID as a valid cursor position
+      // so clients can use it as Last-Event-ID on reconnect (VAL-STREAM-003/005).
+      // This is done AFTER replay so the cursor position reflects the end of
+      // the replay window — reconnecting with this connected event ID will not
+      // re-replay events that were already delivered during the replay phase.
+      if (messageStore) {
+        messageStore.registerCursorPosition(connectedEventId);
+      }
 
       // Subscribe to message store stream events for live delivery (if available)
       let unsubscribe: (() => void) | undefined;

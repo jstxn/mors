@@ -764,6 +764,198 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       }
     });
 
+    it('reconnect using connected event ID as cursor does not replay events already delivered during that session', async () => {
+      // Edge case: Client connects, receives connected event + N replayed events during
+      // the initial catch-up. If it disconnects and reconnects using the connected event ID,
+      // those N events should NOT be re-replayed because the cursor for the connected event
+      // should account for any events replayed after it.
+      //
+      // Scenario: Events exist before connection. Client connects with Last-Event-ID that
+      // causes a replay. The connected event's cursor should be registered AFTER replay
+      // so reconnecting with the connected event ID doesn't re-send replayed events.
+
+      // Step 1: Create initial session to establish some cursor state
+      const sse0 = openSSE(server.port, 'token-alice');
+      try {
+        await sse0.waitForEvents(1); // connected
+        const initialCursor = sse0.events[0].id;
+
+        // Create events while sse0 is connected
+        messageStore.send(1002, 'bob', {
+          recipientId: 1001,
+          body: 'Event A',
+        });
+        messageStore.send(1002, 'bob', {
+          recipientId: 1001,
+          body: 'Event B',
+        });
+        await sse0.waitForEvents(3); // connected + 2 events
+        sse0.close();
+
+        // Step 2: More events happen while disconnected
+        messageStore.send(1002, 'bob', {
+          recipientId: 1001,
+          body: 'Event C (during disconnect)',
+        });
+
+        // Step 3: Reconnect with the initial cursor — should replay A, B, C
+        const sse1 = openSSE(server.port, 'token-alice', { lastEventId: initialCursor });
+        try {
+          // connected + 3 replayed events (A, B, C)
+          const evts1 = await sse1.waitForEvents(4);
+          const connectedId = evts1.find((e) => e.event === 'connected')?.id;
+          expect(connectedId).toBeDefined();
+
+          const msgEvts = evts1.filter((e) => e.event === 'message_created');
+          expect(msgEvts.length).toBe(3);
+          sse1.close();
+
+          // Step 4: Reconnect using the connected event ID from sse1
+          // Since all 3 events were replayed in sse1, reconnecting with
+          // the connected event ID should NOT replay them again.
+          const sse2 = openSSE(server.port, 'token-alice', { lastEventId: connectedId });
+          try {
+            // Should only get connected event, no re-replay
+            const evts2 = await sse2.waitForEvents(1);
+            expect(evts2[0].event).toBe('connected');
+
+            await new Promise((r) => setTimeout(r, 200));
+            const nonConnected = sse2.events.filter((e) => e.event !== 'connected');
+            expect(nonConnected.length).toBe(0);
+          } finally {
+            sse2.close();
+          }
+        } finally {
+          sse1.close();
+        }
+      } finally {
+        sse0.close();
+      }
+    });
+
+    it('lastSentEventId in auth_expired payload reflects replayed events, not just connected event', async () => {
+      // Edge case: When auth expires after replay catch-up but before any live event,
+      // the auth_expired event's last_event_id should be the last replayed event ID
+      // (not the connected event ID), so the client can resume correctly after re-auth.
+
+      // Setup controllable auth
+      const principals = new Map<string, { githubUserId: number; githubLogin: string }>([
+        ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
+        ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+      ]);
+      const controlledVerifier = async (token: string) => principals.get(token) ?? null;
+
+      // Create a server with fast revalidation
+      await server.close();
+      const controlledStore = new RelayMessageStore();
+      const opts: RelayServerOptions = {
+        logger: () => {},
+        tokenVerifier: controlledVerifier,
+        messageStore: controlledStore,
+        sseAuthRevalidateMs: 100, // Fast revalidation for test
+      };
+      server = createRelayServer(testConfig(), opts);
+      await server.start();
+
+      // Step 1: Create initial connection and some events
+      const sse0 = openSSE(server.port, 'token-alice');
+      try {
+        await sse0.waitForEvents(1);
+        const initialCursor = sse0.events[0].id;
+
+        // Create events
+        controlledStore.send(1002, 'bob', {
+          recipientId: 1001,
+          body: 'Event for replay',
+        });
+        controlledStore.send(1002, 'bob', {
+          recipientId: 1001,
+          body: 'Another event for replay',
+        });
+
+        await sse0.waitForEvents(3);
+        const lastLiveEventId = sse0.events[sse0.events.length - 1].id;
+        sse0.close();
+
+        // Step 2: Reconnect with initial cursor — replay will catch up
+        const sse1 = openSSE(server.port, 'token-alice', { lastEventId: initialCursor });
+        try {
+          // connected + 2 replayed events
+          await sse1.waitForEvents(3);
+          const replayed = sse1.events.filter((e) => e.event === 'message_created');
+          expect(replayed.length).toBe(2);
+          const lastReplayedId = replayed[replayed.length - 1].id;
+          expect(lastReplayedId).toBe(lastLiveEventId);
+
+          // Step 3: Expire the token so auth_expired fires
+          principals.delete('token-alice');
+
+          // Wait for auth_expired event
+          const authEvt = await sse1.waitForEvents(4, 3000);
+          const authExpired = authEvt.find((e) => e.event === 'auth_expired');
+          expect(authExpired).toBeDefined();
+
+          // The auth_expired event should report last_event_id as the last replayed event
+          // (not the connected event ID)
+          if (!authExpired) throw new Error('auth_expired event not found');
+          const authData = parseEventData(authExpired);
+          expect(authData.last_event_id).toBe(lastReplayedId);
+        } finally {
+          sse1.close();
+        }
+      } finally {
+        sse0.close();
+      }
+    });
+
+    it('reconnect after replay uses last replayed event as effective resume point', async () => {
+      // Edge case: Client connects with Last-Event-ID and gets replayed events.
+      // If it disconnects immediately after replay and reconnects using the LAST
+      // replayed event's ID as cursor, it should get no duplicate events.
+
+      const sse0 = openSSE(server.port, 'token-alice');
+      try {
+        await sse0.waitForEvents(1);
+        const cursor0 = sse0.events[0].id;
+
+        // Create events
+        messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 1' });
+        messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 2' });
+        messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 3' });
+
+        await sse0.waitForEvents(4); // connected + 3 events
+        sse0.close();
+
+        // Reconnect with the initial cursor — should replay all 3
+        const sse1 = openSSE(server.port, 'token-alice', { lastEventId: cursor0 });
+        try {
+          await sse1.waitForEvents(4); // connected + 3 replayed
+          const replayed = sse1.events.filter((e) => e.event === 'message_created');
+          expect(replayed.length).toBe(3);
+          const lastReplayedId = replayed[replayed.length - 1].id;
+          sse1.close();
+
+          // Create another event after disconnect
+          messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 4 (new)' });
+
+          // Reconnect using the last replayed event ID as cursor
+          const sse2 = openSSE(server.port, 'token-alice', { lastEventId: lastReplayedId });
+          try {
+            // Should get connected + only Msg 4 (no re-replay of Msg 1-3)
+            const evts2 = await sse2.waitForEvents(2);
+            const msgEvts = evts2.filter((e) => e.event === 'message_created');
+            expect(msgEvts.length).toBe(1);
+          } finally {
+            sse2.close();
+          }
+        } finally {
+          sse1.close();
+        }
+      } finally {
+        sse0.close();
+      }
+    });
+
     it('event log retains events for replay across multiple reconnects', async () => {
       // Connect, get events, disconnect, reconnect multiple times
       const sse1 = openSSE(server.port, 'token-alice');

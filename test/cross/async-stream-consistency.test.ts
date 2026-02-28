@@ -1312,6 +1312,77 @@ describe('cross-surface async/stream consistency', () => {
       }
     });
 
+    it('reconnect with connected-event cursor after replay does not produce avoidable duplicate replay', async () => {
+      // Edge case: A client reconnects with a cursor, receives replayed events.
+      // If it disconnects and reconnects using the connected event ID from the
+      // replay session, those replayed events should NOT be re-sent.
+      // This tests that the connected event cursor is registered after replay delivery.
+
+      // Phase 1: Create initial connection and events
+      const sse1 = openSSE(server.port, 'token-bob');
+      try {
+        await sse1.waitForEvents(1); // connected
+        const cursor1 = sse1.events[0].id;
+
+        // Alice sends 2 messages
+        await relayFetch(server.port, '/messages', {
+          method: 'POST',
+          token: 'token-alice',
+          body: { recipient_id: 1002, body: 'Msg A' },
+        });
+        await relayFetch(server.port, '/messages', {
+          method: 'POST',
+          token: 'token-alice',
+          body: { recipient_id: 1002, body: 'Msg B' },
+        });
+
+        await sse1.waitForEvents(3); // connected + 2 events
+        sse1.close();
+
+        // Phase 2: Another event while disconnected
+        await relayFetch(server.port, '/messages', {
+          method: 'POST',
+          token: 'token-alice',
+          body: { recipient_id: 1002, body: 'Msg C (during disconnect)' },
+        });
+
+        // Phase 3: Reconnect with cursor1 → replays A, B, C
+        const sse2 = openSSE(server.port, 'token-bob', { lastEventId: cursor1 });
+        try {
+          await sse2.waitForEvents(4); // connected + 3 replayed
+          const connected2Id = sse2.events.find((e) => e.event === 'connected')?.id;
+          expect(connected2Id).toBeDefined();
+
+          const replayed = sse2.events.filter((e) => e.event === 'message_created');
+          expect(replayed.length).toBe(3);
+          sse2.close();
+
+          // Phase 4: Reconnect using connected2Id as cursor
+          // Should NOT re-replay A, B, C
+          const sse3 = openSSE(server.port, 'token-bob', { lastEventId: connected2Id });
+          try {
+            await sse3.waitForEvents(1); // connected only
+            await new Promise((r) => setTimeout(r, 200));
+            const nonConnected = sse3.events.filter((e) => e.event !== 'connected');
+            expect(nonConnected.length).toBe(0);
+
+            // Inbox still shows all 3 messages (complete view)
+            const inboxResp = await relayFetch(server.port, '/inbox', { token: 'token-bob' });
+            const messages = (inboxResp.body as Record<string, unknown>)['messages'] as Array<
+              Record<string, unknown>
+            >;
+            expect(messages.length).toBe(3);
+          } finally {
+            sse3.close();
+          }
+        } finally {
+          sse2.close();
+        }
+      } finally {
+        sse1.close();
+      }
+    });
+
     it('live events after catch-up continue to converge with inbox queries', async () => {
       // Bob connects, gets initial events, disconnects
       const sse1 = openSSE(server.port, 'token-bob');
