@@ -30,6 +30,10 @@ Real credentials are intentionally deferred in this phase; workers must fail wit
 - Keep `.env` local-only (`.gitignore` includes `.env`).
 - Do not print auth tokens or private key material in normal CLI/server logs.
 
+## dist/ rebuild after source changes
+
+Some test suites (e.g., `test/auth/cli-auth-gating.test.ts`, `test/install.test.ts`) execute from `dist/` rather than TS source. After modifying TypeScript source files, run `npm run build` before the full test suite to avoid stale-`dist/` failures (missing exports, outdated behavior). This is especially relevant when editing relay or CLI entrypoint files.
+
 ## SQLCipher caveat (still applies)
 
 - `better-sqlite3-multiple-ciphers` keying does not behave correctly with `:memory:` paths. Encryption verification and fail-closed tests must use temporary on-disk DB files.

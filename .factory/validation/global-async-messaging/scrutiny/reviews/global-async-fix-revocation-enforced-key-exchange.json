@@ -1,0 +1,21 @@
+{
+  "featureId": "global-async-fix-revocation-enforced-key-exchange",
+  "reviewedAt": "2026-02-28T14:20:06Z",
+  "commitId": "114d804",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly addresses the prior blocking gap: performKeyExchange now rejects revoked peers before ECDH/session persistence, and new tests cover the blocked key-exchange path and trust-boundary behavior. Comparing the original failed diff (0eba83d) and fix diff (114d804), the missing revocation check at key-exchange time is now enforced.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-global-worker skill requires explicit rationale when manual checks are skipped for internal-only changes, but this handoff marked followedProcedure=true without an explicit manual-checks-not-applicable note.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md steps 8 and 10 vs handoff 2026-02-28T14-15-58-524Z__global-async-fix-revocation-enforced-key-exchange__bb201382-90a0-44e3-b5d0-1015773be5ef.json (verification includes commandsRun only, no interactiveChecks/rationale)."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/global-async-messaging/scrutiny/reviews/e2ee-rekey-rotation-revocation-and-leak-hardening.json",
+  "summary": "Pass. The original blocking issue (no revocation gate in performKeyExchange) is fixed in commit 114d804, and the new revocation-at-key-exchange tests demonstrate revoked peers cannot re-establish trust via fresh exchange."
+}

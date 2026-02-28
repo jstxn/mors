@@ -1,0 +1,21 @@
+{
+  "featureId": "global-async-fix-relay-entrypoint-message-store-wiring",
+  "reviewedAt": "2026-02-28T14:20:57Z",
+  "commitId": "030461b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly resolves the prior blocking integration gap: production relay startup now constructs and passes a RelayMessageStore to createRelayServer, which activates the message routes that were previously gated off in runtime. The original feature diff (3524c8d) added async messaging routes behind `messageStore` checks, and the fix diff (030461b) wires that dependency through the real entrypoint path.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "The worker encountered a transient full-suite failure caused by stale `dist/` artifacts after source edits and had to run `npm run build` before re-running tests. This rebuild dependency for tests that execute `dist` paths is not explicitly captured in shared library guidance.",
+      "evidence": "Fix transcript skeleton for session a17f6498-92ec-4df7-a084-86998dab2354 shows `test/auth/cli-auth-gating.test.ts` failing with a missing export from `dist/relay/index.js`, then passing after `npm run build`. `.factory/library/user-testing.md` references `node dist/index.js` usage but does not document rebuild expectations after TS source changes."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/global-async-messaging/scrutiny/reviews/relay-async-send-inbox-read-ack-sync.json",
+  "summary": "Pass. The fix adequately addresses the original failure by wiring RelayMessageStore into the production relay entrypoint so `/messages`, `/inbox`, and message action routes are active in real runtime rather than only in test-only server construction."
+}

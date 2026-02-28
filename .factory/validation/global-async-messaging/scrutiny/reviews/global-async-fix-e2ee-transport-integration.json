@@ -1,0 +1,28 @@
+{
+  "featureId": "global-async-fix-e2ee-transport-integration",
+  "reviewedAt": "2026-02-28T14:22:24Z",
+  "commitId": "a897de6",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Compared against the prior failed feature (fd4b7f0), this fix moves cipher usage into the relay transport layer by adding RelayClient.sendEncrypted/readDecrypted and validating them with relay-backed integration tests. The added tests exercise ciphertext-only wire/store behavior, recipient decrypt success, and tamper rejection in end-to-end relay send/read paths, which addresses the original 'cipher only tested in isolation' failure.",
+    "issues": [
+      {
+        "file": "src/cli.ts",
+        "line": 414,
+        "severity": "non_blocking",
+        "description": "Remote CLI send/read paths still call RelayClient.send/read directly (src/cli.ts:414, src/cli.ts:657), so encrypted transport is currently opt-in via sendEncrypted/readDecrypted rather than the default CLI remote flow."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-global-worker skill requires manual checks for user-facing changes or an explicit handoff rationale when manual checks are not applicable, but this handoff only listed automated commands and still marked followedProcedure=true.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 8 vs handoff verification block in mission handoff file 2026-02-28T14-12-03-593Z__global-async-fix-e2ee-transport-integration__f6fd3a52-d559-48d8-9f02-169c7da5808c.json"
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/global-async-messaging/scrutiny/reviews/e2ee-ciphertext-delivery-decrypt-and-tamper-detection.json",
+  "summary": "Pass: the fix integrates E2EE operations into actual relay transport methods and adds relay-backed decrypt/tamper tests, resolving the prior isolation-only implementation gap. One non-blocking follow-up remains: CLI remote commands are not yet wired to the encrypted RelayClient methods."
+}

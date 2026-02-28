@@ -1,0 +1,21 @@
+{
+  "featureId": "global-async-fix-relay-client-durability-and-cli-wiring",
+  "reviewedAt": "2026-02-28T14:22:42Z",
+  "commitId": "2dc4a5e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed both fix commits (2dc4a5e, c03c0db) and both fix-session transcript skeletons. Together they resolve the three original blockers: CLI remote messaging paths are wired in src/cli.ts for send/inbox/read/ack/reply via --remote (with deterministic fallback errors), offline queue durability is added via queueStorePath + load/save persistence in src/relay/client.ts, and flush reconciliation now uses bounded retry/backoff via doSendWithFlushRetry.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill requires manual CLI/API/SSE sanity checks (or explicit internal-only rationale), but both fix handoffs mark followedProcedure=true with command-only verification and no interactiveChecks evidence.",
+      "evidence": "/Users/justen/Development/mors/.factory/skills/mors-global-worker/SKILL.md:31-33 requires manual checks/rationale and followedProcedure=false when skipped; handoffs 2026-02-28T13-51-47-786Z__global-async-fix-relay-client-durability-and-cli-wiring__042e192b-8909-403e-b16d-2ccb32fa85ed.json:14,110 and 2026-02-28T14-03-24-646Z__global-async-fix-cli-relayclient-command-wiring__b22e6aa7-fb88-47f3-bd99-6478d76cb28f.json:14,98 show commandsRun + followedProcedure true with no interactiveChecks block."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/global-async-messaging/scrutiny/reviews/relay-offline-sync-and-transient-retry-recovery.json",
+  "summary": "Pass. The two fix features jointly close the prior blocking gaps: RelayClient-backed CLI remote paths are now present, offline queue state persists across restarts, and flush reconciliation supports transient retry/backoff. No new blocking code defects were found in the reviewed diffs."
+}

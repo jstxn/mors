@@ -1,83 +1,41 @@
 {
   "milestone": "global-async-messaging",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
     "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
   },
   "reviewsSummary": {
-    "total": 6,
-    "passed": 1,
-    "failed": 5,
-    "failedFeatures": [
-      "relay-async-send-inbox-read-ack-sync",
-      "relay-thread-reply-dedupe-and-idempotent-transitions",
-      "relay-offline-sync-and-transient-retry-recovery",
-      "e2ee-ciphertext-delivery-decrypt-and-tamper-detection",
-      "e2ee-rekey-rotation-revocation-and-leak-hardening"
-    ]
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
+  "blockingIssues": [],
+  "nonBlockingIssues": [
     {
-      "featureId": "relay-async-send-inbox-read-ack-sync",
-      "severity": "blocking",
-      "description": "Relay runtime entrypoint (src/relay/index.ts:39) does not pass messageStore to createRelayServer. All messaging routes (/messages, /inbox, /messages/:id/read, /messages/:id/ack) are gated by `&& messageStore` checks in server.ts, so they are effectively disabled in the production relay startup path. Only test-only construction exercises these routes."
-    },
-    {
-      "featureId": "relay-thread-reply-dedupe-and-idempotent-transitions",
-      "severity": "blocking",
-      "description": "Relay dedupe lookup in src/relay/message-store.ts:176 is keyed only by sender_id + dedupe_key without validating recipient/in_reply_to/thread compatibility. Reusing the same key in an incompatible context (different recipient, different reply parent) cross-collides instead of rejecting, violating VAL-RELAY-009. Tests at test/relay/thread-dedupe.test.ts:418 encode this incorrect cross-colliding behavior."
-    },
-    {
-      "featureId": "relay-offline-sync-and-transient-retry-recovery",
-      "severity": "blocking",
-      "description": "Three gaps: (1) CLI send/inbox/read/ack paths (src/cli.ts) never use RelayClient — local message-store is still the only path, so CLI-observable retry/offline behavior is absent. (2) Offline queue (src/relay/client.ts:154) is in-memory only — queued messages are lost on process restart, violating local-first durability. (3) flush() does single-shot attempts without retry/backoff during reconciliation (src/relay/client.ts:228), leaving transient failures unrecovered."
-    },
-    {
-      "featureId": "e2ee-ciphertext-delivery-decrypt-and-tamper-detection",
-      "severity": "blocking",
-      "description": "Cipher runtime (encrypt/decrypt) was added and tested in isolation, but relay path still sends and handles plaintext body: src/relay/client.ts:286 sends `body: payload.body` in plaintext, and src/relay/server.ts:268 reads/stores/returns plaintext body. E2EE is not integrated into the relay transport path, violating VAL-E2EE-003 (ciphertext-only wire), VAL-E2EE-004 (recipient decrypt), and relay-path VAL-E2EE-009 (tamper detection on wire)."
-    },
-    {
-      "featureId": "e2ee-rekey-rotation-revocation-and-leak-hardening",
-      "severity": "blocking",
-      "description": "performKeyExchange() in src/e2ee/key-exchange.ts:186 never checks revocation state (isDeviceRevoked). After revokeDevice() marks a device revoked at line 475, callers can still perform a fresh key exchange with that device, restoring decrypt capability and violating the rotation/revocation trust boundary (VAL-E2EE-006). Test assertions at test/e2ee/rekey-rotation.test.ts:338 check CipherError on decrypt but not the key-exchange-blocked path."
+      "featureId": "global-async-fix-e2ee-transport-integration",
+      "severity": "non_blocking",
+      "description": "CLI remote send/read paths (src/cli.ts) still call RelayClient.send/read directly rather than sendEncrypted/readDecrypted, so encrypted transport is opt-in via explicit method calls rather than the default CLI remote flow. This is expected to be addressed in later milestones when CLI E2EE UX is fully wired."
     }
   ],
-  "appliedUpdates": [],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Added dist/ rebuild caveat to .factory/library/environment.md — workers must run `npm run build` after TS source changes before full test suite, as some tests execute from dist/.",
+      "sourceFeature": "global-async-fix-relay-entrypoint-message-store-wiring"
+    }
+  ],
   "suggestedGuidanceUpdates": [
     {
-      "target": "AGENTS.md",
-      "suggestion": "Add implementation convention: 'Workers implementing relay-path features must verify that their code is wired into the relay production entrypoint (src/relay/index.ts), not only exercised in test-only server construction. Features that add optional dependencies to createRelayServer must also update the relay entrypoint to provide them.'",
-      "evidence": "relay-async-send-inbox-read-ack-sync added messageStore-gated routes to server.ts but never updated index.ts to provide messageStore, leaving all messaging routes disabled in production. Same pattern risk exists for future optional relay dependencies.",
-      "isSystemic": true
-    },
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Add implementation convention: 'Relay dedupe-key scope must include context fields (recipient, thread, reply parent) — not just sender+key. Workers modifying dedupe behavior must verify against VAL-RELAY-009 incompatible-context non-collision requirement.'",
-      "evidence": "relay-thread-reply-dedupe feature implemented sender+key-only dedupe in message-store.ts without context-compatibility validation, and tests encoded this incorrect behavior as expected.",
-      "isSystemic": false
-    },
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Add implementation convention: 'E2EE revocation must be enforced at key-exchange time, not just at decrypt time. performKeyExchange() must check isDeviceRevoked() and reject exchanges with revoked devices.'",
-      "evidence": "e2ee-rekey-rotation feature stored revocation state but never enforced it during key exchange, allowing revoked devices to re-establish trust. Tests verified decrypt failure but not key-exchange prevention.",
-      "isSystemic": false
-    },
-    {
       "target": "skills",
-      "suggestion": "Strengthen mors-global-worker skill: require explicit evidence (or documented rationale) for manual CLI/API/SSE sanity checks in worker handoffs. Multiple workers in this milestone marked followedProcedure=true without any manual verification evidence despite feature expectations requiring CLI-observable behavior.",
-      "evidence": "4 of 6 features had shared-state observations noting that workers claimed followedProcedure=true without manual check evidence: relay-async-send-inbox-read-ack-sync, relay-thread-reply-dedupe, relay-offline-sync-and-transient-retry-recovery, relay-sender-binding-and-spoof-prevention.",
+      "suggestion": "Strengthen mors-global-worker skill: require workers to either (a) include interactiveChecks evidence in handoff verification for user-facing changes, or (b) explicitly document a 'not applicable' rationale when the feature is internal-only. Workers marking followedProcedure=true without either should be flagged. Consider adding a handoff schema check or skill-step reminder.",
+      "evidence": "4 of 5 fix feature reviews flagged the same pattern: handoffs marked followedProcedure=true with command-only verification and no interactiveChecks block or not-applicable rationale, despite skill step 8 requiring manual checks for user-facing surfaces. Features: global-async-fix-dedupe-context-compatibility, global-async-fix-relay-client-durability-and-cli-wiring, global-async-fix-cli-relayclient-command-wiring, global-async-fix-e2ee-transport-integration, global-async-fix-revocation-enforced-key-exchange.",
       "isSystemic": true
     }
   ],
-  "rejectedObservations": [
-    {
-      "observation": "Shared guidance does not clearly encode relay dedupe-context compatibility rules",
-      "reason": "Subsumed by the AGENTS.md suggestion about dedupe-key scope. The validation contract already specifies this (VAL-RELAY-009), so this is an enforcement/guidance gap rather than a missing library entry."
-    }
-  ],
-  "previousRound": null
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/global-async-messaging/scrutiny/synthesis.json (round 1)"
 }

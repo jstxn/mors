@@ -1,0 +1,21 @@
+{
+  "featureId": "global-async-fix-dedupe-context-compatibility",
+  "reviewedAt": "2026-02-28T14:20:30Z",
+  "commitId": "fc2947d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly addresses the prior blocking VAL-RELAY-009 gap: relay dedupe hits now enforce recipient/in_reply_to compatibility and reject incompatible reuse via DedupeConflictError, with server-level 409 dedupe_conflict responses. The old cross-recipient-collision expectation was replaced with rejection tests, and added cases cover recipient mismatch, reply-parent mismatch, root-vs-reply mismatches, compatible retry convergence, and conflict detail output.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill requires manual CLI/API/SSE sanity checks for user-facing changes (or an explicit not-applicable rationale for internal-only work), but this fix handoff marked followedProcedure=true without interactive check evidence or a not-applicable rationale.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 8 requires manual sanity checks for user-facing surfaces or explicit not-applicable rationale. The feature changed relay HTTP behavior (POST /messages now returns 409 dedupe_conflict for incompatible dedupe reuse in src/relay/server.ts:303-305), while handoff for workerSessionId 8bf9b369-e150-4ee4-9690-fd69a522fb24 includes verification.commandsRun only and no verification.interactiveChecks or rationale, yet sets handoff.skillFeedback.followedProcedure=true."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/global-async-messaging/scrutiny/reviews/relay-thread-reply-dedupe-and-idempotent-transitions.json",
+  "summary": "Reviewed fix commit fc2947d against prior failure in relay-thread-reply-dedupe-and-idempotent-transitions (b62a6e1). The prior sender+dedupe-key-only cross-collision behavior in relay dedupe was corrected with explicit context-compatibility enforcement and 409 conflict handling, and the tests now assert incompatible context rejection rather than cross-recipient dedupe, so the blocking issue is resolved."
+}
