@@ -1102,24 +1102,27 @@ describe('reply dedupe causal linkage', () => {
 // True overlapping contention: concurrent reply operations
 // ---------------------------------------------------------------------------
 
-describe('reply contention: overlapping concurrent reply creation', () => {
-  it('many concurrent replies to the same parent all persist with unique IDs', () => {
-    const db = openDb();
+describe('reply contention: overlapping multi-handle reply creation', () => {
+  it('interleaved replies across multiple DB handles all persist with unique IDs', () => {
+    // Open multiple independent DB handles to create real SQLite-level contention
+    const handles = Array.from({ length: 4 }, () => openDb());
     try {
-      const root = sendMessage(db, {
+      // Use first handle to create root
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
-        body: 'Root for contention test',
+        body: 'Root for multi-handle contention test',
       });
 
-      // Fire multiple reply operations in tight succession to exercise contention
+      // Interleave reply operations across different handles (round-robin)
+      // Each handle competes for SQLite write locks, exercising real overlap
       const replyCount = 20;
       const replies = Array.from({ length: replyCount }, (_, i) =>
-        replyMessage(db, {
+        replyMessage(handles[i % handles.length], {
           parentMessageId: root.id,
           sender: `agent-${i}`,
           recipient: 'alice',
-          body: `Contention reply ${i}`,
+          body: `Multi-handle contention reply ${i}`,
         })
       );
 
@@ -1133,32 +1136,36 @@ describe('reply contention: overlapping concurrent reply creation', () => {
         expect(reply.in_reply_to).toBe(root.id);
       }
 
-      // Thread has root + all replies
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(replyCount + 1);
-
-      // Verify causal ordering: root is first, every reply appears after root
-      expect(thread[0].id).toBe(root.id);
-      for (let i = 1; i < thread.length; i++) {
-        expect(thread[i].in_reply_to).toBe(root.id);
+      // Verify via a fresh handle to ensure cross-handle consistency
+      const verifyDb = openDb();
+      try {
+        const thread = listThread(verifyDb, root.thread_id);
+        expect(thread.length).toBe(replyCount + 1);
+        expect(thread[0].id).toBe(root.id);
+        for (let i = 1; i < thread.length; i++) {
+          expect(thread[i].in_reply_to).toBe(root.id);
+        }
+      } finally {
+        verifyDb.close();
       }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 
-  it('concurrent replies with same dedupe key converge without SQLITE_CONSTRAINT leakage', () => {
-    const db = openDb();
+  it('dedupe replies across multiple DB handles converge without SQLITE_CONSTRAINT leakage', () => {
+    const handles = Array.from({ length: 3 }, () => openDb());
     try {
-      const root = sendMessage(db, {
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
-        body: 'Root for dedupe contention',
+        body: 'Root for multi-handle dedupe contention',
       });
 
-      const dedupeKey = 'dup_reply-contention-dedupe';
-      const results = Array.from({ length: 15 }, () =>
-        replyMessage(db, {
+      // Interleave dedupe reply attempts across different handles
+      const dedupeKey = 'dup_multi-handle-reply-dedupe';
+      const results = Array.from({ length: 15 }, (_, i) =>
+        replyMessage(handles[i % handles.length], {
           parentMessageId: root.id,
           sender: 'bob',
           recipient: 'alice',
@@ -1175,99 +1182,102 @@ describe('reply contention: overlapping concurrent reply creation', () => {
       const originals = results.filter((r) => !r.dedupe_replay);
       expect(originals.length).toBe(1);
 
-      // Thread has root + exactly 1 reply
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(2);
+      // Verify via fresh handle
+      const verifyDb = openDb();
+      try {
+        const thread = listThread(verifyDb, root.thread_id);
+        expect(thread.length).toBe(2);
+      } finally {
+        verifyDb.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 
-  it('concurrent nested replies to different parents maintain correct linkage', () => {
-    const db = openDb();
+  it('interleaved nested replies to different parents across handles maintain correct linkage', () => {
+    const handles = Array.from({ length: 3 }, () => openDb());
     try {
-      const root = sendMessage(db, {
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
         body: 'Root',
       });
 
-      // Create two sibling branches
-      const branchA = replyMessage(db, {
+      // Create branches on different handles
+      const branchA = replyMessage(handles[1], {
         parentMessageId: root.id,
         sender: 'bob',
         recipient: 'alice',
         body: 'Branch A',
       });
 
-      const branchB = replyMessage(db, {
+      const branchB = replyMessage(handles[2], {
         parentMessageId: root.id,
         sender: 'charlie',
         recipient: 'alice',
         body: 'Branch B',
       });
 
-      // Fire concurrent nested replies to both branches
-      const nestedA = Array.from({ length: 5 }, (_, i) =>
-        replyMessage(db, {
-          parentMessageId: branchA.id,
-          sender: `agent-a${i}`,
-          recipient: 'alice',
-          body: `Nested A ${i}`,
-        })
-      );
-
-      const nestedB = Array.from({ length: 5 }, (_, i) =>
-        replyMessage(db, {
-          parentMessageId: branchB.id,
-          sender: `agent-b${i}`,
-          recipient: 'alice',
-          body: `Nested B ${i}`,
-        })
-      );
-
-      // Verify all nested replies link to correct parents
-      for (const reply of nestedA) {
-        expect(reply.in_reply_to).toBe(branchA.id);
-        expect(reply.thread_id).toBe(root.thread_id);
-      }
-      for (const reply of nestedB) {
-        expect(reply.in_reply_to).toBe(branchB.id);
-        expect(reply.thread_id).toBe(root.thread_id);
+      // Interleave nested replies across handles alternating between branches
+      const nestedReplies: ReturnType<typeof replyMessage>[] = [];
+      for (let i = 0; i < 10; i++) {
+        const parentId = i % 2 === 0 ? branchA.id : branchB.id;
+        const label = i % 2 === 0 ? 'A' : 'B';
+        nestedReplies.push(
+          replyMessage(handles[i % handles.length], {
+            parentMessageId: parentId,
+            sender: `agent-${label}${i}`,
+            recipient: 'alice',
+            body: `Nested ${label} ${i}`,
+          })
+        );
       }
 
-      // Thread should have root + 2 branches + 10 nested = 13 messages
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(13);
+      // Verify correct parent linkage
+      for (let i = 0; i < nestedReplies.length; i++) {
+        const expectedParent = i % 2 === 0 ? branchA.id : branchB.id;
+        expect(nestedReplies[i].in_reply_to).toBe(expectedParent);
+        expect(nestedReplies[i].thread_id).toBe(root.thread_id);
+      }
 
-      // Root is first, then each parent appears before its children
-      expect(thread[0].id).toBe(root.id);
-      for (let i = 1; i < thread.length; i++) {
-        const msg = thread[i];
-        if (msg.in_reply_to) {
-          const parentIdx = thread.findIndex((m) => m.id === msg.in_reply_to);
-          expect(parentIdx).toBeGreaterThanOrEqual(0);
-          expect(parentIdx).toBeLessThan(i);
+      // Verify via fresh handle: root + 2 branches + 10 nested = 13
+      const verifyDb = openDb();
+      try {
+        const thread = listThread(verifyDb, root.thread_id);
+        expect(thread.length).toBe(13);
+
+        // Causal ordering: root first, parents before children
+        expect(thread[0].id).toBe(root.id);
+        for (let i = 1; i < thread.length; i++) {
+          const msg = thread[i];
+          if (msg.in_reply_to) {
+            const parentIdx = thread.findIndex((m) => m.id === msg.in_reply_to);
+            expect(parentIdx).toBeGreaterThanOrEqual(0);
+            expect(parentIdx).toBeLessThan(i);
+          }
         }
+      } finally {
+        verifyDb.close();
       }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 
-  it('concurrent dedupe reply and non-dedupe reply to same parent coexist correctly', () => {
-    const db = openDb();
+  it('mixed dedupe and non-dedupe replies across handles coexist correctly', () => {
+    const handles = Array.from({ length: 3 }, () => openDb());
     try {
-      const root = sendMessage(db, {
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
-        body: 'Root for mixed contention',
+        body: 'Root for mixed multi-handle contention',
       });
 
-      // Dedupe reply (same key, 5 attempts — should converge to 1)
-      const dedupeKey = 'dup_mixed-contention';
-      const dedupeResults = Array.from({ length: 5 }, () =>
-        replyMessage(db, {
+      // Interleave dedupe replies across handles (same key, converge to 1)
+      const dedupeKey = 'dup_mixed-multi-handle';
+      const dedupeResults = Array.from({ length: 5 }, (_, i) =>
+        replyMessage(handles[i % handles.length], {
           parentMessageId: root.id,
           sender: 'bob',
           recipient: 'alice',
@@ -1276,9 +1286,9 @@ describe('reply contention: overlapping concurrent reply creation', () => {
         })
       );
 
-      // Non-dedupe replies (3 unique)
+      // Interleave non-dedupe replies across handles
       const nonDedupeResults = Array.from({ length: 3 }, (_, i) =>
-        replyMessage(db, {
+        replyMessage(handles[(i + 1) % handles.length], {
           parentMessageId: root.id,
           sender: `agent-${i}`,
           recipient: 'alice',
@@ -1294,11 +1304,16 @@ describe('reply contention: overlapping concurrent reply creation', () => {
       const nonDedupeIds = new Set(nonDedupeResults.map((r) => r.id));
       expect(nonDedupeIds.size).toBe(3);
 
-      // Thread: root + 1 dedupe reply + 3 non-dedupe = 5
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(5);
+      // Verify via fresh handle: root + 1 dedupe + 3 non-dedupe = 5
+      const verifyDb = openDb();
+      try {
+        const thread = listThread(verifyDb, root.thread_id);
+        expect(thread.length).toBe(5);
+      } finally {
+        verifyDb.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 

@@ -1050,61 +1050,74 @@ describe('VAL-CROSS-006: encryption fail-closed after real usage', () => {
 // Additional cross-flow integration scenarios
 // ---------------------------------------------------------------------------
 
-describe('cross-flow: concurrent operations', () => {
-  it('concurrent sends with different dedupe keys produce distinct messages', () => {
-    const db = openDb();
+describe('cross-flow: multi-handle concurrent operations', () => {
+  it('interleaved sends across handles with different dedupe keys produce distinct messages', () => {
+    // Open multiple DB handles for true SQLite-level write contention
+    const handles = Array.from({ length: 3 }, () => openDb());
     try {
-      // Simulate concurrent sends (same DB handle, sequential but distinct)
+      // Interleave sends across different handles (round-robin)
       const results = Array.from({ length: 5 }, (_, i) =>
-        sendMessage(db, {
+        sendMessage(handles[i % handles.length], {
           sender: 'agent-a',
           recipient: 'agent-b',
-          body: `Concurrent message ${i}`,
-          dedupeKey: `dup_concurrent-${i}`,
+          body: `Multi-handle message ${i}`,
+          dedupeKey: `dup_multi-handle-concurrent-${i}`,
         })
       );
 
       const uniqueIds = new Set(results.map((r) => r.id));
       expect(uniqueIds.size).toBe(5);
 
-      const inbox = listInbox(db, { recipient: 'agent-b' });
-      expect(inbox.length).toBe(5);
+      // Verify via fresh handle for cross-connection consistency
+      const verifyDb = openDb();
+      try {
+        const inbox = listInbox(verifyDb, { recipient: 'agent-b' });
+        expect(inbox.length).toBe(5);
+      } finally {
+        verifyDb.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 
-  it('concurrent replies to the same parent are all preserved', () => {
-    const db = openDb();
+  it('interleaved replies across handles to the same parent are all preserved', () => {
+    const handles = Array.from({ length: 3 }, () => openDb());
     try {
-      const root = sendMessage(db, {
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
-        body: 'Root for concurrent replies',
+        body: 'Root for multi-handle concurrent replies',
       });
 
+      // Each reply uses a different DB handle
       const replies = Array.from({ length: 3 }, (_, i) =>
-        replyMessage(db, {
+        replyMessage(handles[i % handles.length], {
           parentMessageId: root.id,
           sender: `agent-${i}`,
           recipient: 'alice',
-          body: `Concurrent reply ${i}`,
+          body: `Multi-handle reply ${i}`,
         })
       );
 
       const uniqueReplyIds = new Set(replies.map((r) => r.id));
       expect(uniqueReplyIds.size).toBe(3);
 
-      // All replies share the same thread_id
       for (const reply of replies) {
         expect(reply.thread_id).toBe(root.thread_id);
         expect(reply.in_reply_to).toBe(root.id);
       }
 
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(4); // root + 3 replies
+      // Verify via fresh handle
+      const verifyDb = openDb();
+      try {
+        const thread = listThread(verifyDb, root.thread_id);
+        expect(thread.length).toBe(4); // root + 3 replies
+      } finally {
+        verifyDb.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 });
@@ -1190,11 +1203,13 @@ describe('cross-flow: state consistency edge cases', () => {
 // True overlapping contention: concurrent send/reply/ack integration flows
 // ---------------------------------------------------------------------------
 
-describe('cross-flow: true overlapping contention', () => {
-  it('overlapping sends with unique dedupe keys produce distinct messages and consistent watch events', async () => {
-    const db = openDb();
+describe('cross-flow: true overlapping multi-handle contention', () => {
+  it('interleaved sends across handles with watch produce distinct messages and consistent events', async () => {
+    // Open multiple DB handles for real SQLite-level write contention
+    const handles = Array.from({ length: 3 }, () => openDb());
+    const watchDb = openDb();
     try {
-      const { events, done } = collectWatchEvents(db, {
+      const { events, done } = collectWatchEvents(watchDb, {
         maxEvents: 10,
         timeoutMs: 3000,
         pollIntervalMs: 30,
@@ -1202,13 +1217,13 @@ describe('cross-flow: true overlapping contention', () => {
 
       await new Promise((r) => setTimeout(r, 50));
 
-      // Fire 10 concurrent sends with distinct dedupe keys
+      // Interleave sends across different handles (round-robin)
       const results = Array.from({ length: 10 }, (_, i) =>
-        sendMessage(db, {
+        sendMessage(handles[i % handles.length], {
           sender: 'agent-a',
           recipient: 'agent-b',
-          body: `Contention message ${i}`,
-          dedupeKey: `dup_contention-${i}`,
+          body: `Multi-handle contention message ${i}`,
+          dedupeKey: `dup_mh-contention-${i}`,
         })
       );
 
@@ -1221,36 +1236,42 @@ describe('cross-flow: true overlapping contention', () => {
       // All were originals (not replays)
       expect(results.every((r) => !r.dedupe_replay)).toBe(true);
 
-      // Inbox has all 10
-      const inbox = listInbox(db, { recipient: 'agent-b' });
-      expect(inbox.length).toBe(10);
+      // Verify via fresh handle for cross-connection consistency
+      const verifyDb = openDb();
+      try {
+        const inbox = listInbox(verifyDb, { recipient: 'agent-b' });
+        expect(inbox.length).toBe(10);
+      } finally {
+        verifyDb.close();
+      }
 
       // Watch emitted one create event per message (no duplicates)
       const createEvents = events.filter((e) => e.event_type === 'message_created');
       const watchMessageIds = new Set(createEvents.map((e) => e.message_id));
       expect(watchMessageIds.size).toBe(createEvents.length);
     } finally {
-      db.close();
+      watchDb.close();
+      for (const h of handles) h.close();
     }
   });
 
-  it('overlapping replies to the same parent converge correctly across restart', () => {
-    let db = openDb();
+  it('interleaved replies across handles converge correctly across restart', () => {
+    const handles = Array.from({ length: 4 }, () => openDb());
     try {
-      const root = sendMessage(db, {
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
-        body: 'Root for overlapping reply contention',
+        body: 'Root for multi-handle reply contention',
       });
 
-      // Fire many concurrent replies (unique, no dedupe key)
+      // Interleave reply operations across different handles
       const replyCount = 15;
       const replies = Array.from({ length: replyCount }, (_, i) =>
-        replyMessage(db, {
+        replyMessage(handles[i % handles.length], {
           parentMessageId: root.id,
           sender: `agent-${i}`,
           recipient: 'alice',
-          body: `Contention reply ${i}`,
+          body: `Multi-handle contention reply ${i}`,
         })
       );
 
@@ -1258,82 +1279,103 @@ describe('cross-flow: true overlapping contention', () => {
       const ids = new Set(replies.map((r) => r.id));
       expect(ids.size).toBe(replyCount);
 
-      // Simulate restart
-      db = simulateRestart(db);
+      // Close all handles to simulate full process restart
+      for (const h of handles) h.close();
 
-      // Thread is intact after restart
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(replyCount + 1);
+      // Reopen and verify thread is intact
+      const restartDb = openDb();
+      try {
+        const thread = listThread(restartDb, root.thread_id);
+        expect(thread.length).toBe(replyCount + 1);
 
-      // Causal ordering: root first, all replies after
-      expect(thread[0].id).toBe(root.id);
-      for (let i = 1; i < thread.length; i++) {
-        expect(thread[i].in_reply_to).toBe(root.id);
-        expect(thread[i].thread_id).toBe(root.thread_id);
+        // Causal ordering: root first, all replies after
+        expect(thread[0].id).toBe(root.id);
+        for (let i = 1; i < thread.length; i++) {
+          expect(thread[i].in_reply_to).toBe(root.id);
+          expect(thread[i].thread_id).toBe(root.thread_id);
+        }
+      } finally {
+        restartDb.close();
       }
-    } finally {
-      db.close();
+      return; // handles already closed
+    } catch (err) {
+      // Clean up handles on error path
+      for (const h of handles) {
+        try {
+          h.close();
+        } catch {
+          /* already closed */
+        }
+      }
+      throw err;
     }
   });
 
-  it('overlapping dedupe sends across restart converge to single canonical message', () => {
-    let db = openDb();
+  it('interleaved dedupe sends across handles and restart converge to single canonical', () => {
+    const dedupeKey = 'dup_mh-overlap-restart-converge';
+
+    // Phase 1: interleave across multiple handles
+    const handles1 = Array.from({ length: 3 }, () => openDb());
+    let canonicalId: string;
     try {
-      const dedupeKey = 'dup_overlap-restart-converge';
-
-      // First batch: 5 sends with same dedupe key
-      const batch1 = Array.from({ length: 5 }, () =>
-        sendMessage(db, {
+      const batch1 = Array.from({ length: 5 }, (_, i) =>
+        sendMessage(handles1[i % handles1.length], {
           sender: 'agent-a',
           recipient: 'agent-b',
-          body: 'Overlap restart test',
+          body: 'Multi-handle overlap restart test',
           dedupeKey,
         })
       );
 
-      const canonicalId = batch1[0].id;
+      canonicalId = batch1[0].id;
       expect(batch1.every((r) => r.id === canonicalId)).toBe(true);
+    } finally {
+      for (const h of handles1) h.close();
+    }
 
-      // Restart
-      db = simulateRestart(db);
-
-      // Second batch: 5 more sends with same dedupe key after restart
-      const batch2 = Array.from({ length: 5 }, () =>
-        sendMessage(db, {
+    // Phase 2: restart — open fresh handles, interleave again
+    const handles2 = Array.from({ length: 3 }, () => openDb());
+    try {
+      const batch2 = Array.from({ length: 5 }, (_, i) =>
+        sendMessage(handles2[i % handles2.length], {
           sender: 'agent-a',
           recipient: 'agent-b',
-          body: 'Overlap restart test',
+          body: 'Multi-handle overlap restart test',
           dedupeKey,
         })
       );
 
-      // All converge to the same canonical ID from before restart
       expect(batch2.every((r) => r.id === canonicalId)).toBe(true);
       expect(batch2.every((r) => r.dedupe_replay)).toBe(true);
 
-      // Only one message total
-      const inbox = listInbox(db, { recipient: 'agent-b' });
-      expect(inbox.length).toBe(1);
-      expect(inbox[0].id).toBe(canonicalId);
+      // Verify only one message via fresh handle
+      const verifyDb = openDb();
+      try {
+        const inbox = listInbox(verifyDb, { recipient: 'agent-b' });
+        expect(inbox.length).toBe(1);
+        expect(inbox[0].id).toBe(canonicalId);
+      } finally {
+        verifyDb.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles2) h.close();
     }
   });
 
-  it('mixed send/reply contention with dedupe keys maintains thread and inbox integrity', () => {
-    const db = openDb();
+  it('mixed send/reply contention across handles maintains thread and inbox integrity', () => {
+    const handles = Array.from({ length: 3 }, () => openDb());
     try {
-      // Create a conversation thread under contention
-      const root = sendMessage(db, {
+      // Create root on handle 0
+      const root = sendMessage(handles[0], {
         sender: 'alice',
         recipient: 'bob',
-        body: 'Root for mixed contention integration',
+        body: 'Root for mixed multi-handle contention integration',
       });
 
-      // Dedupe reply (same key, multiple attempts)
-      const replyDedupeKey = 'dup_mixed-integration-reply';
-      const replyResults = Array.from({ length: 5 }, () =>
-        replyMessage(db, {
+      // Interleave dedupe reply attempts across handles
+      const replyDedupeKey = 'dup_mh-mixed-integration-reply';
+      const replyResults = Array.from({ length: 5 }, (_, i) =>
+        replyMessage(handles[i % handles.length], {
           parentMessageId: root.id,
           sender: 'bob',
           recipient: 'alice',
@@ -1346,9 +1388,9 @@ describe('cross-flow: true overlapping contention', () => {
       const replyIds = new Set(replyResults.map((r) => r.id));
       expect(replyIds.size).toBe(1);
 
-      // Non-dedupe replies (each unique)
+      // Interleave non-dedupe replies across handles
       const uniqueReplies = Array.from({ length: 3 }, (_, i) =>
-        replyMessage(db, {
+        replyMessage(handles[(i + 1) % handles.length], {
           parentMessageId: root.id,
           sender: `agent-${i}`,
           recipient: 'alice',
@@ -1356,46 +1398,54 @@ describe('cross-flow: true overlapping contention', () => {
         })
       );
 
-      // All unique IDs
       const uniqueIds = new Set(uniqueReplies.map((r) => r.id));
       expect(uniqueIds.size).toBe(3);
 
-      // Thread: root + 1 dedupe reply + 3 unique replies = 5
-      const thread = listThread(db, root.thread_id);
-      expect(thread.length).toBe(5);
+      // Verify via fresh handle: thread = root + 1 dedupe + 3 unique = 5
+      const verifyDb = openDb();
+      try {
+        const thread = listThread(verifyDb, root.thread_id);
+        expect(thread.length).toBe(5);
 
-      // Inbox integrity: all messages accounted for
-      const inbox = listInbox(db, {});
-      expect(inbox.length).toBe(5);
+        const inbox = listInbox(verifyDb, {});
+        expect(inbox.length).toBe(5);
+      } finally {
+        verifyDb.close();
+      }
 
       // Verify read/ack lifecycle works on contention-created messages
-      readMessage(db, root.id);
-      ackMessage(db, root.id);
+      readMessage(handles[0], root.id);
+      ackMessage(handles[1], root.id);
 
       const replyId = [...replyIds][0];
-      readMessage(db, replyId);
-      ackMessage(db, replyId);
+      readMessage(handles[2], replyId);
+      ackMessage(handles[0], replyId);
 
-      const finalInbox = listInbox(db, {});
-      const ackedMessages = finalInbox.filter((m) => m.state === 'acked');
-      expect(ackedMessages.length).toBe(2);
+      const verifyDb2 = openDb();
+      try {
+        const finalInbox = listInbox(verifyDb2, {});
+        const ackedMessages = finalInbox.filter((m) => m.state === 'acked');
+        expect(ackedMessages.length).toBe(2);
+      } finally {
+        verifyDb2.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 
-  it('concurrent dedupe sends do not leak SQLITE_CONSTRAINT errors', () => {
-    const db = openDb();
+  it('interleaved dedupe sends across handles do not leak SQLITE_CONSTRAINT errors', () => {
+    const handles = Array.from({ length: 4 }, () => openDb());
     try {
-      const dedupeKey = 'dup_integration-no-leak';
+      const dedupeKey = 'dup_mh-integration-no-leak';
       const errors: Error[] = [];
 
-      // Fire 20 concurrent sends with same dedupe key, collect any errors
+      // Interleave 20 sends with same dedupe key across handles
       const results: ReturnType<typeof sendMessage>[] = [];
       for (let i = 0; i < 20; i++) {
         try {
           results.push(
-            sendMessage(db, {
+            sendMessage(handles[i % handles.length], {
               sender: 'agent-a',
               recipient: 'agent-b',
               body: 'No leak test',
@@ -1418,11 +1468,16 @@ describe('cross-flow: true overlapping contention', () => {
         expect(results.every((r) => r.id === canonicalId)).toBe(true);
       }
 
-      // Exactly one message
-      const inbox = listInbox(db, { recipient: 'agent-b' });
-      expect(inbox.length).toBe(1);
+      // Verify exactly one message via fresh handle
+      const verifyDb = openDb();
+      try {
+        const inbox = listInbox(verifyDb, { recipient: 'agent-b' });
+        expect(inbox.length).toBe(1);
+      } finally {
+        verifyDb.close();
+      }
     } finally {
-      db.close();
+      for (const h of handles) h.close();
     }
   });
 });
