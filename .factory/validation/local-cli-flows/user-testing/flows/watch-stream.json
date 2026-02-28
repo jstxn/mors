@@ -1,0 +1,24 @@
+{
+  "groupId": "watch-stream",
+  "assertions": {
+    "VAL-WATCH-001": {
+      "status": "pass",
+      "evidence": "Started mors watch in background, sent message msg_d5e0daa8 and reply msg_187c2b9f. Watch output showed: [📨 New message] with message_id, thread_id, sender, recipient, state; [↩️ Reply] with message_id, thread_id, in_reply_to, sender, recipient, state. All required context fields present."
+    },
+    "VAL-WATCH-002": {
+      "status": "pass",
+      "evidence": "Sent SIGINT to watch process. Watch printed 'Watch stopped.' and exited cleanly. kill -0 check confirmed process terminated. No orphaned processes found via ps aux grep. Terminal remained usable after exit."
+    },
+    "VAL-WATCH-003": {
+      "status": "pass",
+      "evidence": "Two pre-existing messages were sent before watch started. After starting watch and waiting 2 seconds, watch output contained only the startup banner 'Watching for new events...' (1 line). No pre-existing message events were emitted. Only post-subscription send/reply events appeared."
+    },
+    "VAL-WATCH-004": {
+      "status": "pass",
+      "evidence": "Sent message msg_2137ab92, then read it, then acked it during a watch session. Watch output showed exactly 2 events for this message_id: one 📨 New message (create) and one ✅ Acked (state transition). No duplicate emissions for same event transition. Read did not produce a separate watch event (correct per design)."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["CLI direct execution (inline - subagent permission error)"]
+}

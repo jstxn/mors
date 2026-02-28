@@ -61,6 +61,9 @@ After successful `mors init`, the config dir contains:
 - `db.key` — database encryption key (32 bytes, owner-only 0o600 permissions)
 - `mors.db` — SQLCipher encrypted database
 
+### Dedupe key format
+Dedupe keys passed via `--dedupe-key` must be prefixed with `dup_` (e.g., `--dedupe-key dup_my-idempotent-key`). The CLI validates this prefix and rejects keys without it.
+
 ### Evidence collection
 - Capture terminal output (stdout and stderr separately when possible)
 - Record exit codes for every command

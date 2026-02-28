@@ -1,0 +1,28 @@
+{
+  "groupId": "threading",
+  "assertions": {
+    "VAL-THREAD-001": {
+      "status": "pass",
+      "evidence": "Reply created with exit 0. Reply thread_id=thr_697d6433 matches parent thread_id. in_reply_to=msg_17576835 matches parent message ID. Verified via mors read --json on reply."
+    },
+    "VAL-THREAD-002": {
+      "status": "pass",
+      "evidence": "mors reply msg_nonexistent-id-12345 --body 'Reply to nothing' --json returned exit code 1 with error: {\"status\":\"error\",\"error\":\"MessageNotFoundError\",\"message\":\"Message not found: msg_nonexistent-id-12345\"}. Clear actionable error."
+    },
+    "VAL-THREAD-003": {
+      "status": "pass",
+      "evidence": "Two concurrent replies (launched with &) to same parent both succeeded with exit 0. Reply A ID=msg_6b2c0bf2 and Reply B ID=msg_3b978478 are unique. Both persisted without overwrite or duplication."
+    },
+    "VAL-THREAD-004": {
+      "status": "pass",
+      "evidence": "Root msg_44a9e224 -> Reply1 msg_b7b5a16c -> Reply2 msg_de83669c. Nested reply (reply2) read --json shows thread_id=thr_01d05b73 (matches root) and in_reply_to=msg_b7b5a16c (matches immediate parent reply, not root)."
+    },
+    "VAL-THREAD-005": {
+      "status": "pass",
+      "evidence": "mors thread thr_01d05b73 --json run twice produced identical message ordering: [root, reply1, reply2]. Order is deterministic and causal (parent before descendant)."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["CLI direct execution (inline - subagent permission error)"]
+}

@@ -1,0 +1,46 @@
+{
+  "groupId": "msg-lifecycle",
+  "assertions": {
+    "VAL-MSG-001": {
+      "status": "pass",
+      "evidence": "send rc=0 id=msg_bf6a55ce-6846-4f0e-a4dd-cfd41d947fa8; inbox(before-read) rc=0 contains_id=True"
+    },
+    "VAL-MSG-002": {
+      "status": "pass",
+      "evidence": "unread before contains=True; read rc=0; unread after contains=False; read_at_after_read=2026-02-28T06:13:11.545Z"
+    },
+    "VAL-MSG-003": {
+      "status": "pass",
+      "evidence": "read rc=0 state_after_read=delivered; ack rc=0 state_after_ack=acked"
+    },
+    "VAL-MSG-004": {
+      "status": "pass",
+      "evidence": "ack rc=0 ack_output_state=acked inbox_state_after_ack=acked"
+    },
+    "VAL-MSG-005": {
+      "status": "pass",
+      "evidence": "dedupe sends rc=(0,0) ids=(msg_708c2aa0-b99e-4b23-886b-1d23b9f7e811,msg_708c2aa0-b99e-4b23-886b-1d23b9f7e811) dedupe_replay_second=True inbox_count_for_key=1"
+    },
+    "VAL-MSG-006": {
+      "status": "pass",
+      "evidence": "read-invalid rc=1 stderr=Error: Message not found: msg_not_real_123; ack-invalid rc=1 stderr=Error: Message not found: msg_not_real_123"
+    },
+    "VAL-MSG-007": {
+      "status": "pass",
+      "evidence": "states_observed=['delivered', 'delivered', 'acked', 'acked']; allowed_only=True"
+    },
+    "VAL-MSG-008": {
+      "status": "pass",
+      "evidence": "send rc=0; read --json rc=0; body_match=True"
+    },
+    "VAL-MSG-009": {
+      "status": "pass",
+      "evidence": "repeat read rc=0 repeat ack rc=0; inbox_count_stable=True; state_before_after_idempotent=('acked', 'acked'); ack_repeat_state=acked"
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "CLI direct execution"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "groupId": "cross-flows",
+  "assertions": {
+    "VAL-CROSS-001": {
+      "status": "pass",
+      "evidence": "Config dir: /var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows; transcript /var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/transcript.txt sections c001_init/c001_send/c001_inbox_before/c001_read/c001_ack/c001_inbox_after all exit=0; watch output in /var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c001_watch.log shows message_created and message_acked for msg_b3c45e2f-549e-4ce0-ac3d-732a84646990."
+    },
+    "VAL-CROSS-002": {
+      "status": "pass",
+      "evidence": "Transcript sections c002_send/c002_read/c002_inbox_after_read/c002_ack/c002_inbox_after_ack; message msg_856f8494-e9c5-48b9-8775-4d21f04fc924 remains state=delivered after read (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c002_inbox_after_read.stdout) and becomes state=acked only after explicit ack (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c002_inbox_after_ack.stdout); each command is a separate CLI invocation (restart boundary)."
+    },
+    "VAL-CROSS-003": {
+      "status": "pass",
+      "evidence": "Thread flow in transcript sections c003_*; parent msg_71305b82-1860-4d97-be5e-67e938c9b978 with replies msg_16cf9365-57fe-4739-b7c3-de10f90faede and msg_b98bb760-7f70-45aa-8a67-9e4ac1f50887. After read(reply1) and read+ack(reply2), inbox shows mixed states delivered vs acked (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c003_inbox.stdout) and thread view is consistent (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c003_thread.stdout)."
+    },
+    "VAL-CROSS-004": {
+      "status": "pass",
+      "evidence": "Retry simulation via dedupe replay: c004_send_first and c004_send_retry use --dedupe-key dup_cross004-retry and both return id msg_a1abdcff-2978-480a-ba21-ed5f264cf0db with second response dedupe_replay=true (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c004_send_retry.stdout); inbox contains exactly one message for that dedupe key (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c004_inbox.stdout); watch output shows one create event (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c004_watch.log)."
+    },
+    "VAL-CROSS-005": {
+      "status": "pass",
+      "evidence": "Across separate CLI invocations, send/replay with --dedupe-key dup_cross005-restart returns the same canonical id msg_8466eff8-ee9c-4fa9-a9db-ea2be8eeaf2c and replay response has dedupe_replay=true (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c005_send_replay.stdout); final inbox proves dedupe-key count is exactly 1 (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c005_inbox.stdout)."
+    },
+    "VAL-CROSS-006": {
+      "status": "pass",
+      "evidence": "After real usage, removing db.key causes fail-closed KeyError with exit=1 (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c006_missing_key_inbox.stdout); using wrong random db.key causes StoreEncryptionError with exit=1 (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c006_wrong_key_read.stdout); fallback scan found no plaintext/fallback DB artifacts (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c006_fallback_scan.stdout); restoring original key returns normal access with exit=0 (/var/folders/xk/ypw6cs1j15ggnz5sn2v_yzqh0000gn/T/tmp.la3hiamwyM/mors-test-cross-flows/cross-flows-evidence/c006_restore_inbox.stdout)."
+    }
+  },
+  "frictions": [
+    {
+      "description": "Dedupe keys must include the \"dup_\" prefix; this constraint is enforced by CLI validation but not stated in Flow Validator Guidance: CLI.",
+      "resolved": true,
+      "resolution": "Used dedupe keys prefixed with \"dup_\" for VAL-CROSS-001..005 sends/replays.",
+      "affectedAssertions": [
+        "VAL-CROSS-001",
+        "VAL-CROSS-002",
+        "VAL-CROSS-003",
+        "VAL-CROSS-004",
+        "VAL-CROSS-005"
+      ]
+    }
+  ],
+  "blockers": [],
+  "toolsUsed": [
+    "CLI direct execution"
+  ]
+}
