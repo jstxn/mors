@@ -171,7 +171,16 @@ describe('CLI command wiring to RelayClient (remote mode)', () => {
     saveSession(tempDir, makeSession());
 
     const result = await runCliAsync(
-      ['send', '--to', String(BOB.userId), '--body', 'hello from relay', '--remote', '--json'],
+      [
+        'send',
+        '--to',
+        String(BOB.userId),
+        '--body',
+        'hello from relay',
+        '--remote',
+        '--no-encrypt',
+        '--json',
+      ],
       {
         configDir: tempDir,
         env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
@@ -227,10 +236,13 @@ describe('CLI command wiring to RelayClient (remote mode)', () => {
     markAuthEnabled(tempDir);
     saveSession(tempDir, makeSession());
 
-    const result = await runCliAsync(['read', sent.message.id, '--remote', '--json'], {
-      configDir: tempDir,
-      env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
-    });
+    const result = await runCliAsync(
+      ['read', sent.message.id, '--remote', '--no-encrypt', '--json'],
+      {
+        configDir: tempDir,
+        env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
+      }
+    );
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.stdout);
@@ -286,6 +298,7 @@ describe('CLI command wiring to RelayClient (remote mode)', () => {
         '--body',
         'relay reply',
         '--remote',
+        '--no-encrypt',
         '--json',
       ],
       {
@@ -313,11 +326,14 @@ describe('CLI command wiring to RelayClient (remote mode)', () => {
     markAuthEnabled(tempDir);
     saveSession(tempDir, makeSession());
 
-    // Read first
-    const readResult = await runCliAsync(['read', sent.message.id, '--remote', '--json'], {
-      configDir: tempDir,
-      env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
-    });
+    // Read first (--no-encrypt for plaintext read path)
+    const readResult = await runCliAsync(
+      ['read', sent.message.id, '--remote', '--no-encrypt', '--json'],
+      {
+        configDir: tempDir,
+        env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
+      }
+    );
 
     const readParsed = JSON.parse(readResult.stdout);
     expect(readParsed.message.read_at).toBeTruthy();
@@ -347,7 +363,16 @@ describe('CLI command wiring to RelayClient (remote mode)', () => {
     saveSession(tempDir, makeSession());
 
     const result = await runCliAsync(
-      ['send', '--to', String(BOB.userId), '--body', 'queued offline', '--remote', '--json'],
+      [
+        'send',
+        '--to',
+        String(BOB.userId),
+        '--body',
+        'queued offline',
+        '--remote',
+        '--no-encrypt',
+        '--json',
+      ],
       {
         configDir: tempDir,
         env: {

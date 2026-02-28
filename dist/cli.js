@@ -10,9 +10,10 @@ import { openEncryptedDb } from './store.js';
 import { sendMessage, listInbox, readMessage, ackMessage, replyMessage, listThread, } from './message.js';
 import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
-import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, } from './errors.js';
-import { assertDeviceBootstrapped } from './e2ee/bootstrap-guard.js';
+import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
+import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
 import { getDeviceKeysDir } from './e2ee/device-keys.js';
+import { loadKeyExchangeSession, listKeyExchangeSessions, } from './e2ee/key-exchange.js';
 import { ContractValidationError } from './contract/errors.js';
 import { saveSession, loadSession, clearSession, markAuthEnabled } from './auth/session.js';
 import { requestDeviceCode, pollForToken, fetchGitHubUser, validateAuthConfig, authConfigFromEnv, DeviceFlowError, TokenExpiredError, } from './auth/device-flow.js';
@@ -157,6 +158,43 @@ function createRelayClientFromSession(configDir) {
         queueStorePath: `${configDir}/offline-queue.json`,
     });
 }
+// ── E2EE secure remote helpers ──────────────────────────────────────
+/**
+ * Resolve a key exchange session for encrypted remote messaging.
+ *
+ * If peerDeviceId is specified, loads the session for that specific peer.
+ * If not specified, lists all sessions and uses the sole session if exactly one exists.
+ *
+ * @param configDir - Config directory (used to locate E2EE keys).
+ * @param peerDeviceId - Optional explicit peer device ID.
+ * @returns The resolved KeyExchangeSession.
+ * @throws DeviceNotBootstrappedError if device keys are not bootstrapped.
+ * @throws KeyExchangeNotCompleteError if no matching key exchange session exists.
+ */
+function resolveKeyExchangeSession(configDir, peerDeviceId) {
+    const keysDir = getDeviceKeysDir(configDir);
+    // First, ensure device is bootstrapped
+    requireDeviceBootstrap(keysDir);
+    if (peerDeviceId) {
+        const session = loadKeyExchangeSession(keysDir, peerDeviceId);
+        if (!session) {
+            throw new KeyExchangeNotCompleteError(peerDeviceId);
+        }
+        return session;
+    }
+    // No peer specified — check if there's exactly one session
+    const sessions = listKeyExchangeSessions(keysDir);
+    if (sessions.length === 0) {
+        throw new KeyExchangeNotCompleteError('any', 'No key exchange sessions found. Run "mors key-exchange" with a peer device\'s ' +
+            'public key before sending encrypted messages, or use --peer-device to specify a peer.');
+    }
+    if (sessions.length === 1) {
+        return sessions[0];
+    }
+    // Multiple sessions — require explicit --peer-device
+    throw new KeyExchangeNotCompleteError('any', `Multiple key exchange sessions found (${sessions.length} peers). ` +
+        'Use --peer-device <device-id> to specify which peer to encrypt for.');
+}
 /**
  * Dispatch a gated command after init validation.
  */
@@ -224,6 +262,8 @@ function runSend(args, configDir) {
     const json = 'json' in flags;
     const secure = 'secure' in flags;
     const remote = 'remote' in flags;
+    const noEncrypt = 'no-encrypt' in flags;
+    const peerDevice = typeof flags['peer-device'] === 'string' ? flags['peer-device'] : undefined;
     const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
     const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
     const subject = typeof flags['subject'] === 'string' ? flags['subject'] : undefined;
@@ -247,6 +287,8 @@ function runSend(args, configDir) {
             body,
             subject,
             inReplyTo: undefined,
+            noEncrypt,
+            peerDevice,
         });
         return;
     }
@@ -323,6 +365,12 @@ function runSend(args, configDir) {
 /**
  * Send a message through the relay via RelayClient.
  *
+ * By default, uses encrypted transport (sendEncrypted) when a key-exchange
+ * session exists for the peer device. Provides actionable guidance when
+ * secure prerequisites (device bootstrap, key exchange) are missing.
+ *
+ * Use --no-encrypt to explicitly bypass encryption and send plaintext.
+ *
  * Uses durable queue/retry from RelayClient. If the relay is unreachable,
  * the message is queued offline for later delivery.
  */
@@ -342,6 +390,35 @@ function runRemoteSend(configDir, json, opts) {
         process.exitCode = 1;
         return;
     }
+    // ── Default encrypted path: resolve key exchange session ──────────
+    if (!opts.noEncrypt) {
+        let session;
+        try {
+            session = resolveKeyExchangeSession(configDir, opts.peerDevice);
+        }
+        catch (err) {
+            process.exitCode = 1;
+            handleSecureSetupError(err, json);
+            return;
+        }
+        client
+            .sendEncrypted({
+            recipientId,
+            body: opts.body,
+            subject: opts.subject,
+            inReplyTo: opts.inReplyTo,
+            sharedSecret: session.sharedSecret,
+        })
+            .then((result) => {
+            formatRemoteSendResult(result, json, true);
+        })
+            .catch((err) => {
+            process.exitCode = 1;
+            handleRemoteError(err, json);
+        });
+        return;
+    }
+    // ── Plaintext path (--no-encrypt) ─────────────────────────────────
     client
         .send({
         recipientId,
@@ -350,46 +427,55 @@ function runRemoteSend(configDir, json, opts) {
         inReplyTo: opts.inReplyTo,
     })
         .then((result) => {
-        if (result.queued) {
-            if (json) {
-                console.log(JSON.stringify({
-                    status: 'queued',
-                    mode: 'remote',
-                    dedupe_key: result.dedupeKey,
-                    message: 'Message queued offline. It will be delivered when the relay is reachable.',
-                }));
-            }
-            else {
-                console.log(`Message queued offline (dedupe key: ${result.dedupeKey})`);
-                console.log('It will be delivered when the relay is reachable.');
-            }
-        }
-        else if (result.message) {
-            const msg = result.message;
-            if (json) {
-                console.log(JSON.stringify({
-                    status: 'sent',
-                    mode: 'remote',
-                    id: msg.id,
-                    thread_id: msg.thread_id,
-                    in_reply_to: msg.in_reply_to,
-                    sender_id: msg.sender_id,
-                    recipient_id: msg.recipient_id,
-                    state: msg.state,
-                    dedupe_key: result.dedupeKey,
-                    created_at: msg.created_at,
-                }));
-            }
-            else {
-                console.log(`Message sent (remote): ${msg.id}`);
-                console.log(`Thread: ${msg.thread_id}`);
-            }
-        }
+        formatRemoteSendResult(result, json, false);
     })
         .catch((err) => {
         process.exitCode = 1;
         handleRemoteError(err, json);
     });
+}
+/**
+ * Format the result of a remote send operation for CLI output.
+ */
+function formatRemoteSendResult(result, json, encrypted) {
+    if (result.queued) {
+        if (json) {
+            console.log(JSON.stringify({
+                status: 'queued',
+                mode: 'remote',
+                dedupe_key: result.dedupeKey,
+                ...(encrypted ? { encrypted: true } : {}),
+                message: 'Message queued offline. It will be delivered when the relay is reachable.',
+            }));
+        }
+        else {
+            console.log(`Message queued offline (dedupe key: ${result.dedupeKey})`);
+            console.log('It will be delivered when the relay is reachable.');
+        }
+    }
+    else if (result.message) {
+        const msg = result.message;
+        if (json) {
+            console.log(JSON.stringify({
+                status: 'sent',
+                mode: 'remote',
+                id: msg.id,
+                thread_id: msg.thread_id,
+                in_reply_to: msg.in_reply_to,
+                sender_id: msg.sender_id,
+                recipient_id: msg.recipient_id,
+                state: msg.state,
+                dedupe_key: result.dedupeKey,
+                ...(encrypted ? { encrypted: true } : {}),
+                created_at: msg.created_at,
+            }));
+        }
+        else {
+            const enc = encrypted ? ' [encrypted]' : '';
+            console.log(`Message sent (remote${enc}): ${msg.id}`);
+            console.log(`Thread: ${msg.thread_id}`);
+        }
+    }
 }
 // ── Inbox command ────────────────────────────────────────────────────
 function runInbox(args, configDir) {
@@ -513,6 +599,8 @@ function runRead(args, configDir) {
     const { positional, flags } = parseArgs(args);
     const json = 'json' in flags;
     const remote = 'remote' in flags;
+    const noEncrypt = 'no-encrypt' in flags;
+    const peerDevice = typeof flags['peer-device'] === 'string' ? flags['peer-device'] : undefined;
     const messageId = positional[0];
     if (!messageId) {
         formatError('read requires a message ID argument', json);
@@ -521,7 +609,7 @@ function runRead(args, configDir) {
     }
     // ── Remote mode: read through relay ───────────────────────────────
     if (remote) {
-        runRemoteRead(configDir, json, messageId);
+        runRemoteRead(configDir, json, messageId, { noEncrypt, peerDevice });
         return;
     }
     let db = null;
@@ -564,7 +652,16 @@ function runRead(args, configDir) {
 /**
  * Read a message through the relay via RelayClient.
  */
-function runRemoteRead(configDir, json, messageId) {
+/**
+ * Read a message through the relay via RelayClient.
+ *
+ * By default, uses the encrypted read path (readDecrypted) when a key-exchange
+ * session exists. The ciphertext body is decrypted and the plaintext is displayed.
+ * Provides actionable guidance when secure prerequisites are missing.
+ *
+ * Use --no-encrypt to explicitly read the raw (ciphertext) body without decryption.
+ */
+function runRemoteRead(configDir, json, messageId, opts) {
     let client;
     try {
         client = createRelayClientFromSession(configDir);
@@ -574,6 +671,61 @@ function runRemoteRead(configDir, json, messageId) {
         handleRemoteError(err, json);
         return;
     }
+    // ── Default encrypted path: resolve key exchange session ──────────
+    if (!opts?.noEncrypt) {
+        let session;
+        try {
+            session = resolveKeyExchangeSession(configDir, opts?.peerDevice);
+        }
+        catch (err) {
+            process.exitCode = 1;
+            handleSecureSetupError(err, json);
+            return;
+        }
+        client
+            .readDecrypted(messageId, session.sharedSecret)
+            .then((result) => {
+            const msg = result.message;
+            if (json) {
+                console.log(JSON.stringify({
+                    status: 'ok',
+                    mode: 'remote',
+                    encrypted: true,
+                    first_read: result.firstRead,
+                    decrypted_body: result.decryptedBody,
+                    message: msg,
+                }));
+            }
+            else {
+                console.log(`Message (remote) [encrypted]: ${msg.id}`);
+                console.log(`Thread: ${msg.thread_id}`);
+                if (msg.in_reply_to) {
+                    console.log(`In reply to: ${msg.in_reply_to}`);
+                }
+                console.log(`From: ${msg.sender_login} (ID: ${msg.sender_id})`);
+                console.log(`To: ${msg.recipient_id}`);
+                console.log(`State: ${msg.state}`);
+                if (msg.subject) {
+                    console.log(`Subject: ${msg.subject}`);
+                }
+                console.log(`Read at: ${msg.read_at ?? 'just now'}`);
+                console.log(`Created: ${msg.created_at}`);
+                console.log('---');
+                console.log(result.decryptedBody);
+            }
+        })
+            .catch((err) => {
+            process.exitCode = 1;
+            if (err instanceof CipherError) {
+                handleSecureSetupError(err, json);
+            }
+            else {
+                handleRemoteError(err, json);
+            }
+        });
+        return;
+    }
+    // ── Plaintext path (--no-encrypt) ─────────────────────────────────
     client
         .read(messageId)
         .then((result) => {
@@ -697,6 +849,8 @@ function runReply(args, configDir) {
     const json = 'json' in flags;
     const secure = 'secure' in flags;
     const remote = 'remote' in flags;
+    const noEncrypt = 'no-encrypt' in flags;
+    const peerDevice = typeof flags['peer-device'] === 'string' ? flags['peer-device'] : undefined;
     const parentId = positional[0];
     const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
     const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
@@ -722,6 +876,8 @@ function runReply(args, configDir) {
             to: recipientId,
             body,
             subject,
+            noEncrypt,
+            peerDevice,
         });
         return;
     }
@@ -803,6 +959,10 @@ function runReply(args, configDir) {
 /**
  * Reply to a message through the relay via RelayClient.
  *
+ * By default, uses encrypted transport (sendEncrypted) when a key-exchange
+ * session exists for the peer device. Provides actionable guidance when
+ * secure prerequisites are missing.
+ *
  * Uses the send endpoint with inReplyTo to establish causal linkage.
  * The relay server resolves thread_id from the parent message.
  */
@@ -823,6 +983,35 @@ function runRemoteReply(configDir, json, opts) {
         process.exitCode = 1;
         return;
     }
+    // ── Default encrypted path: resolve key exchange session ──────────
+    if (!opts.noEncrypt) {
+        let session;
+        try {
+            session = resolveKeyExchangeSession(configDir, opts.peerDevice);
+        }
+        catch (err) {
+            process.exitCode = 1;
+            handleSecureSetupError(err, json);
+            return;
+        }
+        client
+            .sendEncrypted({
+            recipientId,
+            body: opts.body,
+            subject: opts.subject,
+            inReplyTo: opts.parentId,
+            sharedSecret: session.sharedSecret,
+        })
+            .then((result) => {
+            formatRemoteReplyResult(result, json, true, opts.parentId);
+        })
+            .catch((err) => {
+            process.exitCode = 1;
+            handleRemoteError(err, json);
+        });
+        return;
+    }
+    // ── Plaintext path (--no-encrypt) ─────────────────────────────────
     client
         .send({
         recipientId,
@@ -831,48 +1020,57 @@ function runRemoteReply(configDir, json, opts) {
         inReplyTo: opts.parentId,
     })
         .then((result) => {
-        if (result.queued) {
-            if (json) {
-                console.log(JSON.stringify({
-                    status: 'queued',
-                    mode: 'remote',
-                    dedupe_key: result.dedupeKey,
-                    in_reply_to: opts.parentId,
-                    message: 'Reply queued offline. It will be delivered when the relay is reachable.',
-                }));
-            }
-            else {
-                console.log(`Reply queued offline (dedupe key: ${result.dedupeKey})`);
-                console.log(`In reply to: ${opts.parentId}`);
-            }
-        }
-        else if (result.message) {
-            const msg = result.message;
-            if (json) {
-                console.log(JSON.stringify({
-                    status: 'replied',
-                    mode: 'remote',
-                    id: msg.id,
-                    thread_id: msg.thread_id,
-                    in_reply_to: msg.in_reply_to,
-                    sender_id: msg.sender_id,
-                    recipient_id: msg.recipient_id,
-                    state: msg.state,
-                    dedupe_key: result.dedupeKey,
-                    created_at: msg.created_at,
-                }));
-            }
-            else {
-                console.log(`Reply sent (remote): ${msg.id}`);
-                console.log(`Thread: ${msg.thread_id}`);
-                console.log(`In reply to: ${msg.in_reply_to}`);
-            }
-        }
+        formatRemoteReplyResult(result, json, false, opts.parentId);
     })
         .catch((err) => {
         process.exitCode = 1;
         handleRemoteError(err, json);
     });
+}
+/**
+ * Format the result of a remote reply operation for CLI output.
+ */
+function formatRemoteReplyResult(result, json, encrypted, parentId) {
+    if (result.queued) {
+        if (json) {
+            console.log(JSON.stringify({
+                status: 'queued',
+                mode: 'remote',
+                dedupe_key: result.dedupeKey,
+                in_reply_to: parentId,
+                ...(encrypted ? { encrypted: true } : {}),
+                message: 'Reply queued offline. It will be delivered when the relay is reachable.',
+            }));
+        }
+        else {
+            console.log(`Reply queued offline (dedupe key: ${result.dedupeKey})`);
+            console.log(`In reply to: ${parentId}`);
+        }
+    }
+    else if (result.message) {
+        const msg = result.message;
+        if (json) {
+            console.log(JSON.stringify({
+                status: 'replied',
+                mode: 'remote',
+                id: msg.id,
+                thread_id: msg.thread_id,
+                in_reply_to: msg.in_reply_to,
+                sender_id: msg.sender_id,
+                recipient_id: msg.recipient_id,
+                state: msg.state,
+                dedupe_key: result.dedupeKey,
+                ...(encrypted ? { encrypted: true } : {}),
+                created_at: msg.created_at,
+            }));
+        }
+        else {
+            const enc = encrypted ? ' [encrypted]' : '';
+            console.log(`Reply sent (remote${enc}): ${msg.id}`);
+            console.log(`Thread: ${msg.thread_id}`);
+            console.log(`In reply to: ${msg.in_reply_to}`);
+        }
+    }
 }
 // ── Thread command ───────────────────────────────────────────────────
 function runThread(args, configDir) {
@@ -1404,6 +1602,33 @@ function handleRemoteError(err, json) {
         formatError(msg, json, 'unknown');
     }
 }
+/**
+ * Handle errors from secure setup prerequisites with actionable guidance.
+ *
+ * Maps specific E2EE error types to actionable CLI output:
+ * - DeviceNotBootstrappedError → device_not_bootstrapped with init guidance
+ * - KeyExchangeNotCompleteError → key_exchange_required with exchange guidance
+ * - CipherError → cipher_error with rekey guidance
+ * - Other MorsError → error type name
+ */
+function handleSecureSetupError(err, json) {
+    if (err instanceof DeviceNotBootstrappedError) {
+        formatError(err.message, json, 'device_not_bootstrapped');
+    }
+    else if (err instanceof KeyExchangeNotCompleteError) {
+        formatError(err.message, json, 'key_exchange_required');
+    }
+    else if (err instanceof CipherError) {
+        formatError(err.message, json, 'cipher_error');
+    }
+    else if (err instanceof MorsError) {
+        formatError(err.message, json, err.name);
+    }
+    else {
+        const msg = err instanceof Error ? err.message : String(err);
+        formatError(msg, json, 'unknown');
+    }
+}
 function formatError(message, json, errorType) {
     if (json) {
         console.log(JSON.stringify({
@@ -1443,6 +1668,8 @@ Options:
 
 Remote mode:
   --remote               Route command through relay (requires auth + MORS_RELAY_BASE_URL)
+  --peer-device <id>     Peer device ID for E2EE key exchange session lookup
+  --no-encrypt           Bypass E2EE encryption (send/read plaintext via relay)
 
 Send options:
   --to <recipient>       Recipient identity (required; numeric GitHub user ID for --remote)
@@ -1451,7 +1678,7 @@ Send options:
   --subject <subject>    Message subject
   --dedupe-key <key>     Dedupe key for idempotent sends (must start with "dup_")
   --trace-id <id>        Trace ID for observability (must start with "trc_")
-  --remote               Send through relay server
+  --remote               Send through relay server (encrypted by default)
   --json                 Output JSON
 
 Inbox options:
@@ -1461,7 +1688,7 @@ Inbox options:
   --json                 Output JSON
 
 Read/Ack:
-  mors read <message-id> [--json] [--remote]
+  mors read <message-id> [--json] [--remote] [--peer-device <id>] [--no-encrypt]
   mors ack <message-id> [--json] [--remote]
 
 Reply:
@@ -1471,7 +1698,7 @@ Reply:
   --subject <subject>    Reply subject
   --dedupe-key <key>     Dedupe key for idempotent replies (must start with "dup_")
   --trace-id <id>        Trace ID for observability (must start with "trc_")
-  --remote               Reply through relay server
+  --remote               Reply through relay server (encrypted by default)
   --json                 Output JSON
 
 Thread:
