@@ -79,16 +79,25 @@ export function validateHandle(handle) {
 }
 // ── Account Store ────────────────────────────────────────────────────
 /**
- * In-memory account store with handle uniqueness and immutability.
+ * In-memory account store with handle uniqueness, immutability,
+ * and multi-device identity tracking.
  *
  * Thread-safe for single-process use (JavaScript event loop).
  * Future milestones may back this with a persistent store.
+ *
+ * Multi-device model (VAL-AUTH-009):
+ * - One account (stable accountId) can have multiple devices
+ * - Each device has a distinct deviceId
+ * - Device registration is idempotent
+ * - Device lists are account-scoped (no cross-account leakage)
  */
 export class AccountStore {
     /** Map from account ID to profile. */
     byAccountId = new Map();
     /** Map from lowercase handle to account ID (for uniqueness checks). */
     handleToAccountId = new Map();
+    /** Map from account ID to its registered device identities (VAL-AUTH-009). */
+    devicesByAccountId = new Map();
     /**
      * Register an account with a handle and profile.
      *
@@ -163,6 +172,48 @@ export class AccountStore {
         if (!accountId)
             return null;
         return this.byAccountId.get(accountId) ?? null;
+    }
+    // ── Multi-device identity tracking (VAL-AUTH-009) ──────────────
+    /**
+     * Register a device identity under an account.
+     *
+     * Idempotent — re-registering the same device for the same account
+     * is a no-op and preserves the original registration timestamp.
+     *
+     * Does not require the account to have a profile yet — device registration
+     * can happen before or after onboarding.
+     *
+     * @param accountId - The account ID.
+     * @param deviceId - The device ID to register.
+     */
+    registerDevice(accountId, deviceId) {
+        let deviceMap = this.devicesByAccountId.get(accountId);
+        if (!deviceMap) {
+            deviceMap = new Map();
+            this.devicesByAccountId.set(accountId, deviceMap);
+        }
+        // Idempotent: skip if already registered
+        if (deviceMap.has(deviceId))
+            return;
+        deviceMap.set(deviceId, {
+            deviceId,
+            registeredAt: new Date().toISOString(),
+        });
+    }
+    /**
+     * List all registered device identities for an account.
+     *
+     * Returns an empty array if no devices have been registered.
+     * Ordered by registration time (insertion order).
+     *
+     * @param accountId - The account ID to look up.
+     * @returns Array of device registrations.
+     */
+    listDevices(accountId) {
+        const deviceMap = this.devicesByAccountId.get(accountId);
+        if (!deviceMap)
+            return [];
+        return Array.from(deviceMap.values());
     }
 }
 //# sourceMappingURL=account-store.js.map

@@ -451,6 +451,13 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       return;
     }
 
+    // ── Auto-register device identity on authenticated access (VAL-AUTH-009) ──
+    // Every authenticated request with an accountStore auto-registers the
+    // device, enabling multi-device tracking without explicit device-registration calls.
+    if (accountStore) {
+      accountStore.registerDevice(principal.accountId, principal.deviceId);
+    }
+
     // ── Account routes (require accountStore) ─────────────────────
 
     // Route: POST /accounts/register (register handle + profile)
@@ -525,6 +532,19 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         handle: profile.handle,
         display_name: profile.displayName,
         created_at: profile.createdAt,
+      });
+      return;
+    }
+
+    // Route: GET /accounts/me/devices (list registered device identities, VAL-AUTH-009)
+    if (url === '/accounts/me/devices' && method === 'GET' && accountStore) {
+      const devices = accountStore.listDevices(principal.accountId);
+      sendJson(res, 200, {
+        account_id: principal.accountId,
+        devices: devices.map((d) => ({
+          device_id: d.deviceId,
+          registered_at: d.registeredAt,
+        })),
       });
       return;
     }

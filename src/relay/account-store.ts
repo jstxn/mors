@@ -86,6 +86,14 @@ export interface RegisterOptions {
   displayName: string;
 }
 
+/** A registered device identity under an account. */
+export interface DeviceRegistration {
+  /** Unique device identifier. */
+  deviceId: string;
+  /** ISO-8601 timestamp of device registration. */
+  registeredAt: string;
+}
+
 // ── Handle validation ────────────────────────────────────────────────
 
 /**
@@ -130,16 +138,25 @@ export function validateHandle(handle: string): void {
 // ── Account Store ────────────────────────────────────────────────────
 
 /**
- * In-memory account store with handle uniqueness and immutability.
+ * In-memory account store with handle uniqueness, immutability,
+ * and multi-device identity tracking.
  *
  * Thread-safe for single-process use (JavaScript event loop).
  * Future milestones may back this with a persistent store.
+ *
+ * Multi-device model (VAL-AUTH-009):
+ * - One account (stable accountId) can have multiple devices
+ * - Each device has a distinct deviceId
+ * - Device registration is idempotent
+ * - Device lists are account-scoped (no cross-account leakage)
  */
 export class AccountStore {
   /** Map from account ID to profile. */
   private readonly byAccountId = new Map<string, AccountProfile>();
   /** Map from lowercase handle to account ID (for uniqueness checks). */
   private readonly handleToAccountId = new Map<string, string>();
+  /** Map from account ID to its registered device identities (VAL-AUTH-009). */
+  private readonly devicesByAccountId = new Map<string, Map<string, DeviceRegistration>>();
 
   /**
    * Register an account with a handle and profile.
@@ -224,5 +241,50 @@ export class AccountStore {
     const accountId = this.handleToAccountId.get(handle.toLowerCase());
     if (!accountId) return null;
     return this.byAccountId.get(accountId) ?? null;
+  }
+
+  // ── Multi-device identity tracking (VAL-AUTH-009) ──────────────
+
+  /**
+   * Register a device identity under an account.
+   *
+   * Idempotent — re-registering the same device for the same account
+   * is a no-op and preserves the original registration timestamp.
+   *
+   * Does not require the account to have a profile yet — device registration
+   * can happen before or after onboarding.
+   *
+   * @param accountId - The account ID.
+   * @param deviceId - The device ID to register.
+   */
+  registerDevice(accountId: string, deviceId: string): void {
+    let deviceMap = this.devicesByAccountId.get(accountId);
+    if (!deviceMap) {
+      deviceMap = new Map();
+      this.devicesByAccountId.set(accountId, deviceMap);
+    }
+
+    // Idempotent: skip if already registered
+    if (deviceMap.has(deviceId)) return;
+
+    deviceMap.set(deviceId, {
+      deviceId,
+      registeredAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * List all registered device identities for an account.
+   *
+   * Returns an empty array if no devices have been registered.
+   * Ordered by registration time (insertion order).
+   *
+   * @param accountId - The account ID to look up.
+   * @returns Array of device registrations.
+   */
+  listDevices(accountId: string): DeviceRegistration[] {
+    const deviceMap = this.devicesByAccountId.get(accountId);
+    if (!deviceMap) return [];
+    return Array.from(deviceMap.values());
   }
 }

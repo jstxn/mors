@@ -51,6 +51,13 @@ export interface RegisterOptions {
     /** Display name for profile. */
     displayName: string;
 }
+/** A registered device identity under an account. */
+export interface DeviceRegistration {
+    /** Unique device identifier. */
+    deviceId: string;
+    /** ISO-8601 timestamp of device registration. */
+    registeredAt: string;
+}
 /**
  * Validate a handle string against format rules.
  *
@@ -59,16 +66,25 @@ export interface RegisterOptions {
  */
 export declare function validateHandle(handle: string): void;
 /**
- * In-memory account store with handle uniqueness and immutability.
+ * In-memory account store with handle uniqueness, immutability,
+ * and multi-device identity tracking.
  *
  * Thread-safe for single-process use (JavaScript event loop).
  * Future milestones may back this with a persistent store.
+ *
+ * Multi-device model (VAL-AUTH-009):
+ * - One account (stable accountId) can have multiple devices
+ * - Each device has a distinct deviceId
+ * - Device registration is idempotent
+ * - Device lists are account-scoped (no cross-account leakage)
  */
 export declare class AccountStore {
     /** Map from account ID to profile. */
     private readonly byAccountId;
     /** Map from lowercase handle to account ID (for uniqueness checks). */
     private readonly handleToAccountId;
+    /** Map from account ID to its registered device identities (VAL-AUTH-009). */
+    private readonly devicesByAccountId;
     /**
      * Register an account with a handle and profile.
      *
@@ -105,5 +121,28 @@ export declare class AccountStore {
      * @returns The account profile, or null if not found.
      */
     getByHandle(handle: string): AccountProfile | null;
+    /**
+     * Register a device identity under an account.
+     *
+     * Idempotent — re-registering the same device for the same account
+     * is a no-op and preserves the original registration timestamp.
+     *
+     * Does not require the account to have a profile yet — device registration
+     * can happen before or after onboarding.
+     *
+     * @param accountId - The account ID.
+     * @param deviceId - The device ID to register.
+     */
+    registerDevice(accountId: string, deviceId: string): void;
+    /**
+     * List all registered device identities for an account.
+     *
+     * Returns an empty array if no devices have been registered.
+     * Ordered by registration time (insertion order).
+     *
+     * @param accountId - The account ID to look up.
+     * @returns Array of device registrations.
+     */
+    listDevices(accountId: string): DeviceRegistration[];
 }
 //# sourceMappingURL=account-store.d.ts.map
