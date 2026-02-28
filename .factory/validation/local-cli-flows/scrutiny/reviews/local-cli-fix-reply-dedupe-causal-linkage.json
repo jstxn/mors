@@ -1,0 +1,21 @@
+{
+  "featureId": "local-cli-fix-reply-dedupe-causal-linkage",
+  "reviewedAt": "2026-02-28T06:05:58Z",
+  "commitId": "613af10e50228e95dec664813395de560705b663",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly addresses the prior blocking defect: dedupe replay now validates causal reply compatibility (`in_reply_to` and `thread_id`) before replaying, rejects cross-context collisions deterministically via `DedupeConflictError`, and removes fabricated linkage fallback behavior. The original failing path from `cli-reply-and-thread-navigation` (`in_reply_to: existing.in_reply_to ?? parentMessageId`) is no longer present, and new tests cover send↔reply key collisions, wrong-parent reply replay, and nested reply conflict scenarios.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `mors-worker` skill requires manual CLI sanity checks for touched command paths, but this fix handoff reports only automated commands while still marking `skillFeedback.followedProcedure` as true.",
+      "evidence": "Procedure step 6 in `/Users/justen/Development/mors/.factory/skills/mors-worker/SKILL.md` requires manual CLI sanity checks. The handoff `/Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T05-58-07-578Z__local-cli-fix-reply-dedupe-causal-linkage__562ca649-c4a7-4f75-b335-79f1a0a7f23d.json` includes `verification.commandsRun` only and no `interactiveChecks`, while `skillFeedback.followedProcedure` is `true`."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/local-cli-flows/scrutiny/reviews/cli-reply-and-thread-navigation.json",
+  "summary": "Pass: the fix resolves the prior VAL-THREAD-001 blocking dedupe replay causal-linkage bug by enforcing reply-context compatibility checks and deterministic conflict errors, with targeted regression coverage confirming the corrected behavior."
+}

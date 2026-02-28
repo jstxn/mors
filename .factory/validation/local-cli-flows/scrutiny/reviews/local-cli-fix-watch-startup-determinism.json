@@ -1,0 +1,21 @@
+{
+  "featureId": "local-cli-fix-watch-startup-determinism",
+  "reviewedAt": "2026-02-28T06:05:38Z",
+  "commitId": "e077fb11802101d2dc06fadb50a28e23f54966ef",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly addresses the prior blocking watch-startup determinism defect: create-event classification now suppresses historical create emissions for rows that existed before subscription start while preserving runtime ack and new-message lifecycle emissions.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker procedure requires manual CLI sanity checks for touched command paths, but this fix run reported only automated checks while still setting skillFeedback.followedProcedure=true.",
+      "evidence": "SKILL.md step 6 requires manual CLI sanity checks and step 8 requires accurate followedProcedure reporting. Transcript skeleton for session a67f5ebc-1ca2-4fcb-a3d9-08a6eff803e9 and its handoff verification show test/lint/typecheck/test-suite commands only, with no interactiveChecks/manual watch CLI evidence."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/local-cli-flows/scrutiny/reviews/cli-watch-stream-reliability.json",
+  "summary": "Review passed. Compared against the original failing commit (74e94f2c12a0a1467f952ffea828297837cd818f), this fix (e077fb11802101d2dc06fadb50a28e23f54966ef) adds startup pre-existing ID tracking and corresponding tests so pre-existing rows updated after watch start no longer emit spurious message_created/reply_created events, resolving the VAL-WATCH-003 blocking failure."
+}
