@@ -87,6 +87,29 @@ export interface RelayAckResult {
     /** Whether this ack was the first ack (vs idempotent re-ack). */
     firstAck: boolean;
 }
+/** Event types emitted by the relay message store for SSE streaming. */
+export type RelayStreamEventType = 'message_created' | 'reply_created' | 'message_read' | 'message_acked';
+/** A relay stream event emitted when a message lifecycle transition occurs. */
+export interface RelayStreamEvent {
+    /** Unique event ID (evt_ prefixed) for SSE cursor/Last-Event-ID support. */
+    event_id: string;
+    /** The event type. */
+    event_type: RelayStreamEventType;
+    /** The message ID involved in the event. */
+    message_id: string;
+    /** The thread ID the message belongs to. */
+    thread_id: string;
+    /** Parent message ID (present for replies, null otherwise). */
+    in_reply_to: string | null;
+    /** Sender GitHub user ID. */
+    sender_id: number;
+    /** Recipient GitHub user ID. */
+    recipient_id: number;
+    /** ISO-8601 timestamp of when the event occurred. */
+    timestamp: string;
+}
+/** Listener callback for relay stream events. */
+export type RelayStreamListener = (event: RelayStreamEvent) => void;
 /** Thrown when a message is not found in the relay store. */
 export declare class RelayMessageNotFoundError extends Error {
     constructor(id: string);
@@ -119,6 +142,8 @@ export declare class RelayMessageStore {
      * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
      */
     private dedupeIndex;
+    /** Listeners for stream events. */
+    private streamListeners;
     /** Build a dedupe index key scoped to the sender. */
     private dedupeIndexKey;
     /**
@@ -208,6 +233,19 @@ export declare class RelayMessageStore {
      * @returns true if the user is a participant of the message's thread.
      */
     isMessageParticipant(messageId: string, userId: number): boolean;
+    /**
+     * Subscribe to stream events.
+     *
+     * Listeners are invoked synchronously when a message lifecycle event
+     * occurs (send, read, ack). The server uses this to push SSE events
+     * to connected clients.
+     *
+     * @param listener - Callback invoked for each stream event.
+     * @returns Unsubscribe function to remove the listener.
+     */
+    onStreamEvent(listener: RelayStreamListener): () => void;
+    /** Emit a stream event to all registered listeners. */
+    private emitStreamEvent;
     /** Generate a conversation key from a thread ID. */
     private conversationKey;
     /** Clear all stored data (for testing). */

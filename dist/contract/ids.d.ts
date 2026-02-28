@@ -30,6 +30,11 @@ export declare function generateTraceId(): string;
  */
 export declare function generateDedupeKey(): string;
 /**
+ * Generate a unique event ID for SSE stream events.
+ * Format: evt_{uuid}
+ */
+export declare function generateEventId(): string;
+/**
  * Validate that a value is a non-empty string suitable as an ID.
  * @param value - The value to check.
  * @returns true if the value is a non-empty, non-whitespace-only string.
@@ -53,6 +58,7 @@ export declare const ID_PREFIXES: {
     readonly thread: "thr_";
     readonly trace: "trc_";
     readonly dedupe: "dup_";
+    readonly event: "evt_";
 };
 /** Semantic ID type corresponding to a prefix in {@link ID_PREFIXES}. */
 export type IdType = keyof typeof ID_PREFIXES;

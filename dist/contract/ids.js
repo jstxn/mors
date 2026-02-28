@@ -39,6 +39,13 @@ export function generateDedupeKey() {
     return `dup_${randomUUID()}`;
 }
 /**
+ * Generate a unique event ID for SSE stream events.
+ * Format: evt_{uuid}
+ */
+export function generateEventId() {
+    return `evt_${randomUUID()}`;
+}
+/**
  * Validate that a value is a non-empty string suitable as an ID.
  * @param value - The value to check.
  * @returns true if the value is a non-empty, non-whitespace-only string.
@@ -68,6 +75,7 @@ export const ID_PREFIXES = {
     thread: 'thr_',
     trace: 'trc_',
     dedupe: 'dup_',
+    event: 'evt_',
 };
 /**
  * Validate that a value is a non-empty string with the expected typed prefix

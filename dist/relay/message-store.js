@@ -16,7 +16,7 @@
  * - VAL-RELAY-002: Read state independent from ack state
  * - VAL-RELAY-003: Ack state convergence across views
  */
-import { generateMessageId, generateThreadId } from '../contract/ids.js';
+import { generateMessageId, generateThreadId, generateEventId } from '../contract/ids.js';
 import { DedupeConflictError } from '../errors.js';
 // ── Errors ───────────────────────────────────────────────────────────
 /** Thrown when a message is not found in the relay store. */
@@ -61,6 +61,8 @@ export class RelayMessageStore {
      * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
      */
     dedupeIndex = new Map();
+    /** Listeners for stream events. */
+    streamListeners = new Set();
     /** Build a dedupe index key scoped to the sender. */
     dedupeIndexKey(senderId, dedupeKey) {
         return `${senderId}:${dedupeKey}`;
@@ -164,6 +166,9 @@ export class RelayMessageStore {
         }
         convSet.add(senderId);
         convSet.add(recipientId);
+        // Emit stream event for the new message
+        const eventType = inReplyTo ? 'reply_created' : 'message_created';
+        this.emitStreamEvent(eventType, message);
         return { message, created: true };
     }
     /**
@@ -234,6 +239,8 @@ export class RelayMessageStore {
         const now = new Date().toISOString();
         message.read_at = now;
         message.updated_at = now;
+        // Emit stream event for first read
+        this.emitStreamEvent('message_read', message);
         return { message, firstRead: true };
     }
     /**
@@ -269,6 +276,8 @@ export class RelayMessageStore {
         message.state = 'acked';
         message.acked_at = now;
         message.updated_at = now;
+        // Emit stream event for first ack
+        this.emitStreamEvent('message_acked', message);
         return { message, firstAck: true };
     }
     /**
@@ -305,6 +314,39 @@ export class RelayMessageStore {
             return false;
         return this.isParticipant(message.thread_id, userId);
     }
+    // ── Stream event subscription ────────────────────────────────────
+    /**
+     * Subscribe to stream events.
+     *
+     * Listeners are invoked synchronously when a message lifecycle event
+     * occurs (send, read, ack). The server uses this to push SSE events
+     * to connected clients.
+     *
+     * @param listener - Callback invoked for each stream event.
+     * @returns Unsubscribe function to remove the listener.
+     */
+    onStreamEvent(listener) {
+        this.streamListeners.add(listener);
+        return () => {
+            this.streamListeners.delete(listener);
+        };
+    }
+    /** Emit a stream event to all registered listeners. */
+    emitStreamEvent(eventType, message) {
+        const event = {
+            event_id: generateEventId(),
+            event_type: eventType,
+            message_id: message.id,
+            thread_id: message.thread_id,
+            in_reply_to: message.in_reply_to,
+            sender_id: message.sender_id,
+            recipient_id: message.recipient_id,
+            timestamp: new Date().toISOString(),
+        };
+        for (const listener of this.streamListeners) {
+            listener(event);
+        }
+    }
     /** Generate a conversation key from a thread ID. */
     conversationKey(threadId) {
         return `thread:${threadId}`;
@@ -316,6 +358,7 @@ export class RelayMessageStore {
         this.senderIndex.clear();
         this.participants.clear();
         this.dedupeIndex.clear();
+        this.streamListeners.clear();
     }
 }
 //# sourceMappingURL=message-store.js.map

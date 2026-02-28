@@ -33,8 +33,10 @@ import {
   RelayMessageNotFoundError,
   RelayUnauthorizedError,
   type RelaySendResult,
+  type RelayStreamEvent,
 } from './message-store.js';
 import { DedupeConflictError } from '../errors.js';
+import { generateEventId } from '../contract/ids.js';
 
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
@@ -129,6 +131,24 @@ function parseMessageRoute(url: string, method: string): MessageRoute | null {
 }
 
 /**
+ * Write an SSE event to a response stream.
+ *
+ * Formats the event according to the SSE protocol:
+ * - id: <event_id>\n (for Last-Event-ID cursor resume)
+ * - event: <event_type>\n (named event)
+ * - data: <json_payload>\n\n (event data)
+ */
+function writeSSE(res: ServerResponse, event: { id?: string; event: string; data: string }): void {
+  let frame = '';
+  if (event.id) {
+    frame += `id: ${event.id}\n`;
+  }
+  frame += `event: ${event.event}\n`;
+  frame += `data: ${event.data}\n\n`;
+  res.write(frame);
+}
+
+/**
  * Send a JSON response.
  */
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
@@ -205,7 +225,12 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
     }
     const principal: AuthPrincipal = authResult.principal;
 
-    // Route: GET /events (SSE baseline — auth required when verifier configured)
+    // Route: GET /events (SSE stream — auth required)
+    // Provides real-time event streaming for message lifecycle transitions.
+    // Events are filtered to only include those relevant to the authenticated principal
+    // (messages where the user is sender or recipient).
+    //
+    // Covers: VAL-STREAM-001 (authenticated connection), VAL-STREAM-002 (event shape)
     if (url === '/events' || url.startsWith('/events?')) {
       if (method !== 'GET' && method !== 'HEAD') {
         sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
@@ -221,12 +246,53 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       // Send initial heartbeat comment (SSE keepalive)
       res.write(': heartbeat\n\n');
 
+      // Send connected event with authenticated principal info (VAL-STREAM-001)
+      writeSSE(res, {
+        id: generateEventId(),
+        event: 'connected',
+        data: JSON.stringify({
+          github_user_id: principal.githubUserId,
+          github_login: principal.githubLogin,
+        }),
+      });
+
       // Track this connection
       sseConnections.add(res);
+
+      // Subscribe to message store stream events (if available)
+      let unsubscribe: (() => void) | undefined;
+      if (messageStore) {
+        unsubscribe = messageStore.onStreamEvent((streamEvent: RelayStreamEvent) => {
+          // Filter: only deliver events relevant to this principal.
+          // A user sees events for messages where they are sender or recipient.
+          if (
+            streamEvent.sender_id !== principal.githubUserId &&
+            streamEvent.recipient_id !== principal.githubUserId
+          ) {
+            return;
+          }
+
+          writeSSE(res, {
+            id: streamEvent.event_id,
+            event: streamEvent.event_type,
+            data: JSON.stringify({
+              message_id: streamEvent.message_id,
+              thread_id: streamEvent.thread_id,
+              in_reply_to: streamEvent.in_reply_to,
+              sender_id: streamEvent.sender_id,
+              recipient_id: streamEvent.recipient_id,
+              timestamp: streamEvent.timestamp,
+            }),
+          });
+        });
+      }
 
       // Clean up on client disconnect
       req.on('close', () => {
         sseConnections.delete(res);
+        if (unsubscribe) {
+          unsubscribe();
+        }
       });
 
       return;

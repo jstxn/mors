@@ -17,7 +17,7 @@
  * - VAL-RELAY-003: Ack state convergence across views
  */
 
-import { generateMessageId, generateThreadId } from '../contract/ids.js';
+import { generateMessageId, generateThreadId, generateEventId } from '../contract/ids.js';
 import { DedupeConflictError } from '../errors.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -99,6 +99,38 @@ export interface RelayAckResult {
   firstAck: boolean;
 }
 
+// ── Stream Event Types ───────────────────────────────────────────────
+
+/** Event types emitted by the relay message store for SSE streaming. */
+export type RelayStreamEventType =
+  | 'message_created'
+  | 'reply_created'
+  | 'message_read'
+  | 'message_acked';
+
+/** A relay stream event emitted when a message lifecycle transition occurs. */
+export interface RelayStreamEvent {
+  /** Unique event ID (evt_ prefixed) for SSE cursor/Last-Event-ID support. */
+  event_id: string;
+  /** The event type. */
+  event_type: RelayStreamEventType;
+  /** The message ID involved in the event. */
+  message_id: string;
+  /** The thread ID the message belongs to. */
+  thread_id: string;
+  /** Parent message ID (present for replies, null otherwise). */
+  in_reply_to: string | null;
+  /** Sender GitHub user ID. */
+  sender_id: number;
+  /** Recipient GitHub user ID. */
+  recipient_id: number;
+  /** ISO-8601 timestamp of when the event occurred. */
+  timestamp: string;
+}
+
+/** Listener callback for relay stream events. */
+export type RelayStreamListener = (event: RelayStreamEvent) => void;
+
 // ── Errors ───────────────────────────────────────────────────────────
 
 /** Thrown when a message is not found in the relay store. */
@@ -147,6 +179,8 @@ export class RelayMessageStore {
    * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
    */
   private dedupeIndex = new Map<string, string>();
+  /** Listeners for stream events. */
+  private streamListeners = new Set<RelayStreamListener>();
 
   /** Build a dedupe index key scoped to the sender. */
   private dedupeIndexKey(senderId: number, dedupeKey: string): string {
@@ -268,6 +302,10 @@ export class RelayMessageStore {
     convSet.add(senderId);
     convSet.add(recipientId);
 
+    // Emit stream event for the new message
+    const eventType: RelayStreamEventType = inReplyTo ? 'reply_created' : 'message_created';
+    this.emitStreamEvent(eventType, message);
+
     return { message, created: true };
   }
 
@@ -348,6 +386,9 @@ export class RelayMessageStore {
     message.read_at = now;
     message.updated_at = now;
 
+    // Emit stream event for first read
+    this.emitStreamEvent('message_read', message);
+
     return { message, firstRead: true };
   }
 
@@ -388,6 +429,9 @@ export class RelayMessageStore {
     message.acked_at = now;
     message.updated_at = now;
 
+    // Emit stream event for first ack
+    this.emitStreamEvent('message_acked', message);
+
     return { message, firstAck: true };
   }
 
@@ -427,6 +471,42 @@ export class RelayMessageStore {
     return this.isParticipant(message.thread_id, userId);
   }
 
+  // ── Stream event subscription ────────────────────────────────────
+
+  /**
+   * Subscribe to stream events.
+   *
+   * Listeners are invoked synchronously when a message lifecycle event
+   * occurs (send, read, ack). The server uses this to push SSE events
+   * to connected clients.
+   *
+   * @param listener - Callback invoked for each stream event.
+   * @returns Unsubscribe function to remove the listener.
+   */
+  onStreamEvent(listener: RelayStreamListener): () => void {
+    this.streamListeners.add(listener);
+    return () => {
+      this.streamListeners.delete(listener);
+    };
+  }
+
+  /** Emit a stream event to all registered listeners. */
+  private emitStreamEvent(eventType: RelayStreamEventType, message: RelayMessage): void {
+    const event: RelayStreamEvent = {
+      event_id: generateEventId(),
+      event_type: eventType,
+      message_id: message.id,
+      thread_id: message.thread_id,
+      in_reply_to: message.in_reply_to,
+      sender_id: message.sender_id,
+      recipient_id: message.recipient_id,
+      timestamp: new Date().toISOString(),
+    };
+    for (const listener of this.streamListeners) {
+      listener(event);
+    }
+  }
+
   /** Generate a conversation key from a thread ID. */
   private conversationKey(threadId: string): string {
     return `thread:${threadId}`;
@@ -439,5 +519,6 @@ export class RelayMessageStore {
     this.senderIndex.clear();
     this.participants.clear();
     this.dedupeIndex.clear();
+    this.streamListeners.clear();
   }
 }
