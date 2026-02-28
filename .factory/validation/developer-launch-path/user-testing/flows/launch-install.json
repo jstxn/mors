@@ -1,0 +1,37 @@
+{
+  "groupId": "launch-install",
+  "assertions": {
+    "VAL-LAUNCH-001": {
+      "status": "pass",
+      "evidence": "which tsc -> tsc_not_found; npm ls -g typescript --depth=0 -> /Users/justen/.npm-global/lib with (empty). vitest: test/install.test.ts passed (32/32, exit 0) including `prepare script succeeds when tsc exists locally but is not in PATH (nested npm git-dep context)` and `first-run flow works with pre-built dist (simulates GitHub install)`. vitest: test/install-matrix.test.ts passed (37/37, exit 0) including npm pack/runtime proof. which mors -> /Users/justen/.npm-global/bin/mors. node dist/index.js --version -> `mors 0.1.0` (exit 0).",
+      "reason": "Install-path behavior without global TypeScript and immediate CLI usability are confirmed by passing install suites plus direct executable/path checks."
+    },
+    "VAL-LAUNCH-002": {
+      "status": "pass",
+      "evidence": "vitest: test/setup-shell.test.ts passed (30/30, exit 0). Verbose output includes `CLI integration (setup-shell via child_process) > shows prompt and preview before any edit` and terminal prompt text `Apply this change? (y/N)` during run.",
+      "reason": "setup-shell preview + confirmation prompt-before-mutation behavior is covered and passing in CLI integration tests."
+    },
+    "VAL-LAUNCH-003": {
+      "status": "pass",
+      "evidence": "vitest verbose output includes passing tests `decline leaves rc file unchanged (VAL-INSTALL-003)` and `--decline flag skips interactive prompt and declines` in test/setup-shell.test.ts; install-matrix also passed `decline path leaves RC file unchanged` and `full first-run with decline: install -> decline setup-shell -> version -> init -> inbox`.",
+      "reason": "Decline flows are explicitly validated as non-mutating across both setup-shell and install-matrix suites."
+    },
+    "VAL-LAUNCH-004": {
+      "status": "pass",
+      "evidence": "vitest verbose output includes passing tests `confirm applies minimal PATH update (VAL-INSTALL-004)` and `repeated confirm is idempotent (VAL-INSTALL-004)` in test/setup-shell.test.ts; install-matrix also passed `idempotent setup-shell does not cause RC file mutation on re-run`.",
+      "reason": "Confirm path minimal edit and idempotency are directly exercised and passing in CLI integration coverage."
+    },
+    "VAL-LAUNCH-005": {
+      "status": "pass",
+      "evidence": "vitest: test/install-matrix.test.ts passed (37/37, exit 0) including `full first-run lifecycle: version -> init -> send -> inbox -> read` with exit-code assertions. Manual CLI verification using unique temp config dir /tmp/mors-launch-install-005-Mwg4bb: init --json exit 0 (status initialized), send --json exit 0 (status sent), inbox --json exit 0 (count 1, message returned).",
+      "reason": "Installed-command first-run operational flow works in ordered steps with successful exit codes in both automated and manual CLI runs."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest",
+    "npm",
+    "node dist/index.js"
+  ]
+}

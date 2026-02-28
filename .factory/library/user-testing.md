@@ -62,6 +62,42 @@ Manual validation guidance for global CLI + relay + SSE + E2EE mission.
 
 ---
 
+## Flow Validator Guidance: Developer Launch & Deploy
+
+**Testing tool:** Direct CLI invocation via `node dist/index.js` with `MORS_CONFIG_DIR` isolation, plus filesystem checks.
+
+**Isolation rules:**
+- Each subagent MUST use unique temp dirs for `MORS_CONFIG_DIR` (e.g., `/tmp/mors-launch-test-<group-id>`)
+- Do NOT share config dirs across subagents
+- For multi-device assertions within one subagent, use separate `MORS_CONFIG_DIR` paths
+
+**Install testing (VAL-LAUNCH-001):**
+- Verify `dist/index.js` exists after build, `npm pack` includes all required files
+- Run `node dist/index.js --version` to confirm binary works
+- The install test suite (`test/install.test.ts`, `test/install-matrix.test.ts`) covers npm GitHub install simulation
+- Test that build succeeds even without global `tsc` (uses local `npx tsc`)
+
+**Setup-shell testing (VAL-LAUNCH-002, 003, 004):**
+- `test/setup-shell.test.ts` covers preview/prompt, decline path, confirm path, idempotency
+- Verify: preview shows exact RC changes before mutation, decline leaves files unchanged, confirm applies minimal edit, repeated runs are no-op
+
+**First-run flow (VAL-LAUNCH-005):**
+- `test/install-matrix.test.ts` covers version → init → send → inbox → read lifecycle
+- Verify exit codes for each step
+
+**Deploy testing (VAL-DEPLOY-001, 002, 003):**
+- `test/deploy/fly.test.ts` covers fly.toml presence, placeholder-safe handling, missing flyctl, missing auth
+- `test/deploy/shell-injection-safety.test.ts` covers safe subprocess execution
+- Verify no secrets in output/logs
+
+**Cross-area golden path (VAL-CROSS-001, 005, 006, 007, 008):**
+- `test/cross/golden-path.test.ts` covers all five assertions through programmatic relay server + E2EE tests
+- These tests use ephemeral ports and in-memory stores with stub auth
+- Multi-device tests create separate key material directories
+- Restart integrity tests use snapshot/rehydrate pattern
+
+---
+
 ## Flow Validator Guidance: Relay API
 
 **Testing tool:** `curl` against `http://localhost:3100` (relay must be running on port 3100).

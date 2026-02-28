@@ -1,0 +1,27 @@
+{
+  "groupId": "deploy-ux",
+  "assertions": {
+    "VAL-DEPLOY-001": {
+      "status": "pass",
+      "evidence": "Vitest: `npx vitest run test/deploy/fly.test.ts --maxConcurrency=7` -> 20/20 passed. Artifact checks: `ls -la .../fly.toml` and `ls -la .../Dockerfile` both present. Content transcript confirms placeholder-safe values in fly.toml (`app = \"replace-with-fly-app-name\"`) and deploy-oriented Dockerfile entrypoint (`CMD [\"node\", \"dist/relay/index.js\"]`).",
+      "reason": "Deploy artifacts exist and include placeholder-first configuration consistent with safe secret handling expectations."
+    },
+    "VAL-DEPLOY-002": {
+      "status": "pass",
+      "evidence": "Missing-tool transcript: `node dist/index.js deploy --json` with required env set returned `{\"category\":\"flyctl\",\"message\":\"flyctl CLI is not installed or not found in PATH.\"}` and `EXIT: 1`. Missing-auth transcript: using isolated fake flyctl (`MORS_DEPLOY_FLYCTL_PATH=<temp>/flyctl`) without `FLY_ACCESS_TOKEN` returned `{\"category\":\"auth\",\"message\":\"Fly.io deploy authentication is not configured.\"}` with explicit remediation (`flyctl auth login` / `FLY_ACCESS_TOKEN`) and `EXIT: 1`. Vitest deploy suite also passed these scenarios.",
+      "reason": "Both required failure paths (missing flyctl and missing deploy auth) fail closed with explicit remediation guidance."
+    },
+    "VAL-DEPLOY-003": {
+      "status": "pass",
+      "evidence": "Dry-run transcript: `node dist/index.js deploy --dry-run --json` (isolated temp config, fake flyctl, canary env secrets) returned `status: ready` with non-sensitive config only and `EXIT: 0`. Canary redaction check on output: `rg 'CANARY_DEPLOY_SECRET_ABC123|CANARY_GH_CLIENT_987'` -> no matches (`CANARY_LEAK_CHECK: PASS`). Sensitive word scan on dry-run output (`rg -i 'password|token|secret'`) -> no matches. Shell safety suite `npx vitest run test/deploy/shell-injection-safety.test.ts --maxConcurrency=7` passed 10/10.",
+      "reason": "Deploy output remained free of canary secret values and did not disclose sensitive material in tested deploy paths."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest",
+    "node dist/index.js",
+    "curl"
+  ]
+}

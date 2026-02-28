@@ -1,0 +1,33 @@
+{
+  "groupId": "cross-golden-path",
+  "assertions": {
+    "VAL-CROSS-001": {
+      "status": "pass",
+      "evidence": "Executed `npx vitest run test/cross/golden-path.test.ts --maxConcurrency=7` (exit 0; 20/20 tests passed). Includes: fresh install/auth/send/inbox/read/ack lifecycle test, reply thread linkage test, SSE lifecycle event consistency test, and dedupe retry idempotency test.",
+      "reason": "Golden-path lifecycle and end-to-end state transitions are fully exercised and pass with expected delivered/read/acked behavior and consistent IDs/events."
+    },
+    "VAL-CROSS-005": {
+      "status": "pass",
+      "evidence": "`test/cross/golden-path.test.ts` passed encrypted lifecycle tests (send/reply/ack) verifying relay bodies and SSE metadata do not contain canary plaintext while recipient decrypt succeeds; supporting `npx vitest run test/e2ee/cipher-runtime.test.ts --maxConcurrency=7` also passed (exit 0; 28/28).",
+      "reason": "Confidentiality and decryptability criteria are both satisfied across lifecycle operations with explicit plaintext-absence checks."
+    },
+    "VAL-CROSS-006": {
+      "status": "pass",
+      "evidence": "`test/cross/golden-path.test.ts` includes multi-device tests where two Bob devices (same account) perform key exchange, receive messages, each decrypt their intended payload, concurrent SSE watch receives consistent events, and read/ack converge; suite passed (exit 0).",
+      "reason": "Two-device onboarding and secure delivery continuity behaviors are directly validated and all assertions in scope pass."
+    },
+    "VAL-CROSS-007": {
+      "status": "pass",
+      "evidence": "`test/cross/golden-path.test.ts` revocation/rotation tests passed: old device decrypt fails (`CipherError`/`StaleKeyError`), active rotated device decrypts and completes read/ack lifecycle; revoked device re-exchange blocked. Supporting `npx vitest run test/e2ee/rekey-rotation.test.ts --maxConcurrency=7` passed (exit 0; 28/28).",
+      "reason": "Revocation establishes a new trust boundary, preventing revoked-device decryption while preserving active-device continuity."
+    },
+    "VAL-CROSS-008": {
+      "status": "pass",
+      "evidence": "`test/cross/golden-path.test.ts` restart integrity tests passed using snapshot -> JSON serialize/parse -> rehydrate with fresh store instance. Verified pre/post restart delivered/read/acked state integrity, SSE post-restart events, thread linkage preservation, new-message lifecycle, and dedupe continuity.",
+      "reason": "Message lifecycle integrity remains consistent and actionable across simulated relay restart/deploy persistence boundaries."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["vitest"]
+}
