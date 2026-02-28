@@ -127,6 +127,12 @@ function toPublicKeyObject(rawPublicBytes) {
  * @throws KeyExchangeError if the exchange fails (invalid key, self-exchange, etc.).
  */
 export function performKeyExchange(keysDir, localBundle, peerPublicKey, peerDeviceId, peerFingerprint) {
+    // Reject revoked peer devices before any computation (fail-fast, no secret leakage)
+    if (isDeviceRevoked(keysDir, peerDeviceId)) {
+        throw new KeyExchangeError(`Cannot perform key exchange with revoked device "${peerDeviceId}". ` +
+            'The device has been revoked and cannot re-establish trust. ' +
+            'Use an active (non-revoked) device for key exchange.');
+    }
     // Validate peer public key size
     if (peerPublicKey.length !== X25519_KEY_SIZE) {
         throw new KeyExchangeError(`Invalid peer X25519 public key size: ${peerPublicKey.length} bytes, expected ${X25519_KEY_SIZE}.`);

@@ -46,7 +46,7 @@ import {
   type EncryptedPayload,
 } from '../../src/e2ee/cipher.js';
 
-import { StaleKeyError, CipherError } from '../../src/errors.js';
+import { StaleKeyError, CipherError, KeyExchangeError } from '../../src/errors.js';
 
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 
@@ -517,6 +517,190 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       // Simulate JSON.stringify as the HTTP response serialization
       const httpResponse = JSON.stringify(message);
       expect(httpResponse).not.toContain(canary);
+    });
+  });
+
+  // ── Revocation enforced at key-exchange time ──
+
+  describe('revocation enforced at key-exchange time', () => {
+    it('performKeyExchange rejects revoked device peers deterministically', () => {
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(tempDir, 'alice-revkx');
+      const { bundle: bobBundle } = setupDevice(tempDir, 'bob-revkx');
+
+      // Revoke Bob's device before attempting key exchange
+      revokeDevice(aliceKeysDir, bobBundle.deviceId);
+
+      // Attempting key exchange with revoked peer should throw
+      expect(() =>
+        performKeyExchange(
+          aliceKeysDir,
+          aliceBundle,
+          bobBundle.x25519PublicKey,
+          bobBundle.deviceId,
+          bobBundle.fingerprint
+        )
+      ).toThrow(KeyExchangeError);
+    });
+
+    it('error message mentions revocation and the revoked device ID', () => {
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(tempDir, 'alice-revmsg');
+      const { bundle: bobBundle } = setupDevice(tempDir, 'bob-revmsg');
+
+      revokeDevice(aliceKeysDir, bobBundle.deviceId);
+
+      try {
+        performKeyExchange(
+          aliceKeysDir,
+          aliceBundle,
+          bobBundle.x25519PublicKey,
+          bobBundle.deviceId,
+          bobBundle.fingerprint
+        );
+        expect.fail('should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(KeyExchangeError);
+        const msg = (err as Error).message;
+        expect(msg).toMatch(/revoked/i);
+        expect(msg).toContain(bobBundle.deviceId);
+      }
+    });
+
+    it('revoked device cannot re-establish decrypt capability through fresh exchange', () => {
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(
+        tempDir,
+        'alice-norefresh'
+      );
+      const { keysDir: bobKeysDir, bundle: bobBundle } = setupDevice(tempDir, 'bob-norefresh');
+
+      // Initial key exchange succeeds
+      performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        bobBundle.x25519PublicKey,
+        bobBundle.deviceId,
+        bobBundle.fingerprint
+      );
+      performKeyExchange(
+        bobKeysDir,
+        bobBundle,
+        aliceBundle.x25519PublicKey,
+        aliceBundle.deviceId,
+        aliceBundle.fingerprint
+      );
+
+      // Alice revokes Bob
+      revokeDevice(aliceKeysDir, bobBundle.deviceId);
+
+      // Bob tries to re-exchange keys with Alice — Alice's side rejects
+      expect(() =>
+        performKeyExchange(
+          aliceKeysDir,
+          aliceBundle,
+          bobBundle.x25519PublicKey,
+          bobBundle.deviceId,
+          bobBundle.fingerprint
+        )
+      ).toThrow(KeyExchangeError);
+
+      // Existing session still exists from before revocation (reading is allowed)
+      // but NO new session can be established
+      const existingSession = loadKeyExchangeSession(aliceKeysDir, bobBundle.deviceId);
+      expect(existingSession).not.toBeNull();
+    });
+
+    it('rotation/revocation trust boundary remains intact across exchange attempts', () => {
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(tempDir, 'alice-boundary');
+      const { bundle: bobBundle } = setupDevice(tempDir, 'bob-boundary');
+      const { bundle: charlieBundle } = setupDevice(tempDir, 'charlie-boundary');
+
+      // Alice exchanges with both Bob and Charlie
+      performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        bobBundle.x25519PublicKey,
+        bobBundle.deviceId,
+        bobBundle.fingerprint
+      );
+      performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        charlieBundle.x25519PublicKey,
+        charlieBundle.deviceId,
+        charlieBundle.fingerprint
+      );
+
+      // Revoke only Bob
+      revokeDevice(aliceKeysDir, bobBundle.deviceId);
+
+      // Bob's fresh exchange attempt is blocked
+      expect(() =>
+        performKeyExchange(
+          aliceKeysDir,
+          aliceBundle,
+          bobBundle.x25519PublicKey,
+          bobBundle.deviceId,
+          bobBundle.fingerprint
+        )
+      ).toThrow(KeyExchangeError);
+
+      // Charlie's fresh exchange still succeeds (not revoked)
+      const charlieNewBundle = generateDeviceKeys();
+      const newSession = performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        charlieNewBundle.x25519PublicKey,
+        charlieBundle.deviceId,
+        charlieBundle.fingerprint
+      );
+      expect(newSession.sharedSecret).toBeInstanceOf(Buffer);
+      expect(newSession.sharedSecret.length).toBe(32);
+    });
+
+    it('revocation check happens before ECDH computation (no shared secret leaked)', () => {
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(tempDir, 'alice-noleak');
+      const { bundle: bobBundle } = setupDevice(tempDir, 'bob-noleak');
+
+      revokeDevice(aliceKeysDir, bobBundle.deviceId);
+
+      // The error should be thrown before any session is persisted
+      try {
+        performKeyExchange(
+          aliceKeysDir,
+          aliceBundle,
+          bobBundle.x25519PublicKey,
+          bobBundle.deviceId,
+          bobBundle.fingerprint
+        );
+        expect.fail('should have thrown');
+      } catch {
+        // No session should have been created for the revoked device
+        // (the existing session from before the test is not created either)
+        const session = loadKeyExchangeSession(aliceKeysDir, bobBundle.deviceId);
+        expect(session).toBeNull();
+      }
+    });
+
+    it('rotateDeviceKeys inherits revocation enforcement', () => {
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(tempDir, 'alice-rotrev');
+      const { keysDir: bobKeysDir, bundle: bobBundle } = setupDevice(tempDir, 'bob-rotrev');
+
+      // Initial exchange
+      performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        bobBundle.x25519PublicKey,
+        bobBundle.deviceId,
+        bobBundle.fingerprint
+      );
+
+      // Bob revokes Alice
+      revokeDevice(bobKeysDir, aliceBundle.deviceId);
+
+      // Bob tries to rotate keys and re-exchange with Alice — should fail
+      // because rotateDeviceKeys calls performKeyExchange internally
+      expect(() => rotateDeviceKeys(bobKeysDir, bobBundle, aliceKeysDir, aliceBundle)).toThrow(
+        KeyExchangeError
+      );
     });
   });
 
