@@ -1,8 +1,8 @@
 /**
  * E2EE module barrel exports.
  *
- * Re-exports device key management and bootstrap guard primitives
- * for the mors end-to-end encryption subsystem.
+ * Re-exports device key management, bootstrap guard, and key exchange
+ * primitives for the mors end-to-end encryption subsystem.
  */
 
 export {
@@ -16,7 +16,15 @@ export {
   type DeviceKeyMetadata,
 } from './device-keys.js';
 
+export { requireDeviceBootstrap, assertDeviceBootstrapped } from './bootstrap-guard.js';
+
 export {
-  requireDeviceBootstrap,
-  assertDeviceBootstrapped,
-} from './bootstrap-guard.js';
+  performKeyExchange,
+  loadKeyExchangeSession,
+  isKeyExchangeComplete,
+  listKeyExchangeSessions,
+  requireKeyExchange,
+  validateConversationType,
+  type KeyExchangeSession,
+  type ConversationType,
+} from './key-exchange.js';

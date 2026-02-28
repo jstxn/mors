@@ -63,6 +63,38 @@ export class DeviceNotBootstrappedError extends MorsError {
   }
 }
 
+/** Thrown when a key exchange operation fails (invalid peer key, DH computation error, persistence failure). */
+export class KeyExchangeError extends MorsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KeyExchangeError';
+  }
+}
+
+/** Thrown when an encrypted operation is attempted before key exchange is complete with the target peer. */
+export class KeyExchangeNotCompleteError extends MorsError {
+  constructor(peerDeviceId: string, message?: string) {
+    super(
+      message ??
+        `Key exchange has not been completed with peer device "${peerDeviceId}". ` +
+          'Run "mors key-exchange" with the peer\'s public key before sending encrypted messages.'
+    );
+    this.name = 'KeyExchangeNotCompleteError';
+  }
+}
+
+/** Thrown when E2EE is attempted on a group or channel conversation (only 1:1/direct is supported). */
+export class GroupE2EEUnsupportedError extends MorsError {
+  constructor(conversationType: string) {
+    super(
+      `End-to-end encryption is not supported for "${conversationType}" conversations. ` +
+        'E2EE is currently only supported for 1:1 direct conversations. ' +
+        'Group and channel E2EE support is deferred to a future release.'
+    );
+    this.name = 'GroupE2EEUnsupportedError';
+  }
+}
+
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export class DedupeConflictError extends MorsError {
   readonly dedupeKey: string;
