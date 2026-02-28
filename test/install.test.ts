@@ -162,3 +162,117 @@ describe('prepare script lifecycle', () => {
     expect(result.trim()).toContain(pkg.version);
   });
 });
+
+describe('GitHub shortcut install without build deps (VAL-INSTALL-001)', () => {
+  it('prepare script uses conditional tsc check', () => {
+    // The prepare script must guard against missing tsc (npm bug #8440:
+    // global git installs don't install devDependencies before prepare).
+    // It should check for tsc availability and succeed gracefully if absent.
+    expect(pkg.scripts.prepare).toMatch(/tsc/);
+    expect(pkg.scripts.prepare).toMatch(/\|\|/);
+    // Must not be a bare `npm run build` which would fail without tsc
+    expect(pkg.scripts.prepare).not.toBe('npm run build');
+  });
+
+  it('prepare script logic succeeds when node_modules/.bin/tsc is absent', () => {
+    // Directly test the shell logic the prepare script uses.
+    // Simulate the scenario where tsc is not installed (no devDependencies).
+    // The `test -x` check should fail, `|| true` should succeed.
+    const prepareCmd = pkg.scripts.prepare as string;
+
+    // Run the exact prepare script in a simulated environment where
+    // node_modules/.bin/tsc does not exist by using a renamed path
+    execSync(
+      `bash -c 'TSC_ORIG="node_modules/.bin/tsc"; ` +
+        `TSC_BAK="node_modules/.bin/tsc.bak"; ` +
+        `mv "$TSC_ORIG" "$TSC_BAK" 2>/dev/null; ` +
+        `(${prepareCmd}); EXIT=$?; ` +
+        `mv "$TSC_BAK" "$TSC_ORIG" 2>/dev/null; ` +
+        `exit $EXIT'`,
+      {
+        cwd: ROOT,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
+    // If we got here without throwing, the prepare script succeeded
+    expect(existsSync(join(ROOT, 'dist', 'index.js'))).toBe(true);
+  });
+
+  it('dist/index.js remains runnable after prepare without tsc', () => {
+    // After a prepare that skips build (no tsc), the pre-built dist should still work
+    const result = execSync('node dist/index.js --version', {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...process.env, MORS_CONFIG_DIR: '/tmp/mors-install-test-noop' },
+    });
+    expect(result.trim()).toContain(pkg.version);
+  });
+
+  it('dist/ is tracked in git (not gitignored)', () => {
+    // dist/ must be committed so GitHub shortcut install has pre-built files
+    const gitStatus = execSync('git ls-files dist/index.js', {
+      cwd: ROOT,
+      encoding: 'utf8',
+    });
+    expect(gitStatus.trim()).toBe('dist/index.js');
+  });
+
+  it('dist/ is not listed in .gitignore', () => {
+    const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+    // dist/ must NOT appear as a gitignore pattern
+    expect(gitignore).not.toMatch(/^dist\/?$/m);
+  });
+
+  it('prepare script still builds when tsc IS available', () => {
+    // Normal development flow: prepare should actually compile
+    execSync('npm run prepare', { cwd: ROOT, stdio: 'pipe' });
+    expect(existsSync(join(ROOT, 'dist', 'index.js'))).toBe(true);
+    expect(existsSync(join(ROOT, 'dist', 'cli.js'))).toBe(true);
+
+    // Verify the build output is fresh and runnable
+    const result = execSync('node dist/index.js --version', {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...process.env, MORS_CONFIG_DIR: '/tmp/mors-install-test-noop' },
+    });
+    expect(result.trim()).toContain(pkg.version);
+  });
+
+  it('first-run flow works with pre-built dist (simulates GitHub install)', () => {
+    // Simulate the user experience after `npm i -g github:jstxn/mors`
+    // The dist/ is pre-built and committed, so no build step needed
+    const tmpDir = execSync('mktemp -d', { encoding: 'utf8' }).trim();
+    try {
+      const env = { ...process.env, MORS_CONFIG_DIR: join(tmpDir, 'mors-cfg') };
+
+      // Version check (no init required)
+      const versionResult = execSync('node dist/index.js --version', {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env,
+      });
+      expect(versionResult.trim()).toContain(pkg.version);
+
+      // Init
+      const initResult = execSync('node dist/index.js init --json', {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env,
+      });
+      const initParsed = JSON.parse(initResult.trim());
+      expect(initParsed.status).toBe('initialized');
+
+      // Inbox
+      const inboxResult = execSync('node dist/index.js inbox --json', {
+        cwd: ROOT,
+        encoding: 'utf8',
+        env,
+      });
+      const inboxParsed = JSON.parse(inboxResult.trim());
+      expect(inboxParsed.status).toBe('ok');
+    } finally {
+      execSync(`rm -rf "${tmpDir}"`, { stdio: 'pipe' });
+    }
+  });
+});

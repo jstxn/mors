@@ -1,0 +1,171 @@
+/**
+ * Watch stream for the mors messaging system.
+ *
+ * Provides real-time event streaming for message lifecycle transitions:
+ * - message_created  — A new message was sent
+ * - reply_created    — A reply was sent
+ * - message_acked    — A message was acknowledged
+ *
+ * Design:
+ * - Polling-based approach against the SQLCipher database
+ * - Deterministic startup: only emits events after subscription starts
+ * - Runtime dedupe: each event_type+message_id is emitted at most once per session
+ * - Clean SIGINT shutdown: closes DB, removes listeners, exits cleanly
+ *
+ * Fulfills: VAL-WATCH-001, VAL-WATCH-002, VAL-WATCH-003, VAL-WATCH-004
+ */
+// ── Core watch implementation ──────────────────────────────────────────
+/**
+ * Start a watch stream that polls the database for new lifecycle events.
+ *
+ * The watch stream uses a high-water mark based on `updated_at` to only
+ * emit new events since the last poll. At startup, it captures the current
+ * max timestamp to establish a baseline — no historical events are emitted.
+ *
+ * Runtime dedupe uses an in-memory Set keyed on `event_type:message_id`
+ * to ensure no event is emitted more than once per session, even if the
+ * same row is seen in multiple polls.
+ *
+ * @param db - Open encrypted database handle.
+ * @param options - Watch options including callbacks and interval.
+ * @returns A WatchHandle for stopping the stream.
+ */
+export function startWatch(db, options) {
+    const { pollIntervalMs = 500, onEvent, onShutdown, signal } = options;
+    // ── Determine startup high-water mark ─────────────────────────────
+    // We capture the current max updated_at so that only events created
+    // *after* this point are emitted. This ensures deterministic startup
+    // (VAL-WATCH-003).
+    const startRow = db.prepare('SELECT MAX(updated_at) as max_ts FROM messages').get();
+    let highWaterMark = startRow?.max_ts ?? new Date(0).toISOString();
+    // ── Runtime dedupe set (VAL-WATCH-004) ────────────────────────────
+    const emitted = new Set();
+    // ── Track all pre-existing messages at startup ────────────────────
+    // We record every message ID that exists before the watch starts so
+    // that updates to pre-existing rows (e.g. read, ack) do not falsely
+    // emit create events. Only ack events are tracked separately to
+    // allow runtime ack emissions on pre-existing messages that were not
+    // yet acked at startup.
+    const preExistingIds = new Set();
+    const preExistingAcked = new Set();
+    const existingRows = db.prepare('SELECT id, state FROM messages').all();
+    for (const row of existingRows) {
+        preExistingIds.add(row.id);
+        if (row.state === 'acked') {
+            preExistingAcked.add(row.id);
+        }
+    }
+    let stopped = false;
+    let timer = null;
+    // Resolve when fully stopped.
+    let resolveDone;
+    const done = new Promise((resolve) => {
+        resolveDone = resolve;
+    });
+    function stop() {
+        if (stopped)
+            return;
+        stopped = true;
+        if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+        }
+        if (onShutdown) {
+            onShutdown();
+        }
+        resolveDone();
+    }
+    // Wire up external abort signal.
+    if (signal) {
+        if (signal.aborted) {
+            stop();
+            return { stop, done };
+        }
+        signal.addEventListener('abort', () => stop(), { once: true });
+    }
+    function poll() {
+        if (stopped)
+            return;
+        try {
+            // Query for messages updated after the high-water mark.
+            const rows = db
+                .prepare(`SELECT id, thread_id, in_reply_to, sender, recipient, state, created_at, updated_at
+           FROM messages
+           WHERE updated_at > ?
+           ORDER BY updated_at ASC, id ASC`)
+                .all(highWaterMark);
+            for (const row of rows) {
+                // Determine event type(s) for this row.
+                const events = classifyEvents(row, emitted, preExistingIds, preExistingAcked);
+                for (const evt of events) {
+                    const dedupeKey = `${evt.event_type}:${row.id}`;
+                    if (emitted.has(dedupeKey))
+                        continue;
+                    emitted.add(dedupeKey);
+                    onEvent({
+                        event_type: evt.event_type,
+                        message_id: row.id,
+                        thread_id: row.thread_id,
+                        in_reply_to: row.in_reply_to,
+                        sender: row.sender,
+                        recipient: row.recipient,
+                        state: row.state,
+                        timestamp: row.updated_at,
+                    });
+                }
+                // Advance high-water mark.
+                if (row.updated_at > highWaterMark) {
+                    highWaterMark = row.updated_at;
+                }
+            }
+        }
+        catch {
+            // If the DB is closed or an error occurs, stop gracefully.
+            if (!stopped) {
+                stop();
+                return;
+            }
+        }
+        // Schedule next poll if still running.
+        if (!stopped) {
+            timer = setTimeout(poll, pollIntervalMs);
+        }
+    }
+    // Start polling on the next tick to ensure the handle is returned first.
+    timer = setTimeout(poll, 0);
+    return { stop, done };
+}
+/**
+ * Classify what events should be emitted for a given message row.
+ *
+ * Pre-existing messages (those present in the DB before watch started) never
+ * produce create events, even when their `updated_at` advances due to read/ack
+ * operations. Only genuinely new messages (inserted after the watch subscription
+ * began) emit `message_created` or `reply_created`.
+ *
+ * Ack events are emitted for any message whose state transitions to `acked`
+ * at runtime, including pre-existing messages that were not yet acked at startup.
+ */
+function classifyEvents(row, emitted, preExistingIds, preExistingAcked) {
+    const events = [];
+    // Only emit create events for messages that did NOT exist at startup.
+    // Pre-existing messages that surface in polls (due to read/ack updating
+    // updated_at) must not produce spurious create events.
+    if (!preExistingIds.has(row.id)) {
+        const createKey = row.in_reply_to ? `reply_created:${row.id}` : `message_created:${row.id}`;
+        if (!emitted.has(createKey)) {
+            events.push({
+                event_type: row.in_reply_to ? 'reply_created' : 'message_created',
+            });
+        }
+    }
+    // Determine if this is an ack event.
+    if (row.state === 'acked' && !preExistingAcked.has(row.id)) {
+        const ackKey = `message_acked:${row.id}`;
+        if (!emitted.has(ackKey)) {
+            events.push({ event_type: 'message_acked' });
+        }
+    }
+    return events;
+}
+//# sourceMappingURL=watch.js.map

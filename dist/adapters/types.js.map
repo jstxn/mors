@@ -1,0 +1,1 @@
+{"version":3,"file":"types.js","sourceRoot":"","sources":["../../src/adapters/types.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;GAaG;AAIH,0EAA0E;AAE1E,2CAA2C;AAC3C,MAAM,CAAC,MAAM,oBAAoB,GAAG;IAClC,MAAM;IACN,SAAS;IACT,MAAM;IACN,WAAW;IACX,MAAM;CACE,CAAC;AAKX,8CAA8C;AAC9C,MAAM,CAAC,MAAM,uBAAuB,GAAG;IACrC,eAAe;IACf,eAAe;IACf,cAAc;IACd,gBAAgB;IAChB,eAAe;IACf,SAAS;CACD,CAAC"}
