@@ -13,7 +13,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  mkdtempSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  mkdirSync,
+  chmodSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rmSync } from 'node:fs';
@@ -703,5 +711,35 @@ describe('init edge cases', () => {
     const dbBytes = readFileSync(join(configDir, 'mors.db'));
     const header = dbBytes.subarray(0, 16).toString('utf8');
     expect(header).not.toBe('SQLite format 3\0');
+  });
+
+  it('config dir permissions are hardened even if pre-existing dir has broad perms (umask regression)', async () => {
+    // Simulate a config dir created by an external process or a permissive umask
+    // that left the directory world-readable.
+    const configDir = join(testDir, 'umask-regression');
+    mkdirSync(configDir, { recursive: true, mode: 0o755 });
+    // Verify the precondition — dir starts with broad permissions.
+    expect(statSync(configDir).mode & 0o777).toBe(0o755);
+
+    await initCommand({ configDir });
+
+    // After init, permissions must be hardened to owner-only 700.
+    const mode = statSync(configDir).mode & 0o777;
+    expect(mode).toBe(0o700);
+  });
+
+  it('config dir permissions are hardened on re-run (idempotent permission fix)', async () => {
+    // First init creates the directory correctly.
+    const configDir = join(testDir, 'rerun-perms');
+    await initCommand({ configDir });
+    expect(statSync(configDir).mode & 0o777).toBe(0o700);
+
+    // Simulate external permission broadening between runs.
+    chmodSync(configDir, 0o755);
+    expect(statSync(configDir).mode & 0o777).toBe(0o755);
+
+    // Re-run init should harden permissions even on already-initialized path.
+    await initCommand({ configDir });
+    expect(statSync(configDir).mode & 0o777).toBe(0o700);
   });
 });

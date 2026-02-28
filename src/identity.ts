@@ -89,6 +89,8 @@ export function computeFingerprint(publicKey: Buffer): string {
  */
 export function persistIdentity(configDir: string, identity: Identity): void {
   mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+  // Explicitly chmod in case umask altered the effective directory permissions.
+  chmodSync(configDir, DIR_MODE);
 
   const metadata: IdentityMetadata = {
     publicKey: identity.publicKey.toString('hex'),

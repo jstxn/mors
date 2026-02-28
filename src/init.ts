@@ -14,7 +14,15 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, mkdirSync, rmSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  unlinkSync,
+  chmodSync,
+} from 'node:fs';
 import {
   generateIdentity,
   persistIdentity,
@@ -78,6 +86,9 @@ export async function initCommand(options?: {
 
   // ── Re-run detection (VAL-INIT-002) ──────────────────────────────
   if (existsSync(sentinelPath) && isInitialized(configDir)) {
+    // Harden directory permissions on every re-run in case external
+    // processes or umask changes have broadened them since the first init.
+    chmodSync(configDir, DIR_MODE);
     const identity = loadIdentity(configDir);
     return {
       alreadyInitialized: true,
@@ -88,6 +99,8 @@ export async function initCommand(options?: {
 
   // ── Concurrent init protection (VAL-INIT-007) ────────────────────
   mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+  // Explicitly chmod in case umask altered the effective permissions.
+  chmodSync(configDir, DIR_MODE);
   if (!acquireLock(lockPath)) {
     throw new MorsError(
       'Another init process appears to be running. ' +

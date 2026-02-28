@@ -5,11 +5,11 @@
  * Key material is never printed to stdout/stderr or included in logs.
  */
 
-import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, statSync, chmodSync } from "node:fs";
-import { dirname } from "node:path";
-import { mkdirSync } from "node:fs";
-import { KeyError } from "./errors.js";
+import { randomBytes } from 'node:crypto';
+import { readFileSync, writeFileSync, existsSync, statSync, chmodSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { KeyError } from './errors.js';
 
 /** Length of the encryption key in bytes (256-bit). */
 const KEY_LENGTH = 32;
@@ -39,6 +39,8 @@ export function persistKey(keyPath: string, key: Buffer): void {
   try {
     const dir = dirname(keyPath);
     mkdirSync(dir, { recursive: true, mode: KEY_DIR_MODE });
+    // Explicitly chmod in case umask altered the effective directory permissions.
+    chmodSync(dir, KEY_DIR_MODE);
     writeFileSync(keyPath, key, { mode: KEY_FILE_MODE });
     // Explicitly chmod in case umask altered the effective permissions.
     chmodSync(keyPath, KEY_FILE_MODE);
@@ -57,9 +59,7 @@ export function persistKey(keyPath: string, key: Buffer): void {
  */
 export function loadKey(keyPath: string): Buffer {
   if (!existsSync(keyPath)) {
-    throw new KeyError(
-      `Encryption key not found at ${keyPath}. Run "mors init" to create one.`
-    );
+    throw new KeyError(`Encryption key not found at ${keyPath}. Run "mors init" to create one.`);
   }
 
   const stat = statSync(keyPath);
