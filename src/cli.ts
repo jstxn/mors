@@ -16,6 +16,8 @@ import {
   replyMessage,
   listThread,
 } from './message.js';
+import { startWatch } from './watch.js';
+import type { WatchEvent } from './watch.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError } from './errors.js';
 import { ContractValidationError } from './contract/errors.js';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
@@ -24,7 +26,7 @@ import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 
 /** Commands that are implemented. */
-const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack', 'reply', 'thread']);
+const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack', 'reply', 'thread', 'watch']);
 
 export function run(args: string[]): void {
   const command = args[0];
@@ -106,6 +108,9 @@ function runCommand(command: string, args: string[], configDir: string): void {
       break;
     case 'thread':
       runThread(args, configDir);
+      break;
+    case 'watch':
+      runWatch(args, configDir);
       break;
   }
 }
@@ -479,6 +484,96 @@ function runThread(args: string[], configDir: string): void {
   }
 }
 
+// ── Watch command ─────────────────────────────────────────────────
+
+function runWatch(args: string[], configDir: string): void {
+  const { flags } = parseArgs(args);
+  const json = 'json' in flags;
+  const pollInterval =
+    typeof flags['poll-interval'] === 'string' ? parseInt(flags['poll-interval'], 10) : 500;
+
+  if (isNaN(pollInterval) || pollInterval < 10) {
+    formatError('--poll-interval must be a number >= 10 (ms)', json);
+    process.exitCode = 1;
+    return;
+  }
+
+  let db: BetterSqlite3.Database | null = null;
+  try {
+    db = openStore(configDir);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleCommandError(err, json);
+    return;
+  }
+
+  const controller = new AbortController();
+
+  // ── SIGINT handling for clean shutdown (VAL-WATCH-002) ──────────
+  const onSigint = (): void => {
+    controller.abort();
+  };
+  process.on('SIGINT', onSigint);
+
+  if (!json) {
+    console.log('Watching for new events... (press Ctrl+C to stop)');
+  }
+
+  const handle = startWatch(db, {
+    pollIntervalMs: pollInterval,
+    signal: controller.signal,
+    onEvent: (event: WatchEvent) => {
+      if (json) {
+        console.log(JSON.stringify(event));
+      } else {
+        formatWatchEvent(event);
+      }
+    },
+    onShutdown: () => {
+      // Clean up: remove SIGINT listener, close DB.
+      process.removeListener('SIGINT', onSigint);
+      if (db) {
+        try {
+          db.close();
+        } catch {
+          // Best-effort DB close.
+        }
+        db = null;
+      }
+      if (!json) {
+        console.log('\nWatch stopped.');
+      }
+    },
+  });
+
+  // Keep the process alive until done resolves.
+  handle.done.then(() => {
+    // Ensure clean exit code.
+    if (!process.exitCode) {
+      process.exitCode = 0;
+    }
+  });
+}
+
+function formatWatchEvent(event: WatchEvent): void {
+  const typeLabel =
+    event.event_type === 'message_created'
+      ? '📨 New message'
+      : event.event_type === 'reply_created'
+        ? '↩️  Reply'
+        : event.event_type === 'message_acked'
+          ? '✅ Acked'
+          : event.event_type;
+
+  const replyInfo = event.in_reply_to ? `  In reply to: ${event.in_reply_to}` : '';
+  console.log(`[${event.timestamp}] ${typeLabel}`);
+  console.log(`  Message: ${event.message_id}  Thread: ${event.thread_id}`);
+  console.log(`  From: ${event.sender} → To: ${event.recipient}  State: ${event.state}`);
+  if (replyInfo) {
+    console.log(replyInfo);
+  }
+}
+
 // ── Init command ─────────────────────────────────────────────────────
 
 function runInit(_args: string[]): void {
@@ -630,5 +725,10 @@ Reply:
   --json                 Output JSON
 
 Thread:
-  mors thread <thread-id> [--json]`);
+  mors thread <thread-id> [--json]
+
+Watch:
+  mors watch [--json] [--poll-interval <ms>]
+  --json                 Output JSON (one event per line)
+  --poll-interval <ms>   Polling interval in ms (default: 500, min: 10)`);
 }
