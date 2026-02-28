@@ -1,0 +1,15 @@
+{
+  "featureId": "core-fix-envelope-nullability-and-id-validation",
+  "reviewedAt": "2026-02-28T04:44:47Z",
+  "commitId": "e7366a2",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Fix commit e7366a2 adequately addresses both prior findings from core-envelope-and-state-contracts (ca118cf). Blocking issue is resolved: nullable envelope fields now reject undefined via isValidOptionalId(value is string | null) and validateEnvelope checks for in_reply_to, dedupe_key, trace_id (plus subject/read_at) fail when fields are missing/undefined. Non-blocking issue is also addressed: typed ID prefix validation is now enforced for message/thread/trace/dedupe fields in validateEnvelope and for external message ID input in validateMessageId. Added contract tests explicitly cover undefined-nullability rejection, correct-prefix acceptance, wrong-prefix/cross-type rejection, and validateMessageId prefix enforcement.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": ".factory/validation/core-foundation/scrutiny/reviews/core-envelope-and-state-contracts.json",
+  "summary": "Reviewed features core-envelope-and-state-contracts and core-fix-envelope-nullability-and-id-validation using handoffs, transcript skeletons, and commit diffs. The fix fully closes the original blocking nullability gap and the non-blocking typed-prefix enforcement gap with implementation and test evidence; review status is pass."
+}

@@ -1,0 +1,21 @@
+{
+  "featureId": "core-fix-init-atomic-cleanup-registration",
+  "reviewedAt": "2026-02-28T04:44:36Z",
+  "commitId": "9918a72",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix commit directly resolves the prior blocking atomic-cleanup defect: init now pre-registers all expected artifact paths before any creation calls and always cleans that pre-registered set on failure. Compared to the original implementation (fd64e8c), which registered artifacts only after each creation call returned, this closes the mid-step partial-write gap called out in the prior review. Regression coverage was added for failures after identity, DB key, and DB creation, including retryability and non-initialized-state assertions.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker skill requires manual CLI sanity checks with captured observations, but this worker run did only automated checks and still marked followedProcedure=true.",
+      "evidence": "Skill procedure step 6 in .factory/skills/mors-worker/SKILL.md requires manual CLI sanity checks; the handoff for worker session 05b1530e-59ba-413c-9a06-4e7ec2f5056f contains only verification.commandsRun and no interactive/manual check evidence, while handoff.skillFeedback.followedProcedure is true."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/core-foundation/scrutiny/reviews/core-init-identity-and-atomic-bootstrap.json",
+  "summary": "Reviewed feature core-fix-init-atomic-cleanup-registration as a fix rerun against prior failure in core-init-identity-and-atomic-bootstrap. Evidence reviewed: mission feature metadata, fix handoff and transcript skeleton, prior failing review, fix commit diff (9918a72), and original implementation commit (fd64e8c). The fix adequately addresses the original blocking issue; review status is pass."
+}
