@@ -8,16 +8,23 @@
 import { initCommand, requireInit, getDbPath, getDbKeyPath } from './init.js';
 import { loadKey } from './key-management.js';
 import { openEncryptedDb } from './store.js';
-import { sendMessage, listInbox, readMessage, ackMessage } from './message.js';
+import {
+  sendMessage,
+  listInbox,
+  readMessage,
+  ackMessage,
+  replyMessage,
+  listThread,
+} from './message.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError } from './errors.js';
 import { ContractValidationError } from './contract/errors.js';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 
 /** Commands that require initialization before use. */
-const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'watch']);
+const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 
 /** Commands that are implemented. */
-const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack']);
+const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack', 'reply', 'thread']);
 
 export function run(args: string[]): void {
   const command = args[0];
@@ -93,6 +100,12 @@ function runCommand(command: string, args: string[], configDir: string): void {
       break;
     case 'ack':
       runAck(args, configDir);
+      break;
+    case 'reply':
+      runReply(args, configDir);
+      break;
+    case 'thread':
+      runThread(args, configDir);
       break;
   }
 }
@@ -334,6 +347,138 @@ function runAck(args: string[], configDir: string): void {
   }
 }
 
+// ── Reply command ────────────────────────────────────────────────────
+
+function runReply(args: string[], configDir: string): void {
+  const { positional, flags } = parseArgs(args);
+  const json = 'json' in flags;
+  const parentId = positional[0];
+  const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
+  const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
+  const subject = typeof flags['subject'] === 'string' ? flags['subject'] : undefined;
+  const body = typeof flags['body'] === 'string' ? flags['body'] : undefined;
+  const dedupeKey = typeof flags['dedupe-key'] === 'string' ? flags['dedupe-key'] : undefined;
+  const traceId = typeof flags['trace-id'] === 'string' ? flags['trace-id'] : undefined;
+
+  if (!parentId) {
+    formatError('reply requires a parent message ID argument', json);
+    process.exitCode = 1;
+    return;
+  }
+  if (!body) {
+    formatError('reply requires --body <message>', json);
+    process.exitCode = 1;
+    return;
+  }
+
+  // Default sender to "local" if not specified.
+  const sender = from ?? 'local';
+  // Default recipient to "local" if not specified.
+  const recipient = to ?? 'local';
+
+  let db: BetterSqlite3.Database | null = null;
+  try {
+    db = openStore(configDir);
+    const result = replyMessage(db, {
+      parentMessageId: parentId,
+      sender,
+      recipient,
+      body,
+      subject,
+      dedupeKey,
+      traceId,
+    });
+
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'replied',
+          id: result.id,
+          thread_id: result.thread_id,
+          in_reply_to: result.in_reply_to,
+          sender: result.sender,
+          recipient: result.recipient,
+          state: result.state,
+          dedupe_key: result.dedupe_key,
+          trace_id: result.trace_id,
+          dedupe_replay: result.dedupe_replay,
+          created_at: result.created_at,
+        })
+      );
+    } else {
+      if (result.dedupe_replay) {
+        console.log(`Reply already sent (dedupe replay): ${result.id}`);
+      } else {
+        console.log(`Reply sent: ${result.id}`);
+      }
+      console.log(`Thread: ${result.thread_id}`);
+      console.log(`In reply to: ${result.in_reply_to}`);
+    }
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleCommandError(err, json);
+  } finally {
+    if (db) db.close();
+  }
+}
+
+// ── Thread command ───────────────────────────────────────────────────
+
+function runThread(args: string[], configDir: string): void {
+  const { positional, flags } = parseArgs(args);
+  const json = 'json' in flags;
+  const threadId = positional[0];
+
+  if (!threadId) {
+    formatError('thread requires a thread ID argument', json);
+    process.exitCode = 1;
+    return;
+  }
+
+  let db: BetterSqlite3.Database | null = null;
+  try {
+    db = openStore(configDir);
+    const thread = listThread(db, threadId);
+
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'ok',
+          thread_id: threadId,
+          count: thread.length,
+          messages: thread,
+        })
+      );
+    } else {
+      if (thread.length === 0) {
+        console.log('No messages in thread.');
+      } else {
+        console.log(`Thread: ${threadId} (${thread.length} message(s))\n`);
+        for (const msg of thread) {
+          const indent = msg.in_reply_to ? '  ↳ ' : '';
+          const readMarker = msg.read_at ? '✓' : '•';
+          const stateTag = msg.state === 'acked' ? ' [acked]' : '';
+          console.log(
+            `${indent}${readMarker} ${msg.id}  from:${msg.sender}  ${msg.state}${stateTag}`
+          );
+          if (msg.in_reply_to) {
+            console.log(`${indent}  In reply to: ${msg.in_reply_to}`);
+          }
+          if (msg.subject) {
+            console.log(`${indent}  Subject: ${msg.subject}`);
+          }
+          console.log(`${indent}  ${msg.body.split('\n')[0].slice(0, 80)}`);
+        }
+      }
+    }
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleCommandError(err, json);
+  } finally {
+    if (db) db.close();
+  }
+}
+
 // ── Init command ─────────────────────────────────────────────────────
 
 function runInit(_args: string[]): void {
@@ -450,6 +595,7 @@ Commands:
   read       Read a message
   reply      Reply to a message
   ack        Acknowledge a message
+  thread     View thread messages in causal order
   watch      Watch for new messages
 
 Options:
@@ -472,5 +618,17 @@ Inbox options:
 
 Read/Ack:
   mors read <message-id> [--json]
-  mors ack <message-id> [--json]`);
+  mors ack <message-id> [--json]
+
+Reply:
+  mors reply <parent-message-id> --body <message> [options]
+  --to <recipient>       Recipient identity (default: "local")
+  --from <sender>        Sender identity (default: "local")
+  --subject <subject>    Reply subject
+  --dedupe-key <key>     Dedupe key for idempotent replies
+  --trace-id <id>        Trace ID for observability
+  --json                 Output JSON
+
+Thread:
+  mors thread <thread-id> [--json]`);
 }

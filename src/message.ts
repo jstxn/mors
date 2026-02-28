@@ -366,3 +366,289 @@ export function ackMessage(db: BetterSqlite3.Database, messageId: string): AckRe
     updated_at: now,
   };
 }
+
+// ── Reply types ────────────────────────────────────────────────────────
+
+/** Options for replying to a message. */
+export interface ReplyOptions {
+  /** The ID of the message being replied to (must have msg_ prefix). */
+  parentMessageId: string;
+  /** Sender identity string. */
+  sender: string;
+  /** Recipient identity string. */
+  recipient: string;
+  /** Reply body (markdown content). */
+  body: string;
+  /** Optional reply subject. */
+  subject?: string;
+  /** Optional dedupe key for idempotent replies. Must have dup_ prefix. */
+  dedupeKey?: string;
+  /** Optional trace ID for distributed tracing. Must have trc_ prefix. */
+  traceId?: string;
+}
+
+/** Result of replying to a message. */
+export interface ReplyResult {
+  /** Reply message ID (msg_ prefixed). */
+  id: string;
+  /** Thread ID (thr_ prefixed) — inherited from root of thread. */
+  thread_id: string;
+  /** Parent message ID this reply is in response to. */
+  in_reply_to: string;
+  /** Sender identity. */
+  sender: string;
+  /** Recipient identity. */
+  recipient: string;
+  /** Current delivery state. */
+  state: string;
+  /** ISO-8601 creation timestamp. */
+  created_at: string;
+  /** Dedupe key if provided. */
+  dedupe_key: string | null;
+  /** Trace ID if provided. */
+  trace_id: string | null;
+  /** Whether this was a dedupe replay (existing reply returned). */
+  dedupe_replay: boolean;
+}
+
+/** An entry in a thread listing. */
+export interface ThreadEntry {
+  id: string;
+  thread_id: string;
+  in_reply_to: string | null;
+  sender: string;
+  recipient: string;
+  subject: string | null;
+  body: string;
+  dedupe_key: string | null;
+  trace_id: string | null;
+  state: string;
+  read_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Reply operation ────────────────────────────────────────────────────
+
+/**
+ * Reply to an existing message.
+ *
+ * Creates a new message linked to the parent via `in_reply_to` and sharing
+ * the parent's `thread_id`. For nested replies (replying to a reply), the
+ * thread_id is inherited from the root of the thread (the parent's thread_id),
+ * while `in_reply_to` always points to the immediate parent.
+ *
+ * Supports dedupe_key for idempotent reply creation.
+ * Local delivery: replies are immediately set to 'delivered' state.
+ *
+ * @param db - Open encrypted database handle.
+ * @param options - Reply options.
+ * @returns ReplyResult with the reply metadata.
+ * @throws ContractValidationError if inputs are invalid.
+ * @throws MessageNotFoundError if the parent message doesn't exist.
+ *
+ * Fulfills: VAL-THREAD-001, VAL-THREAD-002, VAL-THREAD-003, VAL-THREAD-004
+ */
+export function replyMessage(db: BetterSqlite3.Database, options: ReplyOptions): ReplyResult {
+  const { parentMessageId, sender, recipient, body, subject, dedupeKey, traceId } = options;
+
+  // ── Input validation ──────────────────────────────────────────────
+  validateMessageId(parentMessageId);
+
+  if (!isValidId(sender)) {
+    throw new ContractValidationError('Reply requires a non-empty sender.');
+  }
+  if (!isValidId(recipient)) {
+    throw new ContractValidationError('Reply requires a non-empty recipient.');
+  }
+  if (!isValidId(body)) {
+    throw new ContractValidationError('Reply requires a non-empty body.');
+  }
+  if (dedupeKey !== undefined && !isValidPrefixedId(dedupeKey, 'dedupe')) {
+    throw new ContractValidationError('dedupe_key must have "dup_" prefix.');
+  }
+  if (traceId !== undefined && !isValidPrefixedId(traceId, 'trace')) {
+    throw new ContractValidationError('trace_id must have "trc_" prefix.');
+  }
+
+  // ── Dedupe check ──────────────────────────────────────────────────
+  if (dedupeKey) {
+    const existing = db
+      .prepare(
+        'SELECT id, thread_id, in_reply_to, sender, recipient, state, created_at, dedupe_key, trace_id FROM messages WHERE dedupe_key = ?'
+      )
+      .get(dedupeKey) as
+      | {
+          id: string;
+          thread_id: string;
+          in_reply_to: string | null;
+          sender: string;
+          recipient: string;
+          state: string;
+          created_at: string;
+          dedupe_key: string | null;
+          trace_id: string | null;
+        }
+      | undefined;
+
+    if (existing) {
+      return {
+        id: existing.id,
+        thread_id: existing.thread_id,
+        in_reply_to: existing.in_reply_to ?? parentMessageId,
+        sender: existing.sender,
+        recipient: existing.recipient,
+        state: existing.state,
+        created_at: existing.created_at,
+        dedupe_key: existing.dedupe_key,
+        trace_id: existing.trace_id,
+        dedupe_replay: true,
+      };
+    }
+  }
+
+  // ── Look up parent message to get thread_id ───────────────────────
+  const parent = db
+    .prepare('SELECT id, thread_id FROM messages WHERE id = ?')
+    .get(parentMessageId) as { id: string; thread_id: string } | undefined;
+
+  if (!parent) {
+    throw new MessageNotFoundError(parentMessageId);
+  }
+
+  // ── Create reply ──────────────────────────────────────────────────
+  const id = generateMessageId();
+  const threadId = parent.thread_id; // Inherit thread from parent (preserves root thread)
+  const now = new Date().toISOString();
+  const state = 'delivered'; // Local delivery: immediately delivered
+
+  db.prepare(
+    `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    threadId,
+    parentMessageId, // in_reply_to: always the immediate parent
+    sender,
+    recipient,
+    subject ?? null,
+    body,
+    dedupeKey ?? null,
+    traceId ?? null,
+    state,
+    null, // read_at: null on creation
+    now,
+    now
+  );
+
+  return {
+    id,
+    thread_id: threadId,
+    in_reply_to: parentMessageId,
+    sender,
+    recipient,
+    state,
+    created_at: now,
+    dedupe_key: dedupeKey ?? null,
+    trace_id: traceId ?? null,
+    dedupe_replay: false,
+  };
+}
+
+// ── Thread navigation ──────────────────────────────────────────────────
+
+/**
+ * List all messages in a thread in deterministic causal order.
+ *
+ * Messages are ordered so that:
+ * 1. Parent messages always appear before their descendants.
+ * 2. Sibling messages (concurrent replies to same parent) are ordered by
+ *    created_at timestamp for stable deterministic ordering.
+ *
+ * This is achieved by fetching all messages in the thread and performing
+ * a topological sort based on the `in_reply_to` graph, with `created_at`
+ * as the tiebreaker for siblings.
+ *
+ * @param db - Open encrypted database handle.
+ * @param threadId - The thread ID to list (must have thr_ prefix).
+ * @returns Array of thread entries in causal order.
+ * @throws ContractValidationError if the thread ID format is invalid.
+ *
+ * Fulfills: VAL-THREAD-005
+ */
+export function listThread(db: BetterSqlite3.Database, threadId: string): ThreadEntry[] {
+  // ── Validate thread ID format ─────────────────────────────────────
+  if (!isValidPrefixedId(threadId, 'thread')) {
+    throw new ContractValidationError(
+      `Invalid thread ID: expected a non-empty "thr_"-prefixed string, got "${String(threadId)}".`
+    );
+  }
+
+  // ── Fetch all messages in the thread ──────────────────────────────
+  const rows = db
+    .prepare(
+      `SELECT id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at
+       FROM messages WHERE thread_id = ?
+       ORDER BY created_at ASC`
+    )
+    .all(threadId) as ThreadEntry[];
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  // ── Topological sort for causal ordering ──────────────────────────
+  // Build adjacency: parent_id -> children (sorted by created_at)
+  const byId = new Map<string, ThreadEntry>();
+  const children = new Map<string, ThreadEntry[]>();
+
+  for (const row of rows) {
+    byId.set(row.id, row);
+    const parentKey = row.in_reply_to ?? '__root__';
+    let siblings = children.get(parentKey);
+    if (!siblings) {
+      siblings = [];
+      children.set(parentKey, siblings);
+    }
+    siblings.push(row);
+  }
+
+  // Sort each sibling group by created_at for deterministic ordering
+  for (const siblings of children.values()) {
+    siblings.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  // BFS/DFS traversal: root messages first, then their children
+  const result: ThreadEntry[] = [];
+  const visited = new Set<string>();
+
+  // Start with root messages (no in_reply_to or parent not in this thread)
+  const roots = children.get('__root__') ?? [];
+  // Also include messages whose in_reply_to is not in this thread (orphan safety)
+  for (const row of rows) {
+    if (row.in_reply_to !== null && !byId.has(row.in_reply_to)) {
+      roots.push(row);
+    }
+  }
+  roots.sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+  // DFS traversal preserving causal order (parent before children)
+  const stack = [...roots].reverse(); // Reverse so first item is processed first
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) break;
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    result.push(current);
+
+    // Push children in reverse order so they come out in correct order
+    const childList = children.get(current.id) ?? [];
+    for (let i = childList.length - 1; i >= 0; i--) {
+      if (!visited.has(childList[i].id)) {
+        stack.push(childList[i]);
+      }
+    }
+  }
+
+  return result;
+}
