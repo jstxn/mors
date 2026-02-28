@@ -1,0 +1,44 @@
+{
+  "featureId": "native-multi-device-bootstrap-continuity",
+  "reviewedAt": "2026-02-28T23:14:01Z",
+  "commitId": "acf3c2a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature cleanly adds account-scoped multi-device registration and a device listing endpoint, with strong unit/integration/CLI coverage for distinct device identity under one account and restart determinism. I found two non-blocking gaps: SSE-authenticated requests bypass the auto-registration path, and the dedicated new tests do not directly assert VAL-CROSS-006 secure message continuity (key exchange + decrypt) for same-account multi-device flows.",
+    "issues": [
+      {
+        "file": "src/relay/server.ts",
+        "line": 262,
+        "severity": "non_blocking",
+        "description": "`/events` returns before the auto-registration block (`accountStore.registerDevice(...)` at line 458), so SSE-only authenticated devices are not registered even though comments/handoff describe auto-registration on every authenticated request."
+      },
+      {
+        "file": "test/auth/multi-device-bootstrap.test.ts",
+        "line": 258,
+        "severity": "non_blocking",
+        "description": "The new feature tests validate account/device identity and session determinism, but they do not directly assert multi-device key-exchange/decrypt continuity; VAL-CROSS-006 evidence in the contract requires authenticated multi-device secure-message continuity with decrypt results."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Skill scope text appears stale relative to current mission usage: this feature uses `mors-global-worker` in `onboarding-handle-profile`, but the skill's 'When to Use' section lists only older milestones.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:12 lists `relay-foundation`, `global-async-messaging`, `realtime-watch`, `developer-launch-path`; mission features assign `mors-global-worker` to onboarding-handle-profile entries (features.json:1578-1580)."
+    },
+    {
+      "area": "skills",
+      "observation": "Procedure/manual-check expectations are inconsistent with this run's reporting: the skill requires manual CLI/API/SSE sanity checks (or explicit rationale if skipped), while this handoff reports only automated commands and still marks followedProcedure=true.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31-33 requires manual checks or explicit skip rationale; handoff has `verification.commandsRun` and `skillFeedback.followedProcedure=true` without an `interactiveChecks` section (/Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T23-09-27-565Z__native-multi-device-bootstrap-continuity__f8537cbe-c714-49cd-afd4-df0a71c72e2d.json:13-15,117-119)."
+    },
+    {
+      "area": "conventions",
+      "observation": "Mission convention guidance and test-code practice diverge on shell invocation patterns for dynamic args.",
+      "evidence": "Mission AGENTS forbids dynamic shell command strings and recommends argv-based subprocess calls (AGENTS.md:42), but this feature's new test uses interpolated `execSync` command strings (test/auth/multi-device-bootstrap.test.ts:462)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass with non-blocking findings: implementation quality is strong for account/device identity continuity and deterministic session behavior, but `/events` bypasses the new auto-registration path and dedicated VAL-CROSS-006 secure-delivery continuity coverage is indirect rather than explicit in this feature's new tests."
+}

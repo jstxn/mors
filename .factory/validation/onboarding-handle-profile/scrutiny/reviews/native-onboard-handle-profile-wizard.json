@@ -1,0 +1,45 @@
+{
+  "featureId": "native-onboard-handle-profile-wizard",
+  "reviewedAt": "2026-02-28T23:14:38Z",
+  "commitId": "04234156173db895a350669cb7d5ad68837145bf",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Core onboarding requirements are not fully met: the CLI path never performs relay-backed handle registration (so global uniqueness/duplicate rejection is not enforced end-to-end), and handle normalization has a whitespace edge case that can bypass uniqueness checks.",
+    "issues": [
+      {
+        "file": "src/cli.ts",
+        "line": 1913,
+        "severity": "blocking",
+        "description": "`mors onboard` persists `profile.json` locally without calling relay account registration, so duplicate handle attempts across accounts/devices are not deterministically rejected by the onboarding flow. This conflicts with expected global unique-handle behavior (VAL-AUTH-008). Evidence: local-only path at `saveProfile(...)` and explicit defer comment at lines 1912-1913."
+      },
+      {
+        "file": "src/relay/account-store.ts",
+        "line": 181,
+        "severity": "blocking",
+        "description": "Handle validation checks `trimmed` content (line 116/130), but uniqueness normalization uses the original untrimmed `handle` (`handle.toLowerCase()` at line 181). Inputs like `\" alice \"` can pass validation and be treated as distinct from `\"alice\"`, violating format/uniqueness guarantees."
+      },
+      {
+        "file": "test/onboard-handle-profile.test.ts",
+        "line": 611,
+        "severity": "non_blocking",
+        "description": "The CLI persistence test is weak: assertions only run inside `if (existsSync(profilePath))` and the fallback comment at line 616 allows the test to pass even when profile persistence fails, reducing regression detection for the onboarding path."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The assigned skill scope documentation is out of sync with mission usage: this feature uses `mors-global-worker` for milestone `onboarding-handle-profile`, but the skill says it is for relay/realtime/developer-launch milestones only.",
+      "evidence": "features.json lines 1549/1551/1568 show `native-onboard-handle-profile-wizard` with `skillName: mors-global-worker` and milestone `onboarding-handle-profile`; `.factory/skills/mors-global-worker/SKILL.md:12` limits usage to `relay-foundation`, `global-async-messaging`, `realtime-watch`, `developer-launch-path`."
+    },
+    {
+      "area": "skills",
+      "observation": "Skill procedure and handoff fidelity are inconsistent for manual checks: the skill requires manual CLI/API/SSE sanity checks for user-facing changes (or explicit rationale and `followedProcedure=false`), but this handoff marks `followedProcedure=true` and contains no `interactiveChecks` section.",
+      "evidence": "`.factory/skills/mors-global-worker/SKILL.md:31-33`; handoff has only `verification.commandsRun` and `skillFeedback.followedProcedure: true` at line 137; `jq '.handoff.verification | has(\"interactiveChecks\")' ...` returned `false`."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed with two blocking correctness gaps in onboarding uniqueness enforcement (missing relay-backed registration in CLI flow and whitespace normalization bypass in handle uniqueness). Test coverage is broad overall but one CLI persistence test is non-assertive, and there are skill/shared-state documentation inconsistencies around scope and manual-check reporting."
+}
