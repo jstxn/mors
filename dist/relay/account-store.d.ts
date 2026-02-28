@@ -59,12 +59,26 @@ export interface DeviceRegistration {
     registeredAt: string;
 }
 /**
+ * Normalize a handle string by trimming whitespace and lowercasing.
+ *
+ * This is the canonical normalization applied before all handle operations
+ * (validation, uniqueness checks, storage, and lookups) to close whitespace
+ * and case edge-case bypasses.
+ *
+ * @param handle - The raw handle input.
+ * @returns The normalized handle (trimmed + lowercased).
+ */
+export declare function normalizeHandle(handle: string): string;
+/**
  * Validate a handle string against format rules.
  *
+ * The handle is normalized (trimmed + lowercased) before validation.
+ *
  * @param handle - The handle to validate.
+ * @returns The normalized handle string.
  * @throws InvalidHandleError if the handle is invalid.
  */
-export declare function validateHandle(handle: string): void;
+export declare function validateHandle(handle: string): string;
 /**
  * In-memory account store with handle uniqueness, immutability,
  * and multi-device identity tracking.

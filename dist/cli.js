@@ -25,7 +25,7 @@ import { execFileSync as execFileSyncImport } from 'node:child_process';
 import { RelayClient, RelayClientError } from './relay/client.js';
 import { connectRemoteWatch } from './remote-watch.js';
 import { runDeployPreflight, formatDeployIssues, formatDeployResultJson, redactSecrets, } from './deploy.js';
-import { validateHandle } from './relay/account-store.js';
+import { validateHandle, normalizeHandle } from './relay/account-store.js';
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 /** Commands that are implemented. */
@@ -77,7 +77,11 @@ export function run(args) {
         return;
     }
     if (command === 'onboard') {
-        runOnboard(args.slice(1));
+        runOnboard(args.slice(1)).catch((err) => {
+            process.exitCode = 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${msg}`);
+        });
         return;
     }
     // ── Pre-init command gating (VAL-INIT-005) ──────────────────────
@@ -1528,12 +1532,102 @@ function runLogout(_args) {
         }
     }
 }
-// ── Onboard command (VAL-AUTH-008, VAL-AUTH-012) ─────────────────────
+/**
+ * Call the relay /accounts/register endpoint to enforce global handle uniqueness.
+ *
+ * Uses Node.js built-in http/https to avoid the undici connection-pool
+ * keep-alive behavior that prevents the CLI process from exiting promptly.
+ *
+ * Returns a result indicating whether the relay rejected the registration.
+ * If the relay is unreachable, returns success (graceful degradation —
+ * global uniqueness will be enforced when relay becomes available).
+ *
+ * @param relayBaseUrl - Relay server base URL (e.g. http://localhost:3100).
+ * @param token - Bearer token for authentication.
+ * @param opts - Handle and display name to register.
+ * @returns Registration result.
+ */
+async function relayRegisterHandle(relayBaseUrl, token, opts) {
+    const { request: httpRequest } = await import('node:http');
+    const { request: httpsRequest } = await import('node:https');
+    const url = new URL('/accounts/register', relayBaseUrl);
+    const isHttps = url.protocol === 'https:';
+    const doRequest = isHttps ? httpsRequest : httpRequest;
+    const payload = JSON.stringify({
+        handle: opts.handle,
+        display_name: opts.displayName,
+    });
+    return new Promise((resolve) => {
+        const req = doRequest(url, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload),
+                Connection: 'close',
+            },
+            timeout: 10000,
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+                const statusCode = res.statusCode ?? 500;
+                let body = {};
+                try {
+                    body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                }
+                catch {
+                    /* ignore parse errors */
+                }
+                if (statusCode === 409) {
+                    resolve({
+                        error: true,
+                        errorType: body['error'] ?? 'duplicate_handle',
+                        message: body['detail'] ?? 'Handle is already taken or cannot be changed.',
+                    });
+                    return;
+                }
+                if (statusCode === 400) {
+                    resolve({
+                        error: true,
+                        errorType: 'invalid_handle',
+                        message: body['detail'] ?? 'Invalid handle format.',
+                    });
+                    return;
+                }
+                if (statusCode === 401) {
+                    resolve({
+                        error: true,
+                        errorType: 'not_authenticated',
+                        message: 'Authentication failed with relay. Run "mors login" to re-authenticate.',
+                    });
+                    return;
+                }
+                // Success or unexpected error — don't block local persistence
+                resolve({ error: false });
+            });
+        });
+        req.on('error', () => {
+            // Relay unreachable — graceful degradation
+            resolve({ error: false });
+        });
+        req.on('timeout', () => {
+            req.destroy();
+            // Timeout — graceful degradation
+            resolve({ error: false });
+        });
+        req.write(payload);
+        req.end();
+    });
+}
 /**
  * First-run onboarding wizard.
  *
- * Captures a globally unique immutable handle and basic profile metadata,
- * then persists the account profile locally.
+ * Captures a globally unique immutable handle and basic profile metadata.
+ * When MORS_RELAY_BASE_URL is configured, calls the relay /accounts/register
+ * endpoint first to enforce global unique-handle constraints end-to-end.
+ * Only persists the profile locally after relay confirmation (or if relay
+ * is unreachable for graceful degradation).
  *
  * Requires:
  * - Initialization (mors init)
@@ -1544,7 +1638,7 @@ function runLogout(_args) {
  * - --display-name <name>     Required. Display name for profile.
  * - --json                    Output JSON.
  */
-function runOnboard(_args) {
+async function runOnboard(_args) {
     const { flags } = parseArgs(_args);
     const json = 'json' in flags;
     const configDir = getConfigDir();
@@ -1623,12 +1717,12 @@ function runOnboard(_args) {
         return;
     }
     // Parse required flags
-    const handle = typeof flags['handle'] === 'string' ? flags['handle'] : undefined;
+    const rawHandle = typeof flags['handle'] === 'string' ? flags['handle'] : undefined;
     const displayName = typeof flags['display-name'] === 'string' ? flags['display-name'] : undefined;
-    if (!handle || !displayName) {
+    if (!rawHandle || !displayName) {
         process.exitCode = 1;
         const missing = [];
-        if (!handle)
+        if (!rawHandle)
             missing.push('--handle');
         if (!displayName)
             missing.push('--display-name');
@@ -1646,8 +1740,10 @@ function runOnboard(_args) {
         }
         return;
     }
-    // Validate handle format locally before attempting relay registration
+    // Normalize and validate handle format locally before attempting relay registration
+    let handle;
     try {
+        handle = normalizeHandle(rawHandle);
         validateHandle(handle);
     }
     catch (err) {
@@ -1666,9 +1762,34 @@ function runOnboard(_args) {
         }
         return;
     }
+    // ── Relay registration: enforce global uniqueness before local persistence ──
+    // If MORS_RELAY_BASE_URL is configured, call relay /accounts/register
+    // to enforce the global unique-handle constraint end-to-end.
+    // On relay rejection (duplicate/immutable), fail without local persistence.
+    // On relay unreachable, persist locally as graceful degradation.
+    const relayBaseUrl = process.env['MORS_RELAY_BASE_URL'];
+    if (relayBaseUrl) {
+        const relayResult = await relayRegisterHandle(relayBaseUrl, session.accessToken, {
+            handle,
+            displayName,
+        });
+        if (relayResult.error) {
+            process.exitCode = 1;
+            if (json) {
+                console.log(JSON.stringify({
+                    status: 'error',
+                    error: relayResult.errorType ?? 'relay_error',
+                    message: relayResult.message ?? 'Relay registration failed.',
+                }));
+            }
+            else {
+                console.error(`Error: ${relayResult.message ?? 'Relay registration failed.'}`);
+            }
+            return;
+        }
+        // If relay succeeded or was unreachable, continue to local persistence.
+    }
     // Persist profile locally (VAL-AUTH-008, VAL-AUTH-012)
-    // In the current phase, onboarding persists locally. Future milestones
-    // will also register with the relay for global uniqueness enforcement.
     saveProfile(configDir, {
         handle,
         displayName,

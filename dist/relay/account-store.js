@@ -47,35 +47,52 @@ export class InvalidHandleError extends MorsError {
         this.handle = handle;
     }
 }
-// ── Handle validation ────────────────────────────────────────────────
+// ── Handle normalization and validation ──────────────────────────────
 /**
  * Handle format: 3-32 characters, alphanumeric + hyphens + underscores.
  * Must start and end with alphanumeric.
  */
 const HANDLE_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,30}[a-zA-Z0-9]$/;
 /**
+ * Normalize a handle string by trimming whitespace and lowercasing.
+ *
+ * This is the canonical normalization applied before all handle operations
+ * (validation, uniqueness checks, storage, and lookups) to close whitespace
+ * and case edge-case bypasses.
+ *
+ * @param handle - The raw handle input.
+ * @returns The normalized handle (trimmed + lowercased).
+ */
+export function normalizeHandle(handle) {
+    return handle.trim().toLowerCase();
+}
+/**
  * Validate a handle string against format rules.
  *
+ * The handle is normalized (trimmed + lowercased) before validation.
+ *
  * @param handle - The handle to validate.
+ * @returns The normalized handle string.
  * @throws InvalidHandleError if the handle is invalid.
  */
 export function validateHandle(handle) {
     if (!handle || typeof handle !== 'string') {
         throw new InvalidHandleError(handle ?? '', 'handle is required');
     }
-    const trimmed = handle.trim();
-    if (trimmed.length === 0) {
+    const normalized = normalizeHandle(handle);
+    if (normalized.length === 0) {
         throw new InvalidHandleError(handle, 'handle cannot be empty');
     }
-    if (trimmed.length < 3) {
+    if (normalized.length < 3) {
         throw new InvalidHandleError(handle, 'handle must be at least 3 characters');
     }
-    if (trimmed.length > 32) {
+    if (normalized.length > 32) {
         throw new InvalidHandleError(handle, 'handle must be at most 32 characters');
     }
-    if (!HANDLE_PATTERN.test(trimmed)) {
+    if (!HANDLE_PATTERN.test(normalized)) {
         throw new InvalidHandleError(handle, 'handle must start and end with a letter or number, and contain only letters, numbers, hyphens, and underscores');
     }
+    return normalized;
 }
 // ── Account Store ────────────────────────────────────────────────────
 /**
@@ -114,14 +131,13 @@ export class AccountStore {
      */
     register(options) {
         const { accountId, handle, displayName } = options;
-        // Validate handle format
-        validateHandle(handle);
-        const normalizedHandle = handle.toLowerCase();
+        // Validate and normalize handle (trim + lowercase)
+        const normalizedHandle = validateHandle(handle);
         // Check if this account already has a profile
         const existing = this.byAccountId.get(accountId);
         if (existing) {
             // Idempotent re-registration with same handle
-            if (existing.handle.toLowerCase() === normalizedHandle) {
+            if (existing.handle === normalizedHandle) {
                 return existing;
             }
             // Attempt to change handle — immutability violation
@@ -132,10 +148,10 @@ export class AccountStore {
         if (ownerAccountId !== undefined && ownerAccountId !== accountId) {
             throw new DuplicateHandleError(handle);
         }
-        // Create new profile
+        // Create new profile — store the normalized handle
         const profile = {
             accountId,
-            handle,
+            handle: normalizedHandle,
             displayName,
             createdAt: new Date().toISOString(),
         };
@@ -150,7 +166,7 @@ export class AccountStore {
      * @returns true if the handle is available, false if taken.
      */
     isHandleAvailable(handle) {
-        return !this.handleToAccountId.has(handle.toLowerCase());
+        return !this.handleToAccountId.has(normalizeHandle(handle));
     }
     /**
      * Get a profile by account ID.
@@ -168,7 +184,7 @@ export class AccountStore {
      * @returns The account profile, or null if not found.
      */
     getByHandle(handle) {
-        const accountId = this.handleToAccountId.get(handle.toLowerCase());
+        const accountId = this.handleToAccountId.get(normalizeHandle(handle));
         if (!accountId)
             return null;
         return this.byAccountId.get(accountId) ?? null;

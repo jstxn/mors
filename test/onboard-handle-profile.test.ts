@@ -16,7 +16,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
@@ -87,6 +87,46 @@ function simulateAuthenticatedInit(configDir: string, signingKey: string): void 
     }),
     { mode: 0o600 }
   );
+}
+
+/**
+ * Run a CLI command asynchronously (non-blocking) to avoid deadlocking
+ * when the child process needs to contact a relay server running in the
+ * parent test process.
+ */
+function runCliAsync(
+  args: string[],
+  env: Record<string, string | undefined>,
+  timeoutMs = 10000
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('node', [CLI, ...args], {
+      env,
+      timeout: timeoutMs,
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    child.stdout.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+    child.on('close', (code) => {
+      resolve({
+        exitCode: code ?? 1,
+        stdout: Buffer.concat(stdoutChunks).toString('utf-8').trim(),
+        stderr: Buffer.concat(stderrChunks).toString('utf-8').trim(),
+      });
+    });
+
+    child.on('error', () => {
+      resolve({
+        exitCode: 1,
+        stdout: Buffer.concat(stdoutChunks).toString('utf-8').trim(),
+        stderr: Buffer.concat(stderrChunks).toString('utf-8').trim(),
+      });
+    });
+  });
 }
 
 // ── Account Store unit tests ──────────────────────────────────────────
@@ -236,6 +276,91 @@ describe('AccountStore', () => {
         displayName: 'Alice',
       });
       expect(result.handle).toBe('alice-bob_123');
+    });
+  });
+
+  describe('handle normalization (trim + lowercase)', () => {
+    it('normalizes handle by trimming whitespace before uniqueness check', () => {
+      store.register({
+        accountId: 'acct-001',
+        handle: 'alice',
+        displayName: 'Alice Smith',
+      });
+
+      // " alice " (with whitespace) should collide with "alice"
+      expect(() => {
+        store.register({
+          accountId: 'acct-002',
+          handle: '  alice  ',
+          displayName: 'Bob',
+        });
+      }).toThrow(DuplicateHandleError);
+    });
+
+    it('normalizes handle by trimming + lowercasing together', () => {
+      store.register({
+        accountId: 'acct-001',
+        handle: 'Alice',
+        displayName: 'Alice Smith',
+      });
+
+      // " ALICE " should collide with "Alice" after trim+lowercase
+      expect(() => {
+        store.register({
+          accountId: 'acct-002',
+          handle: '  ALICE  ',
+          displayName: 'Bob',
+        });
+      }).toThrow(DuplicateHandleError);
+    });
+
+    it('stores the normalized (trimmed+lowered) handle in profile', () => {
+      const result = store.register({
+        accountId: 'acct-001',
+        handle: '  Alice  ',
+        displayName: 'Alice Smith',
+      });
+
+      // Stored handle should be trimmed and lowercased
+      expect(result.handle).toBe('alice');
+    });
+
+    it('isHandleAvailable normalizes with trim + lowercase', () => {
+      store.register({
+        accountId: 'acct-001',
+        handle: 'alice',
+        displayName: 'Alice',
+      });
+      expect(store.isHandleAvailable('  ALICE  ')).toBe(false);
+      expect(store.isHandleAvailable(' alice ')).toBe(false);
+    });
+
+    it('getByHandle normalizes with trim + lowercase', () => {
+      store.register({
+        accountId: 'acct-001',
+        handle: 'alice',
+        displayName: 'Alice Smith',
+      });
+
+      const profile = store.getByHandle('  ALICE  ');
+      expect(profile).not.toBeNull();
+      expect(profile?.accountId).toBe('acct-001');
+    });
+
+    it('idempotent re-registration works with whitespace-variant handle', () => {
+      store.register({
+        accountId: 'acct-001',
+        handle: 'alice',
+        displayName: 'Alice Smith',
+      });
+
+      // Re-register with whitespace — should be idempotent (same normalized handle, same account)
+      const result = store.register({
+        accountId: 'acct-001',
+        handle: '  alice  ',
+        displayName: 'Alice Smith',
+      });
+      expect(result.handle).toBe('alice');
     });
   });
 
@@ -531,6 +656,117 @@ describe('relay account registration', () => {
   });
 });
 
+// ── Relay handle normalization endpoint tests ────────────────────────
+
+describe('relay account registration normalization', () => {
+  let server: ReturnType<typeof import('../src/relay/server.js').createRelayServer> extends Promise<
+    infer T
+  >
+    ? T
+    : ReturnType<typeof import('../src/relay/server.js').createRelayServer>;
+  let port: number;
+  let signingKey: string;
+  let store: AccountStore;
+
+  beforeEach(async () => {
+    const { createRelayServer } = await import('../src/relay/server.js');
+    const { loadRelayConfig } = await import('../src/relay/config.js');
+    const { createNativeTokenVerifier } = await import('../src/relay/auth-middleware.js');
+    const { RelayMessageStore } = await import('../src/relay/message-store.js');
+
+    signingKey = randomBytes(32).toString('hex');
+    store = new AccountStore();
+
+    const config = loadRelayConfig({ PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    server = createRelayServer(config, {
+      logger: () => {},
+      tokenVerifier: createNativeTokenVerifier(signingKey),
+      messageStore: new RelayMessageStore(),
+      accountStore: store,
+    });
+    await server.start();
+    port = server.port;
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  function makeToken(accountId: string, deviceId: string = 'device-001'): string {
+    return generateSessionToken({ accountId, deviceId, signingKey });
+  }
+
+  it('normalizes handle by trimming whitespace in /accounts/register', async () => {
+    const token = makeToken('acct-001');
+    const res = await fetch(`http://127.0.0.1:${port}/accounts/register`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        handle: '  alice  ',
+        display_name: 'Alice Smith',
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['handle']).toBe('alice');
+  });
+
+  it('normalizes handle by lowercasing in /accounts/register', async () => {
+    const token = makeToken('acct-001');
+    const res = await fetch(`http://127.0.0.1:${port}/accounts/register`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        handle: 'ALICE',
+        display_name: 'Alice Smith',
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['handle']).toBe('alice');
+  });
+
+  it('rejects duplicate handle after normalization across accounts', async () => {
+    const token1 = makeToken('acct-001');
+    await fetch(`http://127.0.0.1:${port}/accounts/register`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token1}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        handle: 'alice',
+        display_name: 'Alice Smith',
+      }),
+    });
+
+    const token2 = makeToken('acct-002');
+    const res = await fetch(`http://127.0.0.1:${port}/accounts/register`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token2}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        handle: '  ALICE  ',
+        display_name: 'Bob Jones',
+      }),
+    });
+
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body['error']).toBe('duplicate_handle');
+  });
+});
+
 // ── CLI onboard command tests ────────────────────────────────────────
 
 describe('CLI mors onboard', () => {
@@ -628,6 +864,143 @@ describe('CLI mors onboard', () => {
     });
 
     expect(result).toContain('onboard');
+  });
+
+  it('calls relay /accounts/register during onboard with relay available', async () => {
+    // Start a real relay server that we can point the CLI at.
+    // Uses async spawn (not execSync) to avoid deadlocking the parent event loop
+    // while the child process tries to contact the relay server in the parent.
+    const { createRelayServer } = await import('../src/relay/server.js');
+    const { loadRelayConfig } = await import('../src/relay/config.js');
+    const { createNativeTokenVerifier } = await import('../src/relay/auth-middleware.js');
+    const { RelayMessageStore } = await import('../src/relay/message-store.js');
+
+    const relayStore = new AccountStore();
+    const config = loadRelayConfig({ PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    const server = createRelayServer(config, {
+      logger: () => {},
+      tokenVerifier: createNativeTokenVerifier(signingKey),
+      messageStore: new RelayMessageStore(),
+      accountStore: relayStore,
+    });
+    await server.start();
+    const relayPort = server.port;
+
+    try {
+      const result = await runCliAsync(
+        ['onboard', '--handle', 'relaytest', '--display-name', 'Relay Test User', '--json'],
+        {
+          ...process.env,
+          MORS_CONFIG_DIR: configDir,
+          MORS_RELAY_SIGNING_KEY: signingKey,
+          MORS_RELAY_BASE_URL: `http://127.0.0.1:${relayPort}`,
+          PATH: process.env['PATH'],
+        }
+      );
+
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.status).toBe('onboarded');
+      expect(parsed.handle).toBe('relaytest');
+
+      // Verify the relay store received the registration
+      const relayProfile = relayStore.getByHandle('relaytest');
+      expect(relayProfile).not.toBeNull();
+      expect(relayProfile?.displayName).toBe('Relay Test User');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('rejects duplicate handle through relay during onboard', async () => {
+    const { createRelayServer } = await import('../src/relay/server.js');
+    const { loadRelayConfig } = await import('../src/relay/config.js');
+    const { createNativeTokenVerifier } = await import('../src/relay/auth-middleware.js');
+    const { RelayMessageStore } = await import('../src/relay/message-store.js');
+
+    const relayStore = new AccountStore();
+    const config = loadRelayConfig({ PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    const server = createRelayServer(config, {
+      logger: () => {},
+      tokenVerifier: createNativeTokenVerifier(signingKey),
+      messageStore: new RelayMessageStore(),
+      accountStore: relayStore,
+    });
+    await server.start();
+    const relayPort = server.port;
+
+    try {
+      // Pre-register the handle on the relay from another account
+      relayStore.register({
+        accountId: 'other-acct-999',
+        handle: 'takenhandle',
+        displayName: 'Other User',
+      });
+
+      const result = await runCliAsync(
+        ['onboard', '--handle', 'takenhandle', '--display-name', 'Should Fail', '--json'],
+        {
+          ...process.env,
+          MORS_CONFIG_DIR: configDir,
+          MORS_RELAY_SIGNING_KEY: signingKey,
+          MORS_RELAY_BASE_URL: `http://127.0.0.1:${relayPort}`,
+          PATH: process.env['PATH'],
+        }
+      );
+
+      expect(result.exitCode).not.toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.status).toBe('error');
+      expect(parsed.error).toBe('duplicate_handle');
+
+      // Profile should NOT be persisted locally on relay rejection
+      expect(existsSync(join(configDir, 'profile.json'))).toBe(false);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('normalizes handle via relay during onboard (trim+lowercase)', async () => {
+    const { createRelayServer } = await import('../src/relay/server.js');
+    const { loadRelayConfig } = await import('../src/relay/config.js');
+    const { createNativeTokenVerifier } = await import('../src/relay/auth-middleware.js');
+    const { RelayMessageStore } = await import('../src/relay/message-store.js');
+
+    const relayStore = new AccountStore();
+    const config = loadRelayConfig({ PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    const server = createRelayServer(config, {
+      logger: () => {},
+      tokenVerifier: createNativeTokenVerifier(signingKey),
+      messageStore: new RelayMessageStore(),
+      accountStore: relayStore,
+    });
+    await server.start();
+    const relayPort = server.port;
+
+    try {
+      // Pre-register 'alice' from another account
+      relayStore.register({
+        accountId: 'other-acct-999',
+        handle: 'alice',
+        displayName: 'Other Alice',
+      });
+
+      // Onboard with " Alice " — CLI normalizes to "alice" which should collide with relay
+      const result = await runCliAsync(
+        ['onboard', '--handle', ' Alice ', '--display-name', 'Tricky Alice', '--json'],
+        {
+          ...process.env,
+          MORS_CONFIG_DIR: configDir,
+          MORS_RELAY_SIGNING_KEY: signingKey,
+          MORS_RELAY_BASE_URL: `http://127.0.0.1:${relayPort}`,
+          PATH: process.env['PATH'],
+        }
+      );
+
+      // Should be rejected because "Alice" normalizes to "alice" which is taken
+      expect(result.exitCode).not.toBe(0);
+    } finally {
+      await server.close();
+    }
   });
 
   it('requires authentication before onboarding', () => {
