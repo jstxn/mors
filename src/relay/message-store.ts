@@ -61,6 +61,21 @@ export interface RelaySendOptions {
   subject?: string;
   /** Parent message ID for replies. */
   inReplyTo?: string;
+  /**
+   * Client-provided dedupe key for idempotent send/reply.
+   * If provided, repeated sends with the same key from the same sender
+   * return the canonical message without creating a duplicate.
+   * Scope: per-sender (sender_id + dedupe_key).
+   */
+  dedupeKey?: string;
+}
+
+/** Result of a send operation, indicating whether a new message was created or deduped. */
+export interface RelaySendResult {
+  /** The relay message (canonical, whether new or deduped). */
+  message: RelayMessage;
+  /** Whether this send created a new message (true) or returned an existing one (false, deduped). */
+  created: boolean;
 }
 
 /** Options for listing inbox messages. */
@@ -126,6 +141,16 @@ export class RelayMessageStore {
   private senderIndex = new Map<number, Set<string>>();
   /** Conversation participants: conversationKey → Set<githubUserId>. */
   private participants = new Map<string, Set<number>>();
+  /**
+   * Dedupe index: maps (sender_id, dedupe_key) → message_id.
+   * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
+   */
+  private dedupeIndex = new Map<string, string>();
+
+  /** Build a dedupe index key scoped to the sender. */
+  private dedupeIndexKey(senderId: number, dedupeKey: string): string {
+    return `${senderId}:${dedupeKey}`;
+  }
 
   /**
    * Send a message through the relay.
@@ -134,13 +159,30 @@ export class RelayMessageStore {
    * (never from client payload). Messages start in 'delivered' state
    * since relay delivery is synchronous in this phase.
    *
+   * When a dedupe key is provided, repeated sends from the same sender
+   * with the same key return the canonical message without creating a
+   * duplicate. The dedupe scope is per-sender (sender_id + dedupe_key).
+   *
    * @param senderId - Authenticated sender's GitHub user ID.
    * @param senderLogin - Authenticated sender's GitHub login.
    * @param options - Send options.
-   * @returns The created relay message.
+   * @returns A RelaySendResult with the message and whether it was newly created.
    */
-  send(senderId: number, senderLogin: string, options: RelaySendOptions): RelayMessage {
-    const { recipientId, body, subject, inReplyTo } = options;
+  send(senderId: number, senderLogin: string, options: RelaySendOptions): RelaySendResult {
+    const { recipientId, body, subject, inReplyTo, dedupeKey } = options;
+
+    // Check dedupe index first — if this key was already used by this sender,
+    // return the canonical message without creating a new one.
+    if (dedupeKey) {
+      const indexKey = this.dedupeIndexKey(senderId, dedupeKey);
+      const existingId = this.dedupeIndex.get(indexKey);
+      if (existingId) {
+        const existing = this.messages.get(existingId);
+        if (existing) {
+          return { message: existing, created: false };
+        }
+      }
+    }
 
     // Resolve thread_id: inherit from parent if reply, or generate new
     let threadId: string;
@@ -174,6 +216,12 @@ export class RelayMessageStore {
     // Store message
     this.messages.set(message.id, message);
 
+    // Register in dedupe index if key was provided
+    if (dedupeKey) {
+      const indexKey = this.dedupeIndexKey(senderId, dedupeKey);
+      this.dedupeIndex.set(indexKey, message.id);
+    }
+
     // Update inbox index
     const inboxSet = this.inboxIndex.get(recipientId) ?? new Set<string>();
     if (!this.inboxIndex.has(recipientId)) {
@@ -197,7 +245,7 @@ export class RelayMessageStore {
     convSet.add(senderId);
     convSet.add(recipientId);
 
-    return message;
+    return { message, created: true };
   }
 
   /**
@@ -367,5 +415,6 @@ export class RelayMessageStore {
     this.inboxIndex.clear();
     this.senderIndex.clear();
     this.participants.clear();
+    this.dedupeIndex.clear();
   }
 }

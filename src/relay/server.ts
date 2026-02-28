@@ -32,6 +32,7 @@ import {
   RelayMessageStore,
   RelayMessageNotFoundError,
   RelayUnauthorizedError,
+  type RelaySendResult,
 } from './message-store.js';
 
 /** Logger function type. */
@@ -244,6 +245,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       const messageBody = body['body'];
       const subject = body['subject'];
       const inReplyTo = body['in_reply_to'];
+      const dedupeKey = body['dedupe_key'];
 
       if (typeof recipientId !== 'number') {
         sendJson(res, 400, {
@@ -260,14 +262,25 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         return;
       }
 
-      const message = messageStore.send(principal.githubUserId, principal.githubLogin, {
-        recipientId,
-        body: messageBody,
-        subject: typeof subject === 'string' ? subject : undefined,
-        inReplyTo: typeof inReplyTo === 'string' ? inReplyTo : undefined,
-      });
+      let result: RelaySendResult;
+      try {
+        result = messageStore.send(principal.githubUserId, principal.githubLogin, {
+          recipientId,
+          body: messageBody,
+          subject: typeof subject === 'string' ? subject : undefined,
+          inReplyTo: typeof inReplyTo === 'string' ? inReplyTo : undefined,
+          dedupeKey: typeof dedupeKey === 'string' ? dedupeKey : undefined,
+        });
+      } catch (err: unknown) {
+        if (err instanceof RelayMessageNotFoundError) {
+          sendJson(res, 404, { error: 'not_found', detail: err.message });
+          return;
+        }
+        throw err;
+      }
 
-      sendJson(res, 201, message);
+      // 201 for newly created, 200 for idempotent dedupe hit
+      sendJson(res, result.created ? 201 : 200, result.message);
       return;
     }
 

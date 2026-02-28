@@ -55,6 +55,20 @@ export interface RelaySendOptions {
     subject?: string;
     /** Parent message ID for replies. */
     inReplyTo?: string;
+    /**
+     * Client-provided dedupe key for idempotent send/reply.
+     * If provided, repeated sends with the same key from the same sender
+     * return the canonical message without creating a duplicate.
+     * Scope: per-sender (sender_id + dedupe_key).
+     */
+    dedupeKey?: string;
+}
+/** Result of a send operation, indicating whether a new message was created or deduped. */
+export interface RelaySendResult {
+    /** The relay message (canonical, whether new or deduped). */
+    message: RelayMessage;
+    /** Whether this send created a new message (true) or returned an existing one (false, deduped). */
+    created: boolean;
 }
 /** Options for listing inbox messages. */
 export interface RelayInboxOptions {
@@ -101,18 +115,29 @@ export declare class RelayMessageStore {
     /** Conversation participants: conversationKey → Set<githubUserId>. */
     private participants;
     /**
+     * Dedupe index: maps (sender_id, dedupe_key) → message_id.
+     * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
+     */
+    private dedupeIndex;
+    /** Build a dedupe index key scoped to the sender. */
+    private dedupeIndexKey;
+    /**
      * Send a message through the relay.
      *
      * The sender identity is derived from the authenticated principal
      * (never from client payload). Messages start in 'delivered' state
      * since relay delivery is synchronous in this phase.
      *
+     * When a dedupe key is provided, repeated sends from the same sender
+     * with the same key return the canonical message without creating a
+     * duplicate. The dedupe scope is per-sender (sender_id + dedupe_key).
+     *
      * @param senderId - Authenticated sender's GitHub user ID.
      * @param senderLogin - Authenticated sender's GitHub login.
      * @param options - Send options.
-     * @returns The created relay message.
+     * @returns A RelaySendResult with the message and whether it was newly created.
      */
-    send(senderId: number, senderLogin: string, options: RelaySendOptions): RelayMessage;
+    send(senderId: number, senderLogin: string, options: RelaySendOptions): RelaySendResult;
     /**
      * List inbox messages for a user.
      *

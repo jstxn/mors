@@ -56,19 +56,44 @@ export class RelayMessageStore {
     /** Conversation participants: conversationKey → Set<githubUserId>. */
     participants = new Map();
     /**
+     * Dedupe index: maps (sender_id, dedupe_key) → message_id.
+     * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
+     */
+    dedupeIndex = new Map();
+    /** Build a dedupe index key scoped to the sender. */
+    dedupeIndexKey(senderId, dedupeKey) {
+        return `${senderId}:${dedupeKey}`;
+    }
+    /**
      * Send a message through the relay.
      *
      * The sender identity is derived from the authenticated principal
      * (never from client payload). Messages start in 'delivered' state
      * since relay delivery is synchronous in this phase.
      *
+     * When a dedupe key is provided, repeated sends from the same sender
+     * with the same key return the canonical message without creating a
+     * duplicate. The dedupe scope is per-sender (sender_id + dedupe_key).
+     *
      * @param senderId - Authenticated sender's GitHub user ID.
      * @param senderLogin - Authenticated sender's GitHub login.
      * @param options - Send options.
-     * @returns The created relay message.
+     * @returns A RelaySendResult with the message and whether it was newly created.
      */
     send(senderId, senderLogin, options) {
-        const { recipientId, body, subject, inReplyTo } = options;
+        const { recipientId, body, subject, inReplyTo, dedupeKey } = options;
+        // Check dedupe index first — if this key was already used by this sender,
+        // return the canonical message without creating a new one.
+        if (dedupeKey) {
+            const indexKey = this.dedupeIndexKey(senderId, dedupeKey);
+            const existingId = this.dedupeIndex.get(indexKey);
+            if (existingId) {
+                const existing = this.messages.get(existingId);
+                if (existing) {
+                    return { message: existing, created: false };
+                }
+            }
+        }
         // Resolve thread_id: inherit from parent if reply, or generate new
         let threadId;
         if (inReplyTo) {
@@ -99,6 +124,11 @@ export class RelayMessageStore {
         };
         // Store message
         this.messages.set(message.id, message);
+        // Register in dedupe index if key was provided
+        if (dedupeKey) {
+            const indexKey = this.dedupeIndexKey(senderId, dedupeKey);
+            this.dedupeIndex.set(indexKey, message.id);
+        }
         // Update inbox index
         const inboxSet = this.inboxIndex.get(recipientId) ?? new Set();
         if (!this.inboxIndex.has(recipientId)) {
@@ -119,7 +149,7 @@ export class RelayMessageStore {
         }
         convSet.add(senderId);
         convSet.add(recipientId);
-        return message;
+        return { message, created: true };
     }
     /**
      * List inbox messages for a user.
@@ -270,6 +300,7 @@ export class RelayMessageStore {
         this.inboxIndex.clear();
         this.senderIndex.clear();
         this.participants.clear();
+        this.dedupeIndex.clear();
     }
 }
 //# sourceMappingURL=message-store.js.map
