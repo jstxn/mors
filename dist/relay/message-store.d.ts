@@ -144,6 +144,14 @@ export declare class RelayMessageStore {
     private dedupeIndex;
     /** Listeners for stream events. */
     private streamListeners;
+    /**
+     * Ordered event log for SSE cursor/Last-Event-ID resume support.
+     * Events are appended in order and retained for replay during reconnect.
+     * Each event has a stable event_id that never changes across replays.
+     */
+    private eventLog;
+    /** Index from event_id → position in eventLog for fast cursor lookup. */
+    private eventIdIndex;
     /** Build a dedupe index key scoped to the sender. */
     private dedupeIndexKey;
     /**
@@ -244,7 +252,31 @@ export declare class RelayMessageStore {
      * @returns Unsubscribe function to remove the listener.
      */
     onStreamEvent(listener: RelayStreamListener): () => void;
-    /** Emit a stream event to all registered listeners. */
+    /**
+     * Register an external event ID as a cursor position in the event log.
+     *
+     * This allows non-message-store events (like the SSE "connected" event)
+     * to serve as valid Last-Event-ID cursors. The registered ID points to
+     * the current end of the event log, meaning "everything before this
+     * point was already delivered to the client."
+     *
+     * @param eventId - The event ID to register as a cursor position.
+     */
+    registerCursorPosition(eventId: string): void;
+    /**
+     * Get events from the event log after a given cursor (Last-Event-ID).
+     *
+     * If the cursor is found, returns all events after that position.
+     * If the cursor is not found (e.g. server restarted, unknown ID),
+     * returns an empty array (fallback to no replay).
+     *
+     * Used by the SSE endpoint to replay missed events on reconnect.
+     *
+     * @param lastEventId - The last event ID the client received.
+     * @returns Array of events after the cursor, in order.
+     */
+    getEventsSince(lastEventId: string): RelayStreamEvent[];
+    /** Emit a stream event to all registered listeners and append to event log. */
     private emitStreamEvent;
     /** Generate a conversation key from a thread ID. */
     private conversationKey;

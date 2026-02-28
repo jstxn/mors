@@ -158,12 +158,16 @@ export function createRelayServer(config, options) {
         // Events are filtered to only include those relevant to the authenticated principal
         // (messages where the user is sender or recipient).
         //
-        // Covers: VAL-STREAM-001 (authenticated connection), VAL-STREAM-002 (event shape)
+        // Covers: VAL-STREAM-001 (authenticated connection), VAL-STREAM-002 (event shape),
+        //         VAL-STREAM-003 (cursor resume), VAL-STREAM-004 (deterministic startup),
+        //         VAL-STREAM-005 (duplicate replay → stable event IDs for dedup)
         if (url === '/events' || url.startsWith('/events?')) {
             if (method !== 'GET' && method !== 'HEAD') {
                 sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
                 return;
             }
+            // Extract Last-Event-ID from header for reconnect resume (VAL-STREAM-003)
+            const lastEventId = req.headers['last-event-id'];
             res.writeHead(200, {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
@@ -172,17 +176,50 @@ export function createRelayServer(config, options) {
             // Send initial heartbeat comment (SSE keepalive)
             res.write(': heartbeat\n\n');
             // Send connected event with authenticated principal info (VAL-STREAM-001)
+            const connectedEventId = generateEventId();
             writeSSE(res, {
-                id: generateEventId(),
+                id: connectedEventId,
                 event: 'connected',
                 data: JSON.stringify({
                     github_user_id: principal.githubUserId,
                     github_login: principal.githubLogin,
                 }),
             });
+            // Register the connected event's ID as a valid cursor position
+            // so clients can use it as Last-Event-ID on reconnect (VAL-STREAM-003/005)
+            if (messageStore) {
+                messageStore.registerCursorPosition(connectedEventId);
+            }
             // Track this connection
             sseConnections.add(res);
-            // Subscribe to message store stream events (if available)
+            // Replay missed events from cursor (VAL-STREAM-003).
+            // If no Last-Event-ID, this is a fresh connection — no replay (VAL-STREAM-004).
+            // Unknown cursor also results in no replay (graceful fallback).
+            // Events are filtered to only include those relevant to the authenticated principal.
+            // Replayed events use their original stable event IDs (VAL-STREAM-005).
+            if (lastEventId && messageStore) {
+                const missedEvents = messageStore.getEventsSince(lastEventId);
+                for (const streamEvent of missedEvents) {
+                    // Filter: only deliver events relevant to this principal
+                    if (streamEvent.sender_id !== principal.githubUserId &&
+                        streamEvent.recipient_id !== principal.githubUserId) {
+                        continue;
+                    }
+                    writeSSE(res, {
+                        id: streamEvent.event_id,
+                        event: streamEvent.event_type,
+                        data: JSON.stringify({
+                            message_id: streamEvent.message_id,
+                            thread_id: streamEvent.thread_id,
+                            in_reply_to: streamEvent.in_reply_to,
+                            sender_id: streamEvent.sender_id,
+                            recipient_id: streamEvent.recipient_id,
+                            timestamp: streamEvent.timestamp,
+                        }),
+                    });
+                }
+            }
+            // Subscribe to message store stream events for live delivery (if available)
             let unsubscribe;
             if (messageStore) {
                 unsubscribe = messageStore.onStreamEvent((streamEvent) => {

@@ -63,6 +63,14 @@ export class RelayMessageStore {
     dedupeIndex = new Map();
     /** Listeners for stream events. */
     streamListeners = new Set();
+    /**
+     * Ordered event log for SSE cursor/Last-Event-ID resume support.
+     * Events are appended in order and retained for replay during reconnect.
+     * Each event has a stable event_id that never changes across replays.
+     */
+    eventLog = [];
+    /** Index from event_id → position in eventLog for fast cursor lookup. */
+    eventIdIndex = new Map();
     /** Build a dedupe index key scoped to the sender. */
     dedupeIndexKey(senderId, dedupeKey) {
         return `${senderId}:${dedupeKey}`;
@@ -331,7 +339,46 @@ export class RelayMessageStore {
             this.streamListeners.delete(listener);
         };
     }
-    /** Emit a stream event to all registered listeners. */
+    /**
+     * Register an external event ID as a cursor position in the event log.
+     *
+     * This allows non-message-store events (like the SSE "connected" event)
+     * to serve as valid Last-Event-ID cursors. The registered ID points to
+     * the current end of the event log, meaning "everything before this
+     * point was already delivered to the client."
+     *
+     * @param eventId - The event ID to register as a cursor position.
+     */
+    registerCursorPosition(eventId) {
+        // Position is the index of the last event in the log.
+        // If the log is empty, use -1 (so getEventsSince returns all events).
+        // If the log has events, the cursor points to the last one (so
+        // getEventsSince returns events after that position).
+        const position = this.eventLog.length - 1;
+        this.eventIdIndex.set(eventId, position);
+    }
+    /**
+     * Get events from the event log after a given cursor (Last-Event-ID).
+     *
+     * If the cursor is found, returns all events after that position.
+     * If the cursor is not found (e.g. server restarted, unknown ID),
+     * returns an empty array (fallback to no replay).
+     *
+     * Used by the SSE endpoint to replay missed events on reconnect.
+     *
+     * @param lastEventId - The last event ID the client received.
+     * @returns Array of events after the cursor, in order.
+     */
+    getEventsSince(lastEventId) {
+        const idx = this.eventIdIndex.get(lastEventId);
+        if (idx === undefined) {
+            // Unknown cursor — treat as fresh connection, no replay
+            return [];
+        }
+        // Return all events after the cursor position
+        return this.eventLog.slice(idx + 1);
+    }
+    /** Emit a stream event to all registered listeners and append to event log. */
     emitStreamEvent(eventType, message) {
         const event = {
             event_id: generateEventId(),
@@ -343,6 +390,10 @@ export class RelayMessageStore {
             recipient_id: message.recipient_id,
             timestamp: new Date().toISOString(),
         };
+        // Append to event log before notifying listeners for consistent replay
+        const logIndex = this.eventLog.length;
+        this.eventLog.push(event);
+        this.eventIdIndex.set(event.event_id, logIndex);
         for (const listener of this.streamListeners) {
             listener(event);
         }
@@ -359,6 +410,8 @@ export class RelayMessageStore {
         this.participants.clear();
         this.dedupeIndex.clear();
         this.streamListeners.clear();
+        this.eventLog.length = 0;
+        this.eventIdIndex.clear();
     }
 }
 //# sourceMappingURL=message-store.js.map
