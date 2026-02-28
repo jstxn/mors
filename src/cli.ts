@@ -18,6 +18,7 @@ import {
 } from './message.js';
 import { startWatch } from './watch.js';
 import type { WatchEvent } from './watch.js';
+import { runSetupShell } from './setup-shell.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError } from './errors.js';
 import { ContractValidationError } from './contract/errors.js';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
@@ -43,6 +44,11 @@ export function run(args: string[]): void {
 
   if (command === 'init') {
     runInit(args.slice(1));
+    return;
+  }
+
+  if (command === 'setup-shell') {
+    runSetupShellCommand(args.slice(1));
     return;
   }
 
@@ -574,6 +580,39 @@ function formatWatchEvent(event: WatchEvent): void {
   }
 }
 
+// ── Setup-shell command ──────────────────────────────────────────────
+
+function runSetupShellCommand(_args: string[]): void {
+  const { flags } = parseArgs(_args);
+  const json = 'json' in flags;
+  const autoConfirm = 'confirm' in flags;
+  const autoDecline = 'decline' in flags;
+
+  runSetupShell({
+    json,
+    autoConfirm,
+    autoDecline,
+  })
+    .then(() => {
+      // Success — exit code remains 0.
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'error',
+            error: 'setup_shell_failed',
+            message: msg,
+          })
+        );
+      } else {
+        console.error(`Error: ${msg}`);
+      }
+    });
+}
+
 // ── Init command ─────────────────────────────────────────────────────
 
 function runInit(_args: string[]): void {
@@ -684,14 +723,15 @@ Usage:
   mors <command> [options]
 
 Commands:
-  init       Initialize identity and encrypted store
-  send       Send a message
-  inbox      List messages
-  read       Read a message
-  reply      Reply to a message
-  ack        Acknowledge a message
-  thread     View thread messages in causal order
-  watch      Watch for new messages
+  init         Initialize identity and encrypted store
+  send         Send a message
+  inbox        List messages
+  read         Read a message
+  reply        Reply to a message
+  ack          Acknowledge a message
+  thread       View thread messages in causal order
+  watch        Watch for new messages
+  setup-shell  Configure shell PATH for mors
 
 Options:
   -h, --help     Show this help
@@ -730,5 +770,11 @@ Thread:
 Watch:
   mors watch [--json] [--poll-interval <ms>]
   --json                 Output JSON (one event per line)
-  --poll-interval <ms>   Polling interval in ms (default: 500, min: 10)`);
+  --poll-interval <ms>   Polling interval in ms (default: 500, min: 10)
+
+Setup Shell:
+  mors setup-shell [--json] [--confirm] [--decline]
+  --json                 Output JSON
+  --confirm              Auto-confirm without prompting
+  --decline              Auto-decline without prompting`);
 }
