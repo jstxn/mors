@@ -1,0 +1,28 @@
+{
+  "featureId": "e2ee-ciphertext-delivery-decrypt-and-tamper-detection",
+  "reviewedAt": "2026-02-28T13:27:01Z",
+  "commitId": "fd4b7f0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit adds a cipher runtime and unit tests, but it does not integrate encryption/decryption into the actual relay send/read path. Relay transport and server handling still use plaintext `body`, so the feature does not satisfy ciphertext-only wire delivery or recipient decrypt-on-receive behavior.",
+    "issues": [
+      {
+        "file": "src/relay/client.ts",
+        "line": 286,
+        "severity": "blocking",
+        "description": "Outbound relay requests still send plaintext `body` (`body: payload.body`) instead of ciphertext fields. This violates expected behavior 'Relay/wire payloads never include plaintext message body' (VAL-E2EE-003)."
+      },
+      {
+        "file": "src/relay/server.ts",
+        "line": 268,
+        "severity": "blocking",
+        "description": "Server `/messages` handler still reads plaintext `body` and stores/returns it (`messageBody = body['body']`, then `body: messageBody`). No decrypt path is wired for recipients, and `encryptMessage`/`decryptMessage` are not used in relay code (only in cipher module/tests), so VAL-E2EE-004 and true relay-path VAL-E2EE-009 coverage are not met."
+      }
+    ]
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: feature implementation is limited to crypto primitives and unit tests, without relay path integration. Plaintext message body is still transmitted and handled on relay endpoints, so ciphertext-only delivery/decrypt behavior is not implemented end-to-end."
+}

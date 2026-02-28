@@ -1,0 +1,40 @@
+{
+  "featureId": "relay-offline-sync-and-transient-retry-recovery",
+  "reviewedAt": "2026-02-28T13:28:53Z",
+  "commitId": "ad6b464",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit adds a standalone RelayClient and thorough tests, but it does not satisfy key feature outcomes: retry/offline behavior is not wired into CLI flows, offline queue durability is process-local only, and queued-message reconciliation lacks transient retry behavior.",
+    "issues": [
+      {
+        "file": "src/cli.ts",
+        "line": 18,
+        "severity": "blocking",
+        "description": "Expected behavior requires retries to be observable in CLI output, but CLI send/inbox/read/ack paths still use local message-store functions and never use the new relay client. No RelayClient integration exists in CLI command execution paths."
+      },
+      {
+        "file": "src/relay/client.ts",
+        "line": 154,
+        "severity": "blocking",
+        "description": "Offline queue is in-memory only (`offlineQueue` array) with no persisted backing store. Queued messages are lost on process restart/crash, which violates the feature goal of offline-to-online convergence without loss and mission local-first durability expectations."
+      },
+      {
+        "file": "src/relay/client.ts",
+        "line": 228,
+        "severity": "blocking",
+        "description": "`flush()` reconciles queued entries via single-shot `doSend()` attempts and catches failures without retry/backoff. Transient relay failures during reconciliation therefore do not use the feature's retry strategy, leaving convergence dependent on repeated external/manual flush calls."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Skill procedure requires manual CLI/API/SSE checks for user-facing surface changes (or explicit justification for internal-only work), but this feature's handoff marked procedure followed without manual/interactive verification evidence while feature expectations explicitly include CLI observability.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31 requires manual checks/justification; handoff file 2026-02-28T13-03-30-788Z__relay-offline-sync-and-transient-retry-recovery__d0af398e-ebdb-405d-b4c4-553e93790a15.json contains verification.commandsRun only and no interactiveChecks, while features.json:623 expects CLI-observable retries."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: core relay retry/offline primitives were added and tested in isolation, but feature-level acceptance criteria are not met due to missing CLI integration, non-durable offline queueing, and incomplete retry behavior during queue reconciliation."
+}

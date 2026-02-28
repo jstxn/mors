@@ -1,0 +1,39 @@
+{
+  "featureId": "relay-thread-reply-dedupe-and-idempotent-transitions",
+  "reviewedAt": "2026-02-28T13:27:08Z",
+  "commitId": "b62a6e1",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds relay dedupe-key plumbing, reply-parent 404 handling, and extensive automated tests, but one blocking behavior remains: dedupe matching is sender-key only and does not protect against incompatible context collisions.",
+    "issues": [
+      {
+        "file": "src/relay/message-store.ts",
+        "line": 176,
+        "severity": "blocking",
+        "description": "Dedupe lookup is keyed only by sender_id + dedupe_key and returns an existing message before validating recipient/in_reply_to/thread compatibility. Reusing the same key in an incompatible context (e.g., different recipient or different reply parent) cross-collides instead of rejecting or creating a distinct canonical outcome, which violates VAL-RELAY-009 ('incompatible contexts does not cross-collide incorrectly') and can bypass intended causal reply semantics."
+      },
+      {
+        "file": "test/relay/thread-dedupe.test.ts",
+        "line": 418,
+        "severity": "non_blocking",
+        "description": "The suite asserts that same sender + same dedupe_key across different recipients must dedupe. That expectation conflicts with validation-contract.md VAL-RELAY-009 language about incompatible contexts, so tests currently encode and mask the blocking context-collision behavior."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill procedure requires manual CLI/API/SSE sanity checks for user-facing changes (or an explicit not-applicable rationale), but this run marked followedProcedure=true without manual-check evidence.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31 requires manual sanity checks; the handoff for workerSessionId a5835eb6-bfee-42ad-9bb0-fd00401b4ef4 lists only automated verification.commandsRun and no interactiveChecks/not-applicable rationale, while handoff.skillFeedback.followedProcedure is true."
+    },
+    {
+      "area": "conventions",
+      "observation": "Shared guidance does not clearly encode relay dedupe-context compatibility rules, which may have enabled per-sender-only dedupe behavior.",
+      "evidence": "validation-contract.md:80 requires incompatible contexts not to cross-collide; src/message.ts:182-188 and 646-665 enforce causal-context dedupe conflicts in core local messaging; src/relay/message-store.ts:151-182 applies sender+key-only dedupe without context checks."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit b62a6e1 for relay-thread-reply-dedupe-and-idempotent-transitions. Despite broad test coverage and correct 404/idempotency plumbing, relay dedupe currently allows incompatible-context collisions, so the feature does not fully satisfy VAL-RELAY-009 and is marked fail."
+}

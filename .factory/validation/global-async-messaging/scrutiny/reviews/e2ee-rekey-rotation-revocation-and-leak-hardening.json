@@ -1,0 +1,34 @@
+{
+  "featureId": "e2ee-rekey-rotation-revocation-and-leak-hardening",
+  "reviewedAt": "2026-02-28T13:28:07Z",
+  "commitId": "0eba83d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The stale-key guidance path is implemented, but revocation trust-boundary enforcement is incomplete: revoked devices can still be re-key-exchanged because revocation state is not enforced in key-exchange flows.",
+    "issues": [
+      {
+        "file": "src/e2ee/key-exchange.ts",
+        "line": 186,
+        "severity": "blocking",
+        "description": "performKeyExchange() never checks revocation state. Even after revokeDevice() marks a device revoked (line 475), callers can perform a fresh key exchange with that same device and restore decrypt capability, violating the stated rotation/revocation trust boundary." 
+      },
+      {
+        "file": "test/e2ee/rekey-rotation.test.ts",
+        "line": 338,
+        "severity": "non_blocking",
+        "description": "Test name claims strict revoked-device behavior (DeviceRevokedError), but the assertion uses decryptMessage() and only expects CipherError (line 357). This leaves the explicit revoked-device failure path unverified and obscures the missing enforcement." 
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-global-worker skill asks workers to verify stale/revoked failure paths, but this feature passed with revocation only stored (not enforced). The procedure text appears too ambiguous to force an assertion that revoked devices are actively blocked from future key exchange.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 6 vs src/e2ee/key-exchange.ts:186 and test/e2ee/rekey-rotation.test.ts:338-357"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking trust-boundary gap: revocation is recorded but not enforced during key exchange, so a revoked device can be re-authorized." 
+}

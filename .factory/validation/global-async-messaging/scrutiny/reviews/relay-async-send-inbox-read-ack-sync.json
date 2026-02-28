@@ -1,0 +1,28 @@
+{
+  "featureId": "relay-async-send-inbox-read-ack-sync",
+  "reviewedAt": "2026-02-28T13:27:55Z",
+  "commitId": "3524c8d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Core send/inbox/read/ack route handlers and tests were added, but the relay runtime entrypoint does not wire a messageStore, so the new messaging routes are effectively disabled in normal relay startup.",
+    "issues": [
+      {
+        "file": "src/relay/index.ts",
+        "line": 39,
+        "severity": "blocking",
+        "description": "createRelayServer is constructed with tokenVerifier and participantStore only, omitting messageStore. Because all new messaging routes are guarded by `&& messageStore` in server routing (`src/relay/server.ts` lines 237, 311, 321), `/messages`, `/inbox`, `/messages/:id/read`, and `/messages/:id/ack` are not available in the relay's actual runtime path, so VAL-RELAY-001/002/003 are not fully wired beyond test-only construction."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The feature metadata requires manual multi-identity transcript evidence, but the worker handoff reports only automated test commands while still marking `skillFeedback.followedProcedure=true`.",
+      "evidence": "features.json for `relay-async-send-inbox-read-ack-sync` includes verification step `Manual: multi-identity send/read/ack transcript with state snapshots`; handoff `verification.commandsRun` lists only test/typecheck/lint commands and no manual transcript artifacts."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Failing review due to a blocking integration gap: relay runtime startup does not provide messageStore to createRelayServer, leaving the new async messaging endpoints disabled outside tests."
+}

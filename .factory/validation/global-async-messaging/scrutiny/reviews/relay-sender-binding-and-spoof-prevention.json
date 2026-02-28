@@ -1,0 +1,21 @@
+{
+  "featureId": "relay-sender-binding-and-spoof-prevention",
+  "reviewedAt": "2026-02-28T13:26:40Z",
+  "commitId": "ca1af70",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation in src/relay/server.ts enforces sender identity binding by deriving sender identity from the authenticated principal and rejecting typed mismatches in client-provided sender actor fields. The added spoof-prevention test suite covers mismatch rejection, no-mutation behavior, normal send/reply behavior, and relevant edge cases, satisfying VAL-RELAY-008.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill procedure requires manual CLI/API/SSE sanity checks for user-facing changes unless explicitly documented as not applicable, but this worker marked followedProcedure=true without recording manual checks or a not-applicable rationale.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 8 requires manual sanity checks for user-facing surfaces; transcript skeleton for workerSessionId a4bc6886-d5d2-415c-8385-25d0a1e72e9e shows test/lint/typecheck/full-suite execution but no manual CLI/API/SSE verification record; handoff.skillFeedback.followedProcedure is true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit ca1af70 for relay-sender-binding-and-spoof-prevention and found the feature correctly enforces authenticated sender binding with robust automated coverage; no code defects were found for VAL-RELAY-008. Noted one process-level skill adherence/documentation gap regarding manual sanity-check evidence."
+}
