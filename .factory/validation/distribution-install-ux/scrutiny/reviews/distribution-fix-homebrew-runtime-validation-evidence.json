@@ -1,0 +1,34 @@
+{
+  "featureId": "distribution-fix-homebrew-runtime-validation-evidence",
+  "reviewedAt": "2026-02-28T08:17:55Z",
+  "commitId": "4d697818f0b032799c165b93937990914d460bb3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The fix improves labeling and adds execution-based checks, but it still does not execute a Homebrew-installed `mors` binary. The original VAL-INSTALL-007 blocker (missing executable Homebrew install+run proof) is therefore not fully addressed.",
+    "issues": [
+      {
+        "file": "test/install-matrix.test.ts",
+        "line": 217,
+        "severity": "blocking",
+        "description": "The new \"Homebrew runtime executable proof\" tests run `node dist/index.js` / `runCli('--version')` against the repo build, not a binary installed through Homebrew (`brew install` + brewed `mors`). This still allows the suite to pass even if the actual Homebrew install/runtime path is broken, which is the same gap flagged in the prior failure." 
+      },
+      {
+        "file": ".factory/library/homebrew-formula.md",
+        "line": 33,
+        "severity": "non_blocking",
+        "description": "Runtime documentation labels `node dist/index.js --version` as Homebrew runtime proof and states it confirms formula-installed binary behavior, but no brewed executable is run. This can mislead future validators about what constitutes channel-specific runtime evidence."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Shared Homebrew validation guidance now conflates local built-CLI execution with Homebrew-channel runtime proof.",
+      "evidence": ".factory/library/homebrew-formula.md:33 and :43 use `node dist/index.js --version` and claim it confirms the binary installed via formula, without a `brew install`/brewed `mors` execution step."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/distribution-install-ux/scrutiny/reviews/distribution-install-matrix-and-first-run-flow.json",
+  "summary": "Review failed: commit 4d69781 separates static vs runtime checks, but the runtime evidence still does not execute a Homebrew-installed `mors` command, so the original blocking requirement remains unresolved."
+}
