@@ -22,6 +22,7 @@ import { loadRelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier, ParticipantStore } from '../../src/relay/auth-middleware.js';
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 import { saveSession, markAuthEnabled, type AuthSession } from '../../src/auth/session.js';
+import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
@@ -36,11 +37,6 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   };
   return map[token] ?? null;
 };
-
-/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
-function getTestPort(): number {
-  return 0;
-}
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'dist', 'index.js');

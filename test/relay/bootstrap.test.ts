@@ -16,6 +16,7 @@ import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig, type RelayConfig } from '../../src/relay/config.js';
 import { bootstrapRelay } from '../../src/relay/bootstrap.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
+import { getTestPort } from '../helpers/test-port.js';
 
 /** Stub token verifier that accepts a known test token. */
 const TEST_TOKEN = 'test-token-bootstrap';
@@ -31,12 +32,6 @@ async function fetchRelay(port: number, path: string): Promise<{ status: number;
   const res = await fetch(`http://127.0.0.1:${port}${path}`);
   const body = await res.text();
   return { status: res.status, body };
-}
-
-/** Find a random available port for test isolation. */
-function getTestPort(): number {
-  // Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions
-  return 0;
 }
 
 describe('relay bootstrap', () => {

@@ -16,6 +16,7 @@ import { loadRelayConfig } from '../../src/relay/config.js';
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 import { createProductionServerOptions } from '../../src/relay/index.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
+import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
@@ -30,11 +31,6 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   };
   return map[token] ?? null;
 };
-
-/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
-function getTestPort(): number {
-  return 0;
-}
 
 /** Helper for authenticated relay requests. */
 async function relayFetch(

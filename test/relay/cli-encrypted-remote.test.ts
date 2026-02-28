@@ -30,6 +30,7 @@ import {
 } from '../../src/e2ee/device-keys.js';
 import { performKeyExchange } from '../../src/e2ee/key-exchange.js';
 import { encryptMessage, decryptMessage, type EncryptedPayload } from '../../src/e2ee/cipher.js';
+import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
@@ -44,11 +45,6 @@ const stubVerifier: TokenVerifier = async (token: string) => {
   };
   return map[token] ?? null;
 };
-
-/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
-function getTestPort(): number {
-  return 0;
-}
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'dist', 'index.js');

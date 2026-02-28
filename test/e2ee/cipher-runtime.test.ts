@@ -40,6 +40,7 @@ import { loadRelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
 import { RelayMessageStore, type RelayMessage } from '../../src/relay/message-store.js';
 import { RelayClient, type RelayMessageResponse } from '../../src/relay/client.js';
+import { getTestPort } from '../helpers/test-port.js';
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'mors-cipher-test-'));
@@ -467,11 +468,6 @@ const e2eeStubVerifier: TokenVerifier = async (token: string) => {
   };
   return map[token] ?? null;
 };
-
-/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
-function getTestPort(): number {
-  return 0;
-}
 
 describe('E2EE relay transport integration', () => {
   let tempDir: string;

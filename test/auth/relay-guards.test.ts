@@ -16,11 +16,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
-
-/** Use OS-assigned ephemeral port (0) to avoid EADDRINUSE collisions. */
-function getTestPort(): number {
-  return 0;
-}
+import { getTestPort } from '../helpers/test-port.js';
 
 /** Helper to make HTTP requests to the relay server. */
 async function fetchRelay(
