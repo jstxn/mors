@@ -13,7 +13,7 @@
  * - VAL-MSG-009: Read and ack operations are idempotent
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1047,6 +1047,312 @@ describe('dedupe race-condition hardening', () => {
       if (caughtError) {
         expect(caughtError.message).not.toMatch(/SQLITE_CONSTRAINT/i);
       }
+    } finally {
+      db.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Deterministic INSERT-conflict recovery branch coverage for sendMessage
+// ---------------------------------------------------------------------------
+
+describe('sendMessage INSERT-conflict recovery branch (fault injection)', () => {
+  /**
+   * These tests force the catch/recovery code path inside sendMessage by
+   * using a db.prepare spy. The spy intercepts the dedupe-check SELECT so
+   * that it returns no match (simulating a race window where the SELECT
+   * runs before a concurrent INSERT). The subsequent INSERT then collides
+   * with the already-present row, triggering the UNIQUE constraint error
+   * handler which calls recoverCanonicalSend.
+   *
+   * This is the ONLY way to deterministically reach the catch branch in a
+   * single-handle, single-process test because better-sqlite3 is synchronous.
+   */
+
+  /**
+   * Create a db.prepare spy that makes the first dedupe-check SELECT return
+   * empty, allowing the INSERT to proceed and hit the UNIQUE constraint.
+   * Subsequent calls (including the recovery SELECT) pass through unmodified.
+   */
+  function stubDedupeSelectMiss(db: ReturnType<typeof openDb>): {
+    spy: ReturnType<typeof vi.spyOn>;
+    recoveryReached: { value: boolean };
+  } {
+    const originalPrepare = db.prepare.bind(db);
+    let selectIntercepted = false;
+    const recoveryReached = { value: false };
+
+    const spy = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      // Intercept only the first dedupe-check SELECT (contains WHERE dedupe_key)
+      if (
+        !selectIntercepted &&
+        sql.includes('WHERE dedupe_key') &&
+        sql.includes('SELECT') &&
+        !sql.includes('INSERT')
+      ) {
+        selectIntercepted = true;
+        // Return a statement-like object whose .get() returns undefined
+        const fakeStmt = originalPrepare(sql);
+        const originalGet = fakeStmt.get.bind(fakeStmt);
+        fakeStmt.get = (..._args: unknown[]) => {
+          // On the next prepare call for this same query pattern (recovery),
+          // we want to pass through, so we mark the interception done.
+          void originalGet; // suppress unused warning
+          return undefined;
+        };
+        return fakeStmt;
+      }
+      // All other calls (INSERT, recovery SELECT, etc.) pass through
+      const stmt = originalPrepare(sql);
+      if (selectIntercepted && sql.includes('WHERE dedupe_key') && sql.includes('SELECT')) {
+        recoveryReached.value = true;
+      }
+      return stmt;
+    });
+
+    return { spy, recoveryReached };
+  }
+
+  it('exercises recoverCanonicalSend when INSERT hits UNIQUE constraint', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_insert-recovery-send';
+
+      // Pre-insert a canonical message with the dedupe key
+      const now = new Date().toISOString();
+      const canonicalId = 'msg_canonical-send-recovery';
+      const canonicalThreadId = 'thr_canonical-send-recovery';
+      db.prepare(
+        `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        canonicalId,
+        canonicalThreadId,
+        null,
+        'alice',
+        'bob',
+        null,
+        'Canonical winner message',
+        dedupeKey,
+        null,
+        'delivered',
+        null,
+        now,
+        now
+      );
+
+      // Stub the dedupe SELECT to return empty (simulating race window)
+      const { spy, recoveryReached } = stubDedupeSelectMiss(db);
+
+      try {
+        const result = sendMessage(db, {
+          sender: 'alice',
+          recipient: 'bob',
+          body: 'Loser attempt via INSERT conflict',
+          dedupeKey,
+        });
+
+        // The recovery branch should have been reached
+        expect(recoveryReached.value).toBe(true);
+
+        // Should recover the canonical message, not throw
+        expect(result.id).toBe(canonicalId);
+        expect(result.thread_id).toBe(canonicalThreadId);
+        expect(result.dedupe_replay).toBe(true);
+        expect(result.sender).toBe('alice');
+        expect(result.recipient).toBe('bob');
+      } finally {
+        spy.mockRestore();
+      }
+
+      // Verify only one message exists for this dedupe key
+      const inbox = listInbox(db, { recipient: 'bob' });
+      const dedupeMatches = inbox.filter((m) => m.dedupe_key === dedupeKey);
+      expect(dedupeMatches.length).toBe(1);
+      expect(dedupeMatches[0].id).toBe(canonicalId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('recovery returns canonical metadata faithfully', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_recovery-metadata-fidelity';
+      const now = new Date().toISOString();
+
+      // Pre-insert with specific metadata
+      db.prepare(
+        `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        'msg_fidelity-check',
+        'thr_fidelity-check',
+        null,
+        'alice',
+        'bob',
+        null,
+        'Fidelity body',
+        dedupeKey,
+        'trc_fidelity-trace',
+        'delivered',
+        null,
+        now,
+        now
+      );
+
+      const { spy, recoveryReached } = stubDedupeSelectMiss(db);
+
+      try {
+        const result = sendMessage(db, {
+          sender: 'alice',
+          recipient: 'bob',
+          body: 'Different body (should not matter)',
+          dedupeKey,
+          traceId: 'trc_different-trace',
+        });
+
+        expect(recoveryReached.value).toBe(true);
+        expect(result.id).toBe('msg_fidelity-check');
+        expect(result.thread_id).toBe('thr_fidelity-check');
+        expect(result.trace_id).toBe('trc_fidelity-trace');
+        expect(result.dedupe_replay).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('no SQLITE_CONSTRAINT error leaks when INSERT-conflict recovery fires', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_no-leak-insert-recovery';
+      const now = new Date().toISOString();
+
+      db.prepare(
+        `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        'msg_no-leak-canonical',
+        'thr_no-leak-canonical',
+        null,
+        'alice',
+        'bob',
+        null,
+        'No leak body',
+        dedupeKey,
+        null,
+        'delivered',
+        null,
+        now,
+        now
+      );
+
+      const { spy } = stubDedupeSelectMiss(db);
+
+      let caughtError: Error | null = null;
+      let result: ReturnType<typeof sendMessage> | null = null;
+      try {
+        result = sendMessage(db, {
+          sender: 'alice',
+          recipient: 'bob',
+          body: 'Attempt that triggers INSERT conflict',
+          dedupeKey,
+        });
+      } catch (err) {
+        caughtError = err as Error;
+      } finally {
+        spy.mockRestore();
+      }
+
+      // No error should leak
+      expect(caughtError).toBeNull();
+      // No error message should contain SQLITE_CONSTRAINT
+      if (caughtError) {
+        expect(caughtError.message).not.toMatch(/SQLITE_CONSTRAINT/i);
+      }
+      // Result should be the recovered canonical
+      expect(result).not.toBeNull();
+      if (result) {
+        expect(result.id).toBe('msg_no-leak-canonical');
+        expect(result.dedupe_replay).toBe(true);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('recovery throws DedupeConflictError when canonical record is a reply (causal mismatch)', () => {
+    const db = openDb();
+    try {
+      const dedupeKey = 'dup_recovery-causal-mismatch-send';
+      const now = new Date().toISOString();
+
+      // Pre-insert a REPLY record (in_reply_to is set) with the dedupe key
+      db.prepare(
+        `INSERT INTO messages (id, thread_id, in_reply_to, sender, recipient, subject, body, dedupe_key, trace_id, state, read_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        'msg_reply-for-causal-check',
+        'thr_causal-check',
+        'msg_some-parent',
+        'bob',
+        'alice',
+        null,
+        'Reply body',
+        dedupeKey,
+        null,
+        'delivered',
+        null,
+        now,
+        now
+      );
+
+      const { spy, recoveryReached } = stubDedupeSelectMiss(db);
+
+      try {
+        // sendMessage expects in_reply_to to be null (top-level send),
+        // but the canonical record is a reply — recovery should throw DedupeConflictError
+        expect(() =>
+          sendMessage(db, {
+            sender: 'bob',
+            recipient: 'alice',
+            body: 'Top-level send attempt',
+            dedupeKey,
+          })
+        ).toThrow(DedupeConflictError);
+
+        expect(recoveryReached.value).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it('INSERT without dedupe key re-throws non-UNIQUE errors normally', () => {
+    const db = openDb();
+    try {
+      // Verify that errors unrelated to dedupe (no dedupeKey provided)
+      // are not swallowed by the catch block.
+      // The catch block only recovers when dedupeKey is set AND the error
+      // is a UNIQUE constraint error.
+
+      // This is tested indirectly: send without dedupe key always creates a new
+      // message — the catch is unreachable without dedupeKey. But we verify the
+      // send works normally to ensure no regression.
+      const result = sendMessage(db, {
+        sender: 'alice',
+        recipient: 'bob',
+        body: 'No dedupe key send',
+      });
+
+      expect(result.id).toMatch(/^msg_/);
+      expect(result.dedupe_replay).toBe(false);
     } finally {
       db.close();
     }
