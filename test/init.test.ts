@@ -717,7 +717,10 @@ describe('init edge cases', () => {
     // Simulate a config dir created by an external process or a permissive umask
     // that left the directory world-readable.
     const configDir = join(testDir, 'umask-regression');
-    mkdirSync(configDir, { recursive: true, mode: 0o755 });
+    mkdirSync(configDir, { recursive: true });
+    // Explicitly chmod to 0o755 so the precondition is deterministic
+    // regardless of the ambient process umask (which mkdirSync obeys).
+    chmodSync(configDir, 0o755);
     // Verify the precondition — dir starts with broad permissions.
     expect(statSync(configDir).mode & 0o777).toBe(0o755);
 
