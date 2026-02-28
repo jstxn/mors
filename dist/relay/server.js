@@ -163,6 +163,21 @@ export function createRelayServer(config, options) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
                 return;
             }
+            // ── Sender spoofing prevention (VAL-RELAY-008) ──────────────
+            // Actor identity is always derived from the authenticated principal.
+            // If the client provides sender_id or sender_login fields with valid
+            // types that don't match the auth principal, reject as a spoof attempt.
+            // Invalid types (e.g. string sender_id) are silently ignored as junk.
+            const clientSenderId = body['sender_id'];
+            if (typeof clientSenderId === 'number' && clientSenderId !== principal.githubUserId) {
+                send403(res, 'Sender identity mismatch. The sender_id field does not match the authenticated principal. Sender identity is derived from your auth token.');
+                return;
+            }
+            const clientSenderLogin = body['sender_login'];
+            if (typeof clientSenderLogin === 'string' && clientSenderLogin !== principal.githubLogin) {
+                send403(res, 'Sender identity mismatch. The sender_login field does not match the authenticated principal. Sender identity is derived from your auth token.');
+                return;
+            }
             const recipientId = body['recipient_id'];
             const messageBody = body['body'];
             const subject = body['subject'];
