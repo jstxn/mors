@@ -5,11 +5,46 @@
  *
  * Loads config from environment, bootstraps persistence dependencies,
  * starts the HTTP server, and handles graceful shutdown on SIGINT/SIGTERM.
+ *
+ * Exports `createProductionServerOptions` for test verification that the
+ * production wiring includes messageStore and participant authorization.
  */
 import { loadRelayConfig } from './config.js';
 import { bootstrapRelay } from './bootstrap.js';
 import { createRelayServer } from './server.js';
 import { createGitHubTokenVerifier } from './auth-middleware.js';
+import { RelayMessageStore } from './message-store.js';
+/**
+ * Create the production server options including all wired dependencies.
+ *
+ * Assembles auth, authorization, and messaging dependencies for the relay
+ * server. Extracted as a named export so tests can verify the production
+ * wiring without running the full entrypoint lifecycle.
+ *
+ * @returns RelayServerOptions with tokenVerifier, participantStore, and messageStore.
+ */
+export function createProductionServerOptions() {
+    // Wire production auth dependencies — fail-closed by default.
+    // Token verification uses the GitHub API to validate bearer tokens.
+    const tokenVerifier = createGitHubTokenVerifier();
+    // Wire the in-memory message store for async messaging routes.
+    // This ensures /messages, /inbox, and /messages/:id routes are active
+    // in the production relay, not only in test-only server construction.
+    const messageStore = new RelayMessageStore();
+    // Participant store backed by the message store's conversation tracking.
+    // When a message is sent, both sender and recipient are registered as
+    // participants in the thread, enabling object-level authorization checks.
+    const participantStore = {
+        async isParticipant(conversationId, githubUserId) {
+            return messageStore.isParticipant(conversationId, githubUserId);
+        },
+    };
+    return {
+        tokenVerifier,
+        participantStore,
+        messageStore,
+    };
+}
 async function main() {
     const config = loadRelayConfig();
     // Initialize persistence and other dependencies before accepting requests
@@ -19,22 +54,8 @@ async function main() {
         console.error(`relay bootstrap failed: services not ready: ${failed.join(', ')}`);
         process.exit(1);
     }
-    // Wire production auth dependencies — fail-closed by default.
-    // Token verification uses the GitHub API to validate bearer tokens.
-    // Participant store is a scaffold that denies all access until
-    // real persistence is wired in a future milestone.
-    const tokenVerifier = createGitHubTokenVerifier();
-    const participantStore = {
-        async isParticipant(_conversationId, _githubUserId) {
-            // Scaffold: deny all until real persistence is wired.
-            // This ensures fail-closed authz on conversation routes.
-            return false;
-        },
-    };
-    const server = createRelayServer(config, {
-        tokenVerifier,
-        participantStore,
-    });
+    const serverOptions = createProductionServerOptions();
+    const server = createRelayServer(config, serverOptions);
     // Graceful shutdown handler
     const shutdown = async (signal) => {
         console.log(`\nReceived ${signal}, shutting down...`);
@@ -45,8 +66,17 @@ async function main() {
     process.on('SIGTERM', () => void shutdown('SIGTERM'));
     await server.start();
 }
-main().catch((err) => {
-    console.error('Failed to start mors relay:', err);
-    process.exit(1);
-});
+// Only run main() when executed as the entrypoint (not when imported by tests).
+// When loaded via vitest or other test runners, the module is imported for its
+// exports — running main() would start a real server and block the process.
+const isTestEnvironment = typeof process !== 'undefined' &&
+    (process.env['VITEST'] === 'true' ||
+        process.env['NODE_ENV'] === 'test' ||
+        process.env['JEST_WORKER_ID'] !== undefined);
+if (!isTestEnvironment) {
+    main().catch((err) => {
+        console.error('Failed to start mors relay:', err);
+        process.exit(1);
+    });
+}
 //# sourceMappingURL=index.js.map
