@@ -150,14 +150,14 @@ export function createRelayServer(config, options) {
         start() {
             return new Promise((resolve, reject) => {
                 httpServer.once('error', reject);
-                httpServer.listen(config.port, '127.0.0.1', () => {
+                httpServer.listen(config.port, config.host, () => {
                     httpServer.removeListener('error', reject);
                     isListening = true;
                     const addr = httpServer.address();
                     if (addr && typeof addr === 'object') {
                         boundPort = addr.port;
                     }
-                    logger(`mors-relay listening on http://127.0.0.1:${boundPort}`);
+                    logger(`mors-relay listening on http://${config.host}:${boundPort}`);
                     // Log config diagnostics at startup
                     if (config.diagnostics.length > 0) {
                         logger(`config: ${config.diagnostics.length} placeholder(s) unset:`);

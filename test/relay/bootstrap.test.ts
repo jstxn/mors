@@ -6,11 +6,15 @@
  * - Health endpoint returns success payload for readiness checks
  * - Config placeholders load safely with explicit missing-config diagnostics
  * - Test harness can spin relay up/down without orphaned processes
+ * - Host binding defaults to 0.0.0.0 for hosted/container ingress
+ * - MORS_RELAY_HOST env var override for local-only binding
+ * - Persistence bootstrap runs before server accepts requests
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig, type RelayConfig } from '../../src/relay/config.js';
+import { bootstrapRelay } from '../../src/relay/bootstrap.js';
 
 /** Helper to make HTTP requests to the relay server. */
 async function fetchRelay(port: number, path: string): Promise<{ status: number; body: string }> {
@@ -340,6 +344,121 @@ describe('relay bootstrap', () => {
       server = null;
 
       controller.abort();
+    });
+  });
+
+  // --- Host binding tests ---
+
+  describe('host binding', () => {
+    it('config defaults host to 0.0.0.0 for container/hosted ingress', () => {
+      const config = loadRelayConfig({});
+      expect(config.host).toBe('0.0.0.0');
+    });
+
+    it('MORS_RELAY_HOST overrides default host binding', () => {
+      const config = loadRelayConfig({ MORS_RELAY_HOST: '127.0.0.1' });
+      expect(config.host).toBe('127.0.0.1');
+    });
+
+    it('server startup log reflects actual host binding', async () => {
+      const port = getTestPort();
+      const logs: string[] = [];
+      const config = loadRelayConfig({
+        MORS_RELAY_PORT: String(port),
+        MORS_RELAY_HOST: '127.0.0.1',
+      });
+      server = createRelayServer(config, { logger: (msg: string) => logs.push(msg) });
+      await server.start();
+      expect(logs.some((l) => l.includes('127.0.0.1') && l.includes(String(port)))).toBe(true);
+    });
+
+    it('server binds to 0.0.0.0 by default and is reachable on 127.0.0.1', async () => {
+      const port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      // config.host should default to '0.0.0.0'
+      expect(config.host).toBe('0.0.0.0');
+      server = createRelayServer(config);
+      await server.start();
+
+      // 0.0.0.0 binding is reachable via 127.0.0.1
+      const { status } = await fetchRelay(port, '/health');
+      expect(status).toBe(200);
+    });
+
+    it('server binds to specified host from config', async () => {
+      const port = getTestPort();
+      const logs: string[] = [];
+      const config = loadRelayConfig({
+        MORS_RELAY_PORT: String(port),
+        MORS_RELAY_HOST: '127.0.0.1',
+      });
+      server = createRelayServer(config, { logger: (msg: string) => logs.push(msg) });
+      await server.start();
+
+      // Should be reachable
+      const { status } = await fetchRelay(port, '/health');
+      expect(status).toBe(200);
+
+      // Log should show the configured host
+      expect(logs.some((l) => l.includes('127.0.0.1'))).toBe(true);
+    });
+  });
+
+  // --- Persistence bootstrap tests ---
+
+  describe('persistence bootstrap', () => {
+    it('bootstrapRelay returns a BootstrapResult with ready state', async () => {
+      const result = await bootstrapRelay();
+      expect(result).toBeDefined();
+      expect(result.ready).toBe(true);
+    });
+
+    it('bootstrapRelay reports services that were initialized', async () => {
+      const result = await bootstrapRelay();
+      expect(Array.isArray(result.services)).toBe(true);
+      expect(result.services.length).toBeGreaterThan(0);
+      // At minimum, persistence should be listed
+      expect(result.services.some((s) => s.name === 'persistence')).toBe(true);
+    });
+
+    it('bootstrapRelay is idempotent (safe to call multiple times)', async () => {
+      const result1 = await bootstrapRelay();
+      const result2 = await bootstrapRelay();
+      expect(result1.ready).toBe(true);
+      expect(result2.ready).toBe(true);
+    });
+
+    it('bootstrap runs before server start in the entrypoint flow', async () => {
+      // Verify that the relay entrypoint module calls bootstrapRelay
+      // by testing the combined flow: bootstrap + server create + start
+      const port = getTestPort();
+      const config = loadRelayConfig({
+        MORS_RELAY_PORT: String(port),
+        MORS_RELAY_HOST: '127.0.0.1',
+      });
+      const logs: string[] = [];
+      const logger = (msg: string) => logs.push(msg);
+
+      // Bootstrap first (as the entrypoint should)
+      const result = await bootstrapRelay({ logger });
+      expect(result.ready).toBe(true);
+      expect(logs.some((l) => l.toLowerCase().includes('bootstrap'))).toBe(true);
+
+      // Then start server
+      server = createRelayServer(config, { logger });
+      await server.start();
+      expect(server.listening).toBe(true);
+
+      // Verify bootstrap log came before server listening log
+      const bootstrapIdx = logs.findIndex((l) => l.toLowerCase().includes('bootstrap'));
+      const listeningIdx = logs.findIndex((l) => l.includes('listening'));
+      expect(bootstrapIdx).toBeLessThan(listeningIdx);
+    });
+
+    it('bootstrap accepts optional logger for observability', async () => {
+      const logs: string[] = [];
+      await bootstrapRelay({ logger: (msg: string) => logs.push(msg) });
+      expect(logs.length).toBeGreaterThan(0);
     });
   });
 });

@@ -20,6 +20,8 @@ export interface ConfigDiagnostic {
 export interface RelayConfig {
   /** Port the relay HTTP server listens on. */
   port: number;
+  /** Host/address the relay HTTP server binds to. Defaults to '0.0.0.0'. */
+  host: string;
   /** Base URL for the relay service (used in responses/redirects). */
   baseUrl: string | undefined;
   /** GitHub OAuth device-flow client ID. */
@@ -46,27 +48,32 @@ const CONFIG_VARS = [
   {
     key: 'MORS_RELAY_BASE_URL',
     field: 'baseUrl' as const,
-    description: 'Base URL for the relay service (e.g. https://relay.mors.dev). Used in API responses and redirects.',
+    description:
+      'Base URL for the relay service (e.g. https://relay.mors.dev). Used in API responses and redirects.',
   },
   {
     key: 'GITHUB_DEVICE_CLIENT_ID',
     field: 'githubClientId' as const,
-    description: 'GitHub OAuth App client ID for device-flow authentication. Create one at https://github.com/settings/applications/new.',
+    description:
+      'GitHub OAuth App client ID for device-flow authentication. Create one at https://github.com/settings/applications/new.',
   },
   {
     key: 'GITHUB_DEVICE_SCOPE',
     field: 'githubScope' as const,
-    description: 'OAuth scope for GitHub device flow (e.g. "read:user"). Controls what permissions the CLI requests.',
+    description:
+      'OAuth scope for GitHub device flow (e.g. "read:user"). Controls what permissions the CLI requests.',
   },
   {
     key: 'GITHUB_DEVICE_ENDPOINT',
     field: 'githubDeviceEndpoint' as const,
-    description: 'GitHub device code request endpoint (typically https://github.com/login/device/code).',
+    description:
+      'GitHub device code request endpoint (typically https://github.com/login/device/code).',
   },
   {
     key: 'GITHUB_TOKEN_ENDPOINT',
     field: 'githubTokenEndpoint' as const,
-    description: 'GitHub token exchange endpoint (typically https://github.com/login/oauth/access_token).',
+    description:
+      'GitHub token exchange endpoint (typically https://github.com/login/oauth/access_token).',
   },
   {
     key: 'MORS_AUTH_TOKEN_ISSUER',
@@ -87,7 +94,9 @@ const CONFIG_VARS = [
  * @returns Parsed config with diagnostics for any missing placeholder variables.
  * @throws Error if port is non-numeric or out of range.
  */
-export function loadRelayConfig(env: Record<string, string | undefined> = process.env): RelayConfig {
+export function loadRelayConfig(
+  env: Record<string, string | undefined> = process.env
+): RelayConfig {
   // Port resolution: MORS_RELAY_PORT > PORT > 3100
   const portStr = env['MORS_RELAY_PORT'] ?? env['PORT'] ?? '3100';
   const port = Number(portStr);
@@ -99,6 +108,9 @@ export function loadRelayConfig(env: Record<string, string | undefined> = proces
   if (port < 1 || port > 65535) {
     throw new Error(`Port ${port} is out of range. Must be between 1 and 65535.`);
   }
+
+  // Host resolution: MORS_RELAY_HOST > '0.0.0.0' (container/hosted default)
+  const host = env['MORS_RELAY_HOST'] ?? '0.0.0.0';
 
   // Load optional config variables and collect diagnostics for missing ones
   const diagnostics: ConfigDiagnostic[] = [];
@@ -118,6 +130,7 @@ export function loadRelayConfig(env: Record<string, string | undefined> = proces
 
   return {
     port,
+    host,
     baseUrl: values['baseUrl'],
     githubClientId: values['githubClientId'],
     githubScope: values['githubScope'],

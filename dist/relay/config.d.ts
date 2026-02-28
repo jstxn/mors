@@ -18,6 +18,8 @@ export interface ConfigDiagnostic {
 export interface RelayConfig {
     /** Port the relay HTTP server listens on. */
     port: number;
+    /** Host/address the relay HTTP server binds to. Defaults to '0.0.0.0'. */
+    host: string;
     /** Base URL for the relay service (used in responses/redirects). */
     baseUrl: string | undefined;
     /** GitHub OAuth device-flow client ID. */

@@ -65,6 +65,8 @@ export function loadRelayConfig(env = process.env) {
     if (port < 1 || port > 65535) {
         throw new Error(`Port ${port} is out of range. Must be between 1 and 65535.`);
     }
+    // Host resolution: MORS_RELAY_HOST > '0.0.0.0' (container/hosted default)
+    const host = env['MORS_RELAY_HOST'] ?? '0.0.0.0';
     // Load optional config variables and collect diagnostics for missing ones
     const diagnostics = [];
     const values = {};
@@ -80,6 +82,7 @@ export function loadRelayConfig(env = process.env) {
     }
     return {
         port,
+        host,
         baseUrl: values['baseUrl'],
         githubClientId: values['githubClientId'],
         githubScope: values['githubScope'],
