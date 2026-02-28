@@ -1,0 +1,35 @@
+{
+  "milestone": "distribution-install-followup",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 3,
+    "passed": 0,
+    "failed": 3,
+    "blocked": 0
+  },
+  "passedAssertions": [],
+  "failedAssertions": [
+    {
+      "id": "VAL-INSTALL-001",
+      "reason": "npm i -g github:jstxn/mors fails with exit 127 in clean environment without global TypeScript. The prepare script condition (test -x node_modules/.bin/tsc) evaluates TRUE because npm installs devDependencies before running prepare during git dep resolution, but the subsequent npm run build fails because tsc is not in PATH within the nested npm execution context (npm 11.9.0, Node v25.6.1). The pre-built dist/ exists in git but is not used because the prepare script attempts to rebuild."
+    },
+    {
+      "id": "VAL-INSTALL-007",
+      "reason": "npm GitHub shortcut path fails (same root cause as VAL-INSTALL-001). Homebrew formula is structurally valid (brew style passes, all stanzas present) but cannot be live-installed due to npm registry tarball SHA256 mismatch (package not published). Since the npm path explicitly fails, both distribution paths cannot simultaneously produce a working mors CLI entrypoint."
+    },
+    {
+      "id": "VAL-CROSS-007",
+      "reason": "First-run operational flow cannot proceed from npm GitHub shortcut install because installation fails (exit 127). CLI functionality itself works correctly when invoked directly (node dist/index.js --version, init, inbox, send all succeed in isolated config dir), but the install step is the blocker."
+    }
+  ],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added note about npm 11.9.0 nested git dep prepare context PATH issue for future debugging reference",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}

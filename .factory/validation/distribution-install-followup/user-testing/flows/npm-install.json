@@ -1,0 +1,40 @@
+{
+  "flowId": "npm-install",
+  "assertions": {
+    "VAL-INSTALL-001": {
+      "status": "fail",
+      "evidence": "Clean-environment checks used an isolated npm global prefix. `which tsc` with PATH including only prefix/bin + system bins exited 1 (tsc absent). `npm ls -g typescript --depth=0 --prefix <isolated-prefix>` showed `(empty)` and exited 1. Install command `npm i -g github:jstxn/mors --prefix <isolated-prefix>` exited 127 with `npm error command sh -c npm run build` and `sh: tsc: command not found`. Follow-up `mors --version` exited 127 (`env: mors: No such file or directory`).",
+      "issues": [
+        "GitHub shortcut npm install failed in a clean environment because install path invoked `npm run build` requiring `tsc`.",
+        "`mors` entrypoint was not created after install failure."
+      ]
+    },
+    "VAL-INSTALL-007-npm": {
+      "status": "fail",
+      "evidence": "npm distribution-path validation used `npm i -g github:jstxn/mors --prefix <isolated-prefix>` without manual `npm run build` and without global TypeScript. Command exited 127 with `tsc: command not found`, and subsequent `mors --version` exited 127 because binary was unavailable.",
+      "issues": [
+        "npm GitHub shortcut path did not produce a working `mors` CLI entrypoint in clean conditions.",
+        "Install process depends on TypeScript availability not present in clean environment."
+      ]
+    },
+    "VAL-CROSS-007-npm": {
+      "status": "fail",
+      "evidence": "End-to-end npm first-run flow attempted from fresh isolated environment: install failed (`npm i -g github:jstxn/mors` equivalent with isolated prefix) exit 127 due to `tsc` missing. Because CLI was not installed, `mors --version`, `MORS_CONFIG_DIR=<unique-temp> mors init --json`, and `MORS_CONFIG_DIR=<unique-temp> mors inbox --json` each exited 127 (`mors: No such file or directory`).",
+      "issues": [
+        "First-run operational flow could not proceed because npm install failed.",
+        "Required first-run commands were not runnable after install attempt."
+      ]
+    }
+  },
+  "frictions": [
+    {
+      "description": "`npm ls -g typescript --depth=0` returns exit code 1 even when output shows `(empty)`, which required interpreting output content rather than exit code alone for absence verification.",
+      "resolved": true,
+      "resolution": "Used command output `(empty)` plus `which tsc` exit code 1 to confirm clean-environment TypeScript absence."
+    }
+  ],
+  "blockers": [],
+  "toolsUsed": [
+    "terminal"
+  ]
+}

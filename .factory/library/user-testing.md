@@ -90,6 +90,16 @@ Dedupe keys passed via `--dedupe-key` must be prefixed with `dup_` (e.g., `--ded
 - For encryption assertions, use `strings` or hex dump on `.db`, `-wal`, `-shm` files
 - For permission checks, use `stat -f '%Lp' <file>` (macOS) to get octal permissions
 
+### Known issue: npm GitHub shortcut install PATH in nested context (npm 11.9.0)
+When running `npm i -g github:jstxn/mors`, npm 11.9.0 clones the repo to a temp dir, runs `npm install --force --include=dev`, then fires the `prepare` script. The prepare script's condition `test -x node_modules/.bin/tsc` evaluates TRUE (devDeps installed), so `npm run build` fires. However, `tsc` is NOT found in PATH within this nested npm execution context — the `npm run` inside the prepare context during git dep resolution does NOT properly add `node_modules/.bin` to PATH. The build exits 127 (`sh: tsc: command not found`), causing the entire global install to fail.
+
+**Root cause:** The `build` script uses bare `tsc` instead of `node_modules/.bin/tsc` or `npx tsc`, and the nested npm context during git dep preparation doesn't add `node_modules/.bin` to PATH for the `npm run build` invocation.
+
+**Suggested fix approaches:**
+1. Change `build` script to use `npx tsc -p tsconfig.build.json` instead of `tsc -p tsconfig.build.json`
+2. Or change `build` script to use `node_modules/.bin/tsc -p tsconfig.build.json`
+3. Or change `prepare` script to always skip build (since dist/ is committed to git)
+
 ### Shared state boundaries
 - There is NO shared state between flow validators — each uses an independent config dir.
 - The project source and `dist/` directory are read-only shared resources.
