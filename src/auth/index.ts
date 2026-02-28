@@ -12,7 +12,10 @@ export {
   isAuthEnabled,
   saveSigningKey,
   loadSigningKey,
+  saveProfile,
+  loadProfile,
   type AuthSession,
+  type AccountProfileLocal,
 } from './session.js';
 
 export {

@@ -42,6 +42,8 @@ import {
   markAuthEnabled,
   saveSigningKey,
   loadSigningKey,
+  saveProfile,
+  loadProfile,
 } from './auth/session.js';
 import {
   validateInviteToken,
@@ -69,6 +71,7 @@ import {
   formatDeployResultJson,
   redactSecrets,
 } from './deploy.js';
+import { validateHandle } from './relay/account-store.js';
 
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
@@ -129,6 +132,11 @@ export function run(args: string[]): void {
 
   if (command === 'deploy') {
     runDeploy(args.slice(1));
+    return;
+  }
+
+  if (command === 'onboard') {
+    runOnboard(args.slice(1));
     return;
   }
 
@@ -1749,6 +1757,184 @@ function runLogout(_args: string[]): void {
   }
 }
 
+// ── Onboard command (VAL-AUTH-008, VAL-AUTH-012) ─────────────────────
+
+/**
+ * First-run onboarding wizard.
+ *
+ * Captures a globally unique immutable handle and basic profile metadata,
+ * then persists the account profile locally.
+ *
+ * Requires:
+ * - Initialization (mors init)
+ * - Authenticated session (mors login)
+ *
+ * Flags:
+ * - --handle <handle>         Required. Globally unique handle.
+ * - --display-name <name>     Required. Display name for profile.
+ * - --json                    Output JSON.
+ */
+function runOnboard(_args: string[]): void {
+  const { flags } = parseArgs(_args);
+  const json = 'json' in flags;
+
+  const configDir = getConfigDir();
+
+  // Check init
+  try {
+    requireInit();
+  } catch (err: unknown) {
+    if (err instanceof NotInitializedError) {
+      process.exitCode = 1;
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'error',
+            error: 'not_initialized',
+            message: err.message,
+          })
+        );
+      } else {
+        console.error(`Error: ${err.message}`);
+      }
+      return;
+    }
+    throw err;
+  }
+
+  // Check auth
+  try {
+    requireAuth(configDir);
+  } catch (err: unknown) {
+    if (err instanceof NotAuthenticatedError) {
+      process.exitCode = 1;
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'error',
+            error: 'not_authenticated',
+            message: 'Not authenticated. Run "mors login" before onboarding.',
+          })
+        );
+      } else {
+        console.error('Error: Not authenticated. Run "mors login" before onboarding.');
+      }
+      return;
+    }
+    throw err;
+  }
+
+  const session = loadSession(configDir);
+  if (!session) {
+    process.exitCode = 1;
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'error',
+          error: 'not_authenticated',
+          message: 'No active session. Run "mors login" to authenticate.',
+        })
+      );
+    } else {
+      console.error('Error: No active session. Run "mors login" to authenticate.');
+    }
+    return;
+  }
+
+  // Check if already onboarded
+  const existingProfile = loadProfile(configDir);
+  if (existingProfile) {
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'already_onboarded',
+          handle: existingProfile.handle,
+          display_name: existingProfile.displayName,
+          account_id: existingProfile.accountId,
+        })
+      );
+    } else {
+      console.log(`Already onboarded (handle: ${existingProfile.handle}).`);
+      console.log('Handles are immutable and cannot be changed after creation.');
+    }
+    return;
+  }
+
+  // Parse required flags
+  const handle = typeof flags['handle'] === 'string' ? flags['handle'] : undefined;
+  const displayName = typeof flags['display-name'] === 'string' ? flags['display-name'] : undefined;
+
+  if (!handle || !displayName) {
+    process.exitCode = 1;
+    const missing: string[] = [];
+    if (!handle) missing.push('--handle');
+    if (!displayName) missing.push('--display-name');
+
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'error',
+          error: 'missing_required_fields',
+          missing,
+          message: `Missing required fields: ${missing.join(', ')}. Both --handle and --display-name are required for onboarding.`,
+        })
+      );
+    } else {
+      console.error(`Error: Missing required fields: ${missing.join(', ')}.`);
+      console.error('Usage: mors onboard --handle <handle> --display-name <name> [--json]');
+    }
+    return;
+  }
+
+  // Validate handle format locally before attempting relay registration
+  try {
+    validateHandle(handle);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    if (err instanceof Error) {
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'error',
+            error: 'invalid_handle',
+            message: err.message,
+          })
+        );
+      } else {
+        console.error(`Error: ${err.message}`);
+      }
+    }
+    return;
+  }
+
+  // Persist profile locally (VAL-AUTH-008, VAL-AUTH-012)
+  // In the current phase, onboarding persists locally. Future milestones
+  // will also register with the relay for global uniqueness enforcement.
+  saveProfile(configDir, {
+    handle,
+    displayName,
+    accountId: session.accountId,
+    createdAt: new Date().toISOString(),
+  });
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        status: 'onboarded',
+        handle,
+        display_name: displayName,
+        account_id: session.accountId,
+      })
+    );
+  } else {
+    console.log('\n✅ Onboarding complete');
+    console.log(`Handle: ${handle}`);
+    console.log(`Display Name: ${displayName}`);
+    console.log(`Account: ${session.accountId}`);
+    console.log('\nYour handle is immutable and cannot be changed.');
+  }
+}
+
 // ── Status command (VAL-AUTH-002, VAL-AUTH-006) ──────────────────────
 
 async function runStatus(_args: string[]): Promise<void> {
@@ -2164,9 +2350,10 @@ Usage:
 
 Commands:
   init         Initialize identity and encrypted store
-  login        Authenticate with GitHub (OAuth device flow)
+  login        Authenticate with mors-native auth
   logout       Clear local auth session
   status       Show current auth status
+  onboard      First-run setup: register handle + profile
   send         Send a message
   inbox        List messages
   read         Read a message
@@ -2238,6 +2425,12 @@ Status:
   mors status [--json] [--offline]
   --json                 Output JSON
   --offline              Skip token liveness check (report local session only)
+
+Onboard:
+  mors onboard --handle <handle> --display-name <name> [--json]
+  --handle <handle>      Globally unique handle (3-32 chars, letters/numbers/hyphens/underscores)
+  --display-name <name>  Your display name
+  --json                 Output JSON
 
 Deploy:
   mors deploy [--json] [--dry-run]

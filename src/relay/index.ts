@@ -15,6 +15,7 @@ import { bootstrapRelay } from './bootstrap.js';
 import { createRelayServer, type RelayServerOptions } from './server.js';
 import { createNativeTokenVerifier } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
+import { AccountStore } from './account-store.js';
 
 /**
  * Create the production server options including all wired dependencies.
@@ -46,6 +47,10 @@ export function createProductionServerOptions(): RelayServerOptions {
   // in the production relay, not only in test-only server construction.
   const messageStore = new RelayMessageStore();
 
+  // Wire the in-memory account store for handle registration and profile management.
+  // Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
+  const accountStore = new AccountStore();
+
   // Participant store backed by the message store's conversation tracking.
   // When a message is sent, both sender and recipient are registered as
   // participants in the thread, enabling object-level authorization checks.
@@ -59,6 +64,7 @@ export function createProductionServerOptions(): RelayServerOptions {
     tokenVerifier,
     participantStore,
     messageStore,
+    accountStore,
   };
 }
 

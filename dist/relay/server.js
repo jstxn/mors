@@ -18,6 +18,7 @@
 import { createServer } from 'node:http';
 import { isPublicRoute, extractAndVerify, extractBearerToken, send401, send403, parseConversationRoute, } from './auth-middleware.js';
 import { RelayMessageStore, RelayMessageNotFoundError, RelayUnauthorizedError, } from './message-store.js';
+import { AccountStore, DuplicateHandleError, ImmutableHandleError, InvalidHandleError, } from './account-store.js';
 import { DedupeConflictError } from '../errors.js';
 import { generateEventId } from '../contract/ids.js';
 /**
@@ -115,6 +116,7 @@ export function createRelayServer(config, options) {
     const participantStore = options?.participantStore;
     const onConversationAccess = options?.onConversationAccess;
     const messageStore = options?.messageStore;
+    const accountStore = options?.accountStore;
     const sseAuthRevalidateMs = options?.sseAuthRevalidateMs ?? 60000;
     const startTime = Date.now();
     // Track active SSE connections for clean shutdown
@@ -326,6 +328,78 @@ export function createRelayServer(config, options) {
                     clearInterval(revalidationTimer);
                     sseRevalidationTimers.delete(revalidationTimer);
                 }
+            });
+            return;
+        }
+        // ── Account routes (require accountStore) ─────────────────────
+        // Route: POST /accounts/register (register handle + profile)
+        // Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
+        if (url === '/accounts/register' && method === 'POST' && accountStore) {
+            const body = await readJsonBody(req);
+            if (!body) {
+                sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+                return;
+            }
+            const handle = body['handle'];
+            const displayName = body['display_name'];
+            if (typeof handle !== 'string' || handle.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'handle is required and must be a non-empty string.',
+                });
+                return;
+            }
+            if (typeof displayName !== 'string' || displayName.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'display_name is required and must be a non-empty string.',
+                });
+                return;
+            }
+            try {
+                const profile = accountStore.register({
+                    accountId: principal.accountId,
+                    handle,
+                    displayName,
+                });
+                sendJson(res, 201, {
+                    account_id: profile.accountId,
+                    handle: profile.handle,
+                    display_name: profile.displayName,
+                    created_at: profile.createdAt,
+                });
+            }
+            catch (err) {
+                if (err instanceof InvalidHandleError) {
+                    sendJson(res, 400, { error: 'invalid_handle', detail: err.message });
+                }
+                else if (err instanceof DuplicateHandleError) {
+                    sendJson(res, 409, { error: 'duplicate_handle', detail: err.message });
+                }
+                else if (err instanceof ImmutableHandleError) {
+                    sendJson(res, 409, { error: 'immutable_handle', detail: err.message });
+                }
+                else {
+                    throw err;
+                }
+            }
+            return;
+        }
+        // Route: GET /accounts/me (get own profile)
+        if (url === '/accounts/me' && method === 'GET' && accountStore) {
+            const profile = accountStore.getByAccountId(principal.accountId);
+            if (!profile) {
+                sendJson(res, 404, {
+                    error: 'not_onboarded',
+                    detail: 'Account has not completed onboarding. Run "mors onboard" to register your handle and profile.',
+                });
+                return;
+            }
+            sendJson(res, 200, {
+                account_id: profile.accountId,
+                handle: profile.handle,
+                display_name: profile.displayName,
+                created_at: profile.createdAt,
             });
             return;
         }

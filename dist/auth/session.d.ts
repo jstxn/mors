@@ -94,4 +94,36 @@ export declare function saveSigningKey(configDir: string, signingKey: string): v
  * @returns The signing key string, or null if not found.
  */
 export declare function loadSigningKey(configDir: string): string | null;
+/**
+ * Persisted account profile data.
+ *
+ * Stores the handle and display name from the onboarding wizard.
+ * The handle is immutable after creation (VAL-AUTH-008).
+ */
+export interface AccountProfileLocal {
+    /** Globally unique, immutable handle. */
+    handle: string;
+    /** Display name. */
+    displayName: string;
+    /** Stable account ID. */
+    accountId: string;
+    /** ISO-8601 timestamp of profile creation. */
+    createdAt: string;
+}
+/**
+ * Save an account profile to disk.
+ *
+ * @param configDir - The config directory to write to.
+ * @param profile - The profile data to persist.
+ */
+export declare function saveProfile(configDir: string, profile: AccountProfileLocal): void;
+/**
+ * Load an account profile from disk.
+ *
+ * Returns null if no profile file exists or if it is corrupt.
+ *
+ * @param configDir - The config directory to read from.
+ * @returns The loaded profile, or null if unavailable/invalid.
+ */
+export declare function loadProfile(configDir: string): AccountProfileLocal | null;
 //# sourceMappingURL=session.d.ts.map

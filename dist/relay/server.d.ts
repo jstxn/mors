@@ -18,6 +18,7 @@
 import type { RelayConfig } from './config.js';
 import { type TokenVerifier, type ParticipantStore, type AuthPrincipal } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
+import { AccountStore } from './account-store.js';
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
 /** Options for creating the relay server. */
@@ -50,6 +51,12 @@ export interface RelayServerOptions {
      * Default: 60000 (60 seconds). Set to 0 to disable revalidation.
      */
     sseAuthRevalidateMs?: number;
+    /**
+     * Account store for handle registration and profile management.
+     * When provided, enables /accounts/register, /accounts/me routes.
+     * Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
+     */
+    accountStore?: AccountStore;
 }
 /** Relay server handle with lifecycle methods. */
 export interface RelayServer {

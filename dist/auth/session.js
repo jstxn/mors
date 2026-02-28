@@ -184,4 +184,60 @@ export function loadSigningKey(configDir) {
         return null;
     }
 }
+// ── Profile persistence ──────────────────────────────────────────────
+/** Profile file name. */
+const PROFILE_FILE = 'profile.json';
+/**
+ * Save an account profile to disk.
+ *
+ * @param configDir - The config directory to write to.
+ * @param profile - The profile data to persist.
+ */
+export function saveProfile(configDir, profile) {
+    mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+    const profilePath = join(configDir, PROFILE_FILE);
+    const data = JSON.stringify(profile, null, 2) + '\n';
+    writeFileSync(profilePath, data, { mode: 0o644 });
+}
+/**
+ * Load an account profile from disk.
+ *
+ * Returns null if no profile file exists or if it is corrupt.
+ *
+ * @param configDir - The config directory to read from.
+ * @returns The loaded profile, or null if unavailable/invalid.
+ */
+export function loadProfile(configDir) {
+    const profilePath = join(configDir, PROFILE_FILE);
+    if (!existsSync(profilePath)) {
+        return null;
+    }
+    let raw;
+    try {
+        raw = readFileSync(profilePath, 'utf-8');
+    }
+    catch {
+        return null;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+        return null;
+    }
+    const obj = parsed;
+    if (typeof obj['handle'] !== 'string' || typeof obj['displayName'] !== 'string') {
+        return null;
+    }
+    return {
+        handle: obj['handle'],
+        displayName: obj['displayName'],
+        accountId: obj['accountId'] ?? '',
+        createdAt: obj['createdAt'] ?? '',
+    };
+}
 //# sourceMappingURL=session.js.map

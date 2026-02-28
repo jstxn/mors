@@ -224,3 +224,87 @@ export function loadSigningKey(configDir: string): string | null {
     return null;
   }
 }
+
+// ── Profile persistence ──────────────────────────────────────────────
+
+/** Profile file name. */
+const PROFILE_FILE = 'profile.json';
+
+/**
+ * Persisted account profile data.
+ *
+ * Stores the handle and display name from the onboarding wizard.
+ * The handle is immutable after creation (VAL-AUTH-008).
+ */
+export interface AccountProfileLocal {
+  /** Globally unique, immutable handle. */
+  handle: string;
+  /** Display name. */
+  displayName: string;
+  /** Stable account ID. */
+  accountId: string;
+  /** ISO-8601 timestamp of profile creation. */
+  createdAt: string;
+}
+
+/**
+ * Save an account profile to disk.
+ *
+ * @param configDir - The config directory to write to.
+ * @param profile - The profile data to persist.
+ */
+export function saveProfile(configDir: string, profile: AccountProfileLocal): void {
+  mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+
+  const profilePath = join(configDir, PROFILE_FILE);
+  const data = JSON.stringify(profile, null, 2) + '\n';
+
+  writeFileSync(profilePath, data, { mode: 0o644 });
+}
+
+/**
+ * Load an account profile from disk.
+ *
+ * Returns null if no profile file exists or if it is corrupt.
+ *
+ * @param configDir - The config directory to read from.
+ * @returns The loaded profile, or null if unavailable/invalid.
+ */
+export function loadProfile(configDir: string): AccountProfileLocal | null {
+  const profilePath = join(configDir, PROFILE_FILE);
+
+  if (!existsSync(profilePath)) {
+    return null;
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(profilePath, 'utf-8');
+  } catch {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  if (typeof obj['handle'] !== 'string' || typeof obj['displayName'] !== 'string') {
+    return null;
+  }
+
+  return {
+    handle: obj['handle'] as string,
+    displayName: obj['displayName'] as string,
+    accountId: (obj['accountId'] as string) ?? '',
+    createdAt: (obj['createdAt'] as string) ?? '',
+  };
+}
