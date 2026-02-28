@@ -415,10 +415,9 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
       expect(aliceMsg['id']).not.toBe(eveMsg['id']);
     });
 
-    it('same dedupe_key from same account but different recipients deduplicates', async () => {
-      // The dedupe scope is per-sender — same sender + same key = same message
-      // regardless of recipient. This is because dedupe keys represent the client's
-      // intent to send a specific logical message.
+    it('same dedupe_key from same account but different recipients rejects as incompatible', async () => {
+      // Dedupe scope enforces context compatibility: same sender + same key but
+      // different recipient_id is an incompatible reuse and must be rejected.
       const key = 'dup_same-sender-diff-recipient';
 
       const send1 = await relayFetch(port, '/messages', {
@@ -441,13 +440,205 @@ describe('relay thread/reply dedupe and idempotent transitions', () => {
         },
       });
 
-      // Second send should return the canonical message (deduped by sender + key)
       expect(send1.status).toBe(201);
-      expect(send2.status).toBe(200);
+      // Incompatible context: different recipient_id → 409 Conflict
+      expect(send2.status).toBe(409);
+      const errBody = send2.body as Record<string, unknown>;
+      expect(errBody['error']).toBe('dedupe_conflict');
+    });
 
-      const msg1 = send1.body as Record<string, unknown>;
-      const msg2 = send2.body as Record<string, unknown>;
-      expect(msg1['id']).toBe(msg2['id']);
+    it('same dedupe_key with different in_reply_to rejects as incompatible', async () => {
+      // Send two root messages
+      const rootA = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: { recipient_id: BOB.userId, body: 'Root A' },
+      });
+      const rootB = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: { recipient_id: BOB.userId, body: 'Root B' },
+      });
+      const rootAId = (rootA.body as Record<string, unknown>)['id'] as string;
+      const rootBId = (rootB.body as Record<string, unknown>)['id'] as string;
+
+      const key = 'dup_diff-reply-parent';
+
+      // Reply to root A with dedupe key
+      const reply1 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: BOB.token,
+        body: {
+          recipient_id: ALICE.userId,
+          body: 'Reply to A',
+          in_reply_to: rootAId,
+          dedupe_key: key,
+        },
+      });
+
+      // Try to reply to root B with the same dedupe key
+      const reply2 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: BOB.token,
+        body: {
+          recipient_id: ALICE.userId,
+          body: 'Reply to B',
+          in_reply_to: rootBId,
+          dedupe_key: key,
+        },
+      });
+
+      expect(reply1.status).toBe(201);
+      expect(reply2.status).toBe(409);
+      const errBody = reply2.body as Record<string, unknown>;
+      expect(errBody['error']).toBe('dedupe_conflict');
+    });
+
+    it('same dedupe_key used as root then reply rejects as incompatible', async () => {
+      const key = 'dup_root-then-reply';
+
+      // First: root message (no in_reply_to)
+      const send1 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: {
+          recipient_id: BOB.userId,
+          body: 'Root message',
+          dedupe_key: key,
+        },
+      });
+
+      const rootMsgId = (send1.body as Record<string, unknown>)['id'] as string;
+
+      // Second: try to use same key as a reply
+      const send2 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: {
+          recipient_id: BOB.userId,
+          body: 'Reply attempt',
+          in_reply_to: rootMsgId,
+          dedupe_key: key,
+        },
+      });
+
+      expect(send1.status).toBe(201);
+      expect(send2.status).toBe(409);
+      const errBody = send2.body as Record<string, unknown>;
+      expect(errBody['error']).toBe('dedupe_conflict');
+    });
+
+    it('same dedupe_key used as reply then root rejects as incompatible', async () => {
+      // First: create a root to reply to
+      const root = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: { recipient_id: BOB.userId, body: 'Root for test' },
+      });
+      const rootMsgId = (root.body as Record<string, unknown>)['id'] as string;
+
+      const key = 'dup_reply-then-root';
+
+      // Send a reply with dedupe key
+      const reply1 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: BOB.token,
+        body: {
+          recipient_id: ALICE.userId,
+          body: 'Reply first',
+          in_reply_to: rootMsgId,
+          dedupe_key: key,
+        },
+      });
+
+      // Try to use same key for a root message
+      const send2 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: BOB.token,
+        body: {
+          recipient_id: ALICE.userId,
+          body: 'Root attempt',
+          dedupe_key: key,
+        },
+      });
+
+      expect(reply1.status).toBe(201);
+      expect(send2.status).toBe(409);
+      const errBody = send2.body as Record<string, unknown>;
+      expect(errBody['error']).toBe('dedupe_conflict');
+    });
+
+    it('compatible retry with same recipient/thread/reply converges to canonical', async () => {
+      // Create a root message to reply to
+      const root = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: { recipient_id: BOB.userId, body: 'Root for compatible retry' },
+      });
+      const rootMsgId = (root.body as Record<string, unknown>)['id'] as string;
+
+      const key = 'dup_compatible-retry';
+
+      // First reply
+      const reply1 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: BOB.token,
+        body: {
+          recipient_id: ALICE.userId,
+          body: 'Compatible reply',
+          in_reply_to: rootMsgId,
+          dedupe_key: key,
+        },
+      });
+
+      // Exact same retry (same recipient, same in_reply_to)
+      const reply2 = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: BOB.token,
+        body: {
+          recipient_id: ALICE.userId,
+          body: 'Compatible reply',
+          in_reply_to: rootMsgId,
+          dedupe_key: key,
+        },
+      });
+
+      expect(reply1.status).toBe(201);
+      expect(reply2.status).toBe(200); // idempotent converge, not 409
+
+      const r1 = reply1.body as Record<string, unknown>;
+      const r2 = reply2.body as Record<string, unknown>;
+      expect(r1['id']).toBe(r2['id']);
+    });
+
+    it('dedupe conflict response includes detail about the mismatch', async () => {
+      const key = 'dup_detail-check';
+
+      await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: {
+          recipient_id: BOB.userId,
+          body: 'Original',
+          dedupe_key: key,
+        },
+      });
+
+      const conflict = await relayFetch(port, '/messages', {
+        method: 'POST',
+        token: ALICE.token,
+        body: {
+          recipient_id: EVE.userId,
+          body: 'Conflict',
+          dedupe_key: key,
+        },
+      });
+
+      expect(conflict.status).toBe(409);
+      const errBody = conflict.body as Record<string, unknown>;
+      expect(errBody['error']).toBe('dedupe_conflict');
+      expect(typeof errBody['detail']).toBe('string');
+      expect((errBody['detail'] as string).length).toBeGreaterThan(0);
     });
 
     it('bob inbox shows only one message when alice retries with same dedupe_key', async () => {

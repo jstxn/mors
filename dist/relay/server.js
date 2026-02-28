@@ -18,6 +18,7 @@
 import { createServer } from 'node:http';
 import { isPublicRoute, extractAndVerify, send401, send403, parseConversationRoute, } from './auth-middleware.js';
 import { RelayMessageStore, RelayMessageNotFoundError, RelayUnauthorizedError, } from './message-store.js';
+import { DedupeConflictError } from '../errors.js';
 /**
  * Read and parse JSON body from a request.
  * Returns null if body is empty or cannot be parsed.
@@ -210,6 +211,10 @@ export function createRelayServer(config, options) {
             catch (err) {
                 if (err instanceof RelayMessageNotFoundError) {
                     sendJson(res, 404, { error: 'not_found', detail: err.message });
+                    return;
+                }
+                if (err instanceof DedupeConflictError) {
+                    sendJson(res, 409, { error: 'dedupe_conflict', detail: err.message });
                     return;
                 }
                 throw err;

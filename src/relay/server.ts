@@ -34,6 +34,7 @@ import {
   RelayUnauthorizedError,
   type RelaySendResult,
 } from './message-store.js';
+import { DedupeConflictError } from '../errors.js';
 
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
@@ -297,6 +298,10 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       } catch (err: unknown) {
         if (err instanceof RelayMessageNotFoundError) {
           sendJson(res, 404, { error: 'not_found', detail: err.message });
+          return;
+        }
+        if (err instanceof DedupeConflictError) {
+          sendJson(res, 409, { error: 'dedupe_conflict', detail: err.message });
           return;
         }
         throw err;

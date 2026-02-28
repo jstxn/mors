@@ -17,6 +17,7 @@
  * - VAL-RELAY-003: Ack state convergence across views
  */
 import { generateMessageId, generateThreadId } from '../contract/ids.js';
+import { DedupeConflictError } from '../errors.js';
 // ── Errors ───────────────────────────────────────────────────────────
 /** Thrown when a message is not found in the relay store. */
 export class RelayMessageNotFoundError extends Error {
@@ -83,13 +84,27 @@ export class RelayMessageStore {
     send(senderId, senderLogin, options) {
         const { recipientId, body, subject, inReplyTo, dedupeKey } = options;
         // Check dedupe index first — if this key was already used by this sender,
-        // return the canonical message without creating a new one.
+        // verify context compatibility before returning the canonical message.
+        // Incompatible reuse (different recipient, thread, or reply-parent) is rejected.
         if (dedupeKey) {
             const indexKey = this.dedupeIndexKey(senderId, dedupeKey);
             const existingId = this.dedupeIndex.get(indexKey);
             if (existingId) {
                 const existing = this.messages.get(existingId);
                 if (existing) {
+                    // Context compatibility checks (VAL-RELAY-009):
+                    // 1. Recipient must match
+                    if (existing.recipient_id !== recipientId) {
+                        throw new DedupeConflictError(dedupeKey, existing.id, `Expected recipient_id=${recipientId} but found recipient_id=${existing.recipient_id}.`);
+                    }
+                    // 2. in_reply_to must match (null for root, parent ID for reply)
+                    const requestedReplyTo = inReplyTo ?? null;
+                    if (existing.in_reply_to !== requestedReplyTo) {
+                        const existingReplyTo = existing.in_reply_to ?? 'null (top-level message)';
+                        const requestedReplyToDesc = requestedReplyTo ?? 'null (top-level message)';
+                        throw new DedupeConflictError(dedupeKey, existing.id, `Expected in_reply_to="${requestedReplyToDesc}" but found in_reply_to="${existingReplyTo}".`);
+                    }
+                    // Context is compatible — return canonical message (idempotent retry)
                     return { message: existing, created: false };
                 }
             }
