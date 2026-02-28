@@ -47,6 +47,7 @@ import {
 import { getConfigDir } from './identity.js';
 import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
+import { RelayClient, RelayClientError, type RelayMessageResponse } from './relay/client.js';
 
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
@@ -167,6 +168,48 @@ function openStore(configDir: string): BetterSqlite3.Database {
   return openEncryptedDb({ dbPath, key });
 }
 
+// ── Remote mode detection and RelayClient factory ───────────────────
+
+/** Error class for when remote prerequisites are missing. */
+class RemoteUnavailableError extends MorsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RemoteUnavailableError';
+  }
+}
+
+/**
+ * Create a RelayClient from the current session and relay config.
+ *
+ * Requires both an active authenticated session (with access token) and
+ * a relay base URL (MORS_RELAY_BASE_URL env var).
+ *
+ * @param configDir - Config directory containing the session.
+ * @returns A configured RelayClient.
+ * @throws RemoteUnavailableError if relay URL is not configured.
+ * @throws NotAuthenticatedError if no active session exists.
+ */
+function createRelayClientFromSession(configDir: string): RelayClient {
+  const session = loadSession(configDir);
+  if (!session) {
+    throw new NotAuthenticatedError();
+  }
+
+  const relayBaseUrl = process.env['MORS_RELAY_BASE_URL'];
+  if (!relayBaseUrl) {
+    throw new RemoteUnavailableError(
+      'Remote mode requires MORS_RELAY_BASE_URL to be set. ' +
+        'Set this environment variable to the relay server URL (e.g. http://localhost:3100).'
+    );
+  }
+
+  return new RelayClient({
+    baseUrl: relayBaseUrl,
+    token: session.accessToken,
+    queueStorePath: `${configDir}/offline-queue.json`,
+  });
+}
+
 /**
  * Dispatch a gated command after init validation.
  */
@@ -235,6 +278,7 @@ function runSend(args: string[], configDir: string): void {
   const { flags } = parseArgs(args);
   const json = 'json' in flags;
   const secure = 'secure' in flags;
+  const remote = 'remote' in flags;
   const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
   const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
   const subject = typeof flags['subject'] === 'string' ? flags['subject'] : undefined;
@@ -250,6 +294,17 @@ function runSend(args: string[], configDir: string): void {
   if (!body) {
     formatError('send requires --body <message>', json);
     process.exitCode = 1;
+    return;
+  }
+
+  // ── Remote mode: route through RelayClient ────────────────────────
+  if (remote) {
+    runRemoteSend(configDir, json, {
+      to,
+      body,
+      subject,
+      inReplyTo: undefined,
+    });
     return;
   }
 
@@ -324,13 +379,102 @@ function runSend(args: string[], configDir: string): void {
   }
 }
 
+/**
+ * Send a message through the relay via RelayClient.
+ *
+ * Uses durable queue/retry from RelayClient. If the relay is unreachable,
+ * the message is queued offline for later delivery.
+ */
+function runRemoteSend(
+  configDir: string,
+  json: boolean,
+  opts: { to: string; body: string; subject?: string; inReplyTo?: string }
+): void {
+  let client: RelayClient;
+  try {
+    client = createRelayClientFromSession(configDir);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleRemoteError(err, json);
+    return;
+  }
+
+  const recipientId = parseInt(opts.to, 10);
+  if (isNaN(recipientId)) {
+    formatError(
+      'Remote send requires --to <numeric_recipient_id> (GitHub user ID)',
+      json,
+      'validation_error'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  client
+    .send({
+      recipientId,
+      body: opts.body,
+      subject: opts.subject,
+      inReplyTo: opts.inReplyTo,
+    })
+    .then((result) => {
+      if (result.queued) {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'queued',
+              mode: 'remote',
+              dedupe_key: result.dedupeKey,
+              message: 'Message queued offline. It will be delivered when the relay is reachable.',
+            })
+          );
+        } else {
+          console.log(`Message queued offline (dedupe key: ${result.dedupeKey})`);
+          console.log('It will be delivered when the relay is reachable.');
+        }
+      } else if (result.message) {
+        const msg = result.message;
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'sent',
+              mode: 'remote',
+              id: msg.id,
+              thread_id: msg.thread_id,
+              in_reply_to: msg.in_reply_to,
+              sender_id: msg.sender_id,
+              recipient_id: msg.recipient_id,
+              state: msg.state,
+              dedupe_key: result.dedupeKey,
+              created_at: msg.created_at,
+            })
+          );
+        } else {
+          console.log(`Message sent (remote): ${msg.id}`);
+          console.log(`Thread: ${msg.thread_id}`);
+        }
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      handleRemoteError(err, json);
+    });
+}
+
 // ── Inbox command ────────────────────────────────────────────────────
 
 function runInbox(args: string[], configDir: string): void {
   const { flags } = parseArgs(args);
   const json = 'json' in flags;
+  const remote = 'remote' in flags;
   const recipient = typeof flags['to'] === 'string' ? flags['to'] : undefined;
   const unreadOnly = 'unread' in flags;
+
+  // ── Remote mode: fetch inbox from relay ───────────────────────────
+  if (remote) {
+    runRemoteInbox(configDir, json, { unreadOnly });
+    return;
+  }
 
   let db: BetterSqlite3.Database | null = null;
   try {
@@ -369,16 +513,93 @@ function runInbox(args: string[], configDir: string): void {
   }
 }
 
+/**
+ * Fetch inbox from the relay.
+ *
+ * Uses createRelayClientFromSession to validate prerequisites (session + relay URL),
+ * then performs a direct HTTP request to the relay inbox endpoint.
+ */
+function runRemoteInbox(configDir: string, json: boolean, opts: { unreadOnly?: boolean }): void {
+  // Validate prerequisites (session exists, relay URL configured)
+  try {
+    createRelayClientFromSession(configDir);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleRemoteError(err, json);
+    return;
+  }
+
+  const session = loadSession(configDir);
+  const baseUrl = process.env['MORS_RELAY_BASE_URL'];
+  // Both are validated by createRelayClientFromSession above
+  if (!session || !baseUrl) return;
+  const token = session.accessToken;
+  const unreadParam = opts.unreadOnly ? '?unread=true' : '';
+
+  fetch(`${baseUrl}/inbox${unreadParam}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        throw new RelayClientError(res.status, await res.json().catch(() => res.statusText));
+      }
+      return res.json() as Promise<{ count: number; messages: RelayMessageResponse[] }>;
+    })
+    .then((data) => {
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'ok',
+            mode: 'remote',
+            count: data.count,
+            messages: data.messages,
+          })
+        );
+      } else {
+        if (data.count === 0) {
+          console.log('No messages (remote).');
+        } else {
+          for (const msg of data.messages) {
+            const readMarker = msg.read_at ? '✓' : '•';
+            const stateTag = msg.state === 'acked' ? ' [acked]' : '';
+            console.log(
+              `${readMarker} ${msg.id}  from:${msg.sender_login}  ${msg.state}${stateTag}`
+            );
+            if (msg.subject) {
+              console.log(`  Subject: ${msg.subject}`);
+            }
+            console.log(`  ${msg.body.split('\n')[0].slice(0, 80)}`);
+          }
+          console.log(`\n${data.count} message(s) (remote)`);
+        }
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      handleRemoteError(err, json);
+    });
+}
+
 // ── Read command ─────────────────────────────────────────────────────
 
 function runRead(args: string[], configDir: string): void {
   const { positional, flags } = parseArgs(args);
   const json = 'json' in flags;
+  const remote = 'remote' in flags;
   const messageId = positional[0];
 
   if (!messageId) {
     formatError('read requires a message ID argument', json);
     process.exitCode = 1;
+    return;
+  }
+
+  // ── Remote mode: read through relay ───────────────────────────────
+  if (remote) {
+    runRemoteRead(configDir, json, messageId);
     return;
   }
 
@@ -419,16 +640,73 @@ function runRead(args: string[], configDir: string): void {
   }
 }
 
+/**
+ * Read a message through the relay via RelayClient.
+ */
+function runRemoteRead(configDir: string, json: boolean, messageId: string): void {
+  let client: RelayClient;
+  try {
+    client = createRelayClientFromSession(configDir);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleRemoteError(err, json);
+    return;
+  }
+
+  client
+    .read(messageId)
+    .then((result) => {
+      const msg = result.message;
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'ok',
+            mode: 'remote',
+            first_read: result.firstRead,
+            message: msg,
+          })
+        );
+      } else {
+        console.log(`Message (remote): ${msg.id}`);
+        console.log(`Thread: ${msg.thread_id}`);
+        if (msg.in_reply_to) {
+          console.log(`In reply to: ${msg.in_reply_to}`);
+        }
+        console.log(`From: ${msg.sender_login} (ID: ${msg.sender_id})`);
+        console.log(`To: ${msg.recipient_id}`);
+        console.log(`State: ${msg.state}`);
+        if (msg.subject) {
+          console.log(`Subject: ${msg.subject}`);
+        }
+        console.log(`Read at: ${msg.read_at ?? 'just now'}`);
+        console.log(`Created: ${msg.created_at}`);
+        console.log('---');
+        console.log(msg.body);
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      handleRemoteError(err, json);
+    });
+}
+
 // ── Ack command ──────────────────────────────────────────────────────
 
 function runAck(args: string[], configDir: string): void {
   const { positional, flags } = parseArgs(args);
   const json = 'json' in flags;
+  const remote = 'remote' in flags;
   const messageId = positional[0];
 
   if (!messageId) {
     formatError('ack requires a message ID argument', json);
     process.exitCode = 1;
+    return;
+  }
+
+  // ── Remote mode: ack through relay ────────────────────────────────
+  if (remote) {
+    runRemoteAck(configDir, json, messageId);
     return;
   }
 
@@ -459,12 +737,54 @@ function runAck(args: string[], configDir: string): void {
   }
 }
 
+/**
+ * Acknowledge a message through the relay via RelayClient.
+ */
+function runRemoteAck(configDir: string, json: boolean, messageId: string): void {
+  let client: RelayClient;
+  try {
+    client = createRelayClientFromSession(configDir);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleRemoteError(err, json);
+    return;
+  }
+
+  client
+    .ack(messageId)
+    .then((result) => {
+      const msg = result.message;
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'acked',
+            mode: 'remote',
+            id: msg.id,
+            thread_id: msg.thread_id,
+            state: msg.state,
+            acked_at: msg.acked_at,
+            updated_at: msg.updated_at,
+            first_ack: result.firstAck,
+          })
+        );
+      } else {
+        console.log(`Message acknowledged (remote): ${msg.id}`);
+        console.log(`State: ${msg.state}`);
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      handleRemoteError(err, json);
+    });
+}
+
 // ── Reply command ────────────────────────────────────────────────────
 
 function runReply(args: string[], configDir: string): void {
   const { positional, flags } = parseArgs(args);
   const json = 'json' in flags;
   const secure = 'secure' in flags;
+  const remote = 'remote' in flags;
   const parentId = positional[0];
   const from = typeof flags['from'] === 'string' ? flags['from'] : undefined;
   const to = typeof flags['to'] === 'string' ? flags['to'] : undefined;
@@ -481,6 +801,18 @@ function runReply(args: string[], configDir: string): void {
   if (!body) {
     formatError('reply requires --body <message>', json);
     process.exitCode = 1;
+    return;
+  }
+
+  // ── Remote mode: reply through relay ──────────────────────────────
+  if (remote) {
+    const recipientId = to ?? undefined;
+    runRemoteReply(configDir, json, {
+      parentId,
+      to: recipientId,
+      body,
+      subject,
+    });
     return;
   }
 
@@ -558,6 +890,91 @@ function runReply(args: string[], configDir: string): void {
   } finally {
     if (db) db.close();
   }
+}
+
+/**
+ * Reply to a message through the relay via RelayClient.
+ *
+ * Uses the send endpoint with inReplyTo to establish causal linkage.
+ * The relay server resolves thread_id from the parent message.
+ */
+function runRemoteReply(
+  configDir: string,
+  json: boolean,
+  opts: { parentId: string; to?: string; body: string; subject?: string }
+): void {
+  let client: RelayClient;
+  try {
+    client = createRelayClientFromSession(configDir);
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    handleRemoteError(err, json);
+    return;
+  }
+
+  // For remote reply, --to must be a numeric recipient ID
+  const recipientId = opts.to ? parseInt(opts.to, 10) : NaN;
+  if (isNaN(recipientId)) {
+    formatError(
+      'Remote reply requires --to <numeric_recipient_id> (GitHub user ID)',
+      json,
+      'validation_error'
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  client
+    .send({
+      recipientId,
+      body: opts.body,
+      subject: opts.subject,
+      inReplyTo: opts.parentId,
+    })
+    .then((result) => {
+      if (result.queued) {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'queued',
+              mode: 'remote',
+              dedupe_key: result.dedupeKey,
+              in_reply_to: opts.parentId,
+              message: 'Reply queued offline. It will be delivered when the relay is reachable.',
+            })
+          );
+        } else {
+          console.log(`Reply queued offline (dedupe key: ${result.dedupeKey})`);
+          console.log(`In reply to: ${opts.parentId}`);
+        }
+      } else if (result.message) {
+        const msg = result.message;
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'replied',
+              mode: 'remote',
+              id: msg.id,
+              thread_id: msg.thread_id,
+              in_reply_to: msg.in_reply_to,
+              sender_id: msg.sender_id,
+              recipient_id: msg.recipient_id,
+              state: msg.state,
+              dedupe_key: result.dedupeKey,
+              created_at: msg.created_at,
+            })
+          );
+        } else {
+          console.log(`Reply sent (remote): ${msg.id}`);
+          console.log(`Thread: ${msg.thread_id}`);
+          console.log(`In reply to: ${msg.in_reply_to}`);
+        }
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      handleRemoteError(err, json);
+    });
 }
 
 // ── Thread command ───────────────────────────────────────────────────
@@ -1128,6 +1545,30 @@ function handleCommandError(err: unknown, json: boolean): void {
   }
 }
 
+/**
+ * Handle errors from remote (relay) operations with deterministic output.
+ *
+ * Maps specific relay error types to actionable CLI output:
+ * - RemoteUnavailableError → remote_unavailable with config guidance
+ * - NotAuthenticatedError → not_authenticated with login guidance
+ * - RelayClientError (4xx) → relay_error with status code
+ * - Other errors → unknown error
+ */
+function handleRemoteError(err: unknown, json: boolean): void {
+  if (err instanceof RemoteUnavailableError) {
+    formatError(err.message, json, 'remote_unavailable');
+  } else if (err instanceof NotAuthenticatedError) {
+    formatError(err.message, json, 'not_authenticated');
+  } else if (err instanceof RelayClientError) {
+    formatError(err.message, json, 'relay_error');
+  } else if (err instanceof MorsError) {
+    formatError(err.message, json, err.name);
+  } else {
+    const msg = err instanceof Error ? err.message : String(err);
+    formatError(msg, json, 'unknown');
+  }
+}
+
 function formatError(message: string, json: boolean, errorType?: string): void {
   if (json) {
     console.log(
@@ -1168,31 +1609,37 @@ Options:
   -h, --help     Show this help
   -v, --version  Show version
 
+Remote mode:
+  --remote               Route command through relay (requires auth + MORS_RELAY_BASE_URL)
+
 Send options:
-  --to <recipient>       Recipient identity (required)
+  --to <recipient>       Recipient identity (required; numeric GitHub user ID for --remote)
   --body <message>       Message body (required)
   --from <sender>        Sender identity (default: "local")
   --subject <subject>    Message subject
   --dedupe-key <key>     Dedupe key for idempotent sends (must start with "dup_")
   --trace-id <id>        Trace ID for observability (must start with "trc_")
+  --remote               Send through relay server
   --json                 Output JSON
 
 Inbox options:
   --to <recipient>       Filter by recipient
   --unread               Show only unread messages
+  --remote               Fetch inbox from relay server
   --json                 Output JSON
 
 Read/Ack:
-  mors read <message-id> [--json]
-  mors ack <message-id> [--json]
+  mors read <message-id> [--json] [--remote]
+  mors ack <message-id> [--json] [--remote]
 
 Reply:
   mors reply <parent-message-id> --body <message> [options]
-  --to <recipient>       Recipient identity (default: "local")
+  --to <recipient>       Recipient identity (default: "local"; numeric GitHub user ID for --remote)
   --from <sender>        Sender identity (default: "local")
   --subject <subject>    Reply subject
   --dedupe-key <key>     Dedupe key for idempotent replies (must start with "dup_")
   --trace-id <id>        Trace ID for observability (must start with "trc_")
+  --remote               Reply through relay server
   --json                 Output JSON
 
 Thread:
