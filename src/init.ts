@@ -62,11 +62,15 @@ export interface InitResult {
  * @param options.configDir - Override the config directory (for testing).
  * @param options.simulateSqlCipherUnavailable - Testing hook for VAL-INIT-003.
  * @param options.simulateFailureAfterIdentity - Testing hook for VAL-INIT-006.
+ * @param options.simulateFailureAfterDbKey - Testing hook for VAL-INIT-006 regression.
+ * @param options.simulateFailureAfterDbCreate - Testing hook for VAL-INIT-006 regression.
  */
 export async function initCommand(options?: {
   configDir?: string;
   simulateSqlCipherUnavailable?: boolean;
   simulateFailureAfterIdentity?: boolean;
+  simulateFailureAfterDbKey?: boolean;
+  simulateFailureAfterDbCreate?: boolean;
 }): Promise<InitResult> {
   const configDir = options?.configDir ?? getConfigDir();
   const sentinelPath = join(configDir, INIT_SENTINEL);
@@ -91,8 +95,22 @@ export async function initCommand(options?: {
     );
   }
 
-  // Track created artifacts for atomic cleanup on failure.
-  const createdArtifacts: string[] = [];
+  // ── Pre-register ALL expected artifact paths for atomic cleanup ──
+  // This ensures that even if a failure occurs mid-creation of any
+  // artifact, the cleanup function covers all possible partial writes.
+  // This includes SQLite WAL/SHM journal files that may be created
+  // alongside the database file.
+  const dbKeyPath = join(configDir, DB_KEY_FILE);
+  const dbPath = join(configDir, DB_FILE);
+  const expectedArtifacts: string[] = [
+    join(configDir, 'identity.json'),
+    join(configDir, 'identity.key'),
+    dbKeyPath,
+    dbPath,
+    `${dbPath}-wal`,
+    `${dbPath}-shm`,
+    sentinelPath,
+  ];
 
   try {
     // ── SQLCipher preflight (VAL-INIT-003) ──────────────────────────
@@ -101,7 +119,6 @@ export async function initCommand(options?: {
     // ── Identity generation ─────────────────────────────────────────
     const identity: Identity = generateIdentity();
     persistIdentity(configDir, identity);
-    createdArtifacts.push(join(configDir, 'identity.json'), join(configDir, 'identity.key'));
 
     // ── Simulated failure for atomicity testing (VAL-INIT-006) ──────
     if (options?.simulateFailureAfterIdentity) {
@@ -110,15 +127,20 @@ export async function initCommand(options?: {
 
     // ── DB key generation & persistence ─────────────────────────────
     const dbKey = generateKey();
-    const dbKeyPath = join(configDir, DB_KEY_FILE);
     persistKey(dbKeyPath, dbKey);
-    createdArtifacts.push(dbKeyPath);
+
+    // ── Simulated failure for atomicity regression testing ──────────
+    if (options?.simulateFailureAfterDbKey) {
+      throw new MorsError('Simulated init failure after DB key creation.');
+    }
 
     // ── Encrypted database creation ─────────────────────────────────
-    const dbPath = join(configDir, DB_FILE);
     const db = openEncryptedDb({ dbPath, key: dbKey });
-    createdArtifacts.push(dbPath);
     try {
+      // ── Simulated failure for atomicity regression testing ────────
+      if (options?.simulateFailureAfterDbCreate) {
+        throw new MorsError('Simulated init failure after DB creation.');
+      }
       initializeSchema(db);
     } finally {
       db.close();
@@ -126,7 +148,6 @@ export async function initCommand(options?: {
 
     // ── Write sentinel (marks successful init) ──────────────────────
     writeSentinel(sentinelPath, identity.fingerprint);
-    createdArtifacts.push(sentinelPath);
 
     return {
       alreadyInitialized: false,
@@ -135,9 +156,10 @@ export async function initCommand(options?: {
     };
   } catch (err: unknown) {
     // ── Atomic cleanup (VAL-INIT-006) ───────────────────────────────
-    // Remove all partially created artifacts so the workspace isn't
-    // left in a half-initialized state.
-    cleanupArtifacts(createdArtifacts);
+    // Remove all pre-registered artifacts so the workspace isn't
+    // left in a half-initialized state. Pre-registration ensures
+    // coverage even for partially written files.
+    cleanupArtifacts(expectedArtifacts);
 
     // Re-throw with original error context.
     throw err;

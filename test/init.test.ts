@@ -524,6 +524,142 @@ describe('VAL-SEC-002: encrypted store reopens with persisted key', () => {
 });
 
 // ---------------------------------------------------------------------------
+// VAL-INIT-006 Regression: Multi-file partial-write rollback
+// ---------------------------------------------------------------------------
+
+describe('VAL-INIT-006 regression: partial-write rollback at each init step', () => {
+  it('failure after db key creation cleans up identity and key artifacts', async () => {
+    const configDir = join(testDir, 'partial-dbkey');
+    try {
+      await initCommand({
+        configDir,
+        simulateFailureAfterDbKey: true,
+      });
+      expect.unreachable('Should have thrown');
+    } catch (err: unknown) {
+      expect(err).toBeInstanceOf(MorsError);
+    }
+
+    // All artifacts including db.key should be cleaned up.
+    if (existsSync(configDir)) {
+      const files = readdirSync(configDir);
+      expect(files).not.toContain('identity.json');
+      expect(files).not.toContain('identity.key');
+      expect(files).not.toContain('db.key');
+      expect(files).not.toContain('mors.db');
+      expect(files).not.toContain('mors.db-wal');
+      expect(files).not.toContain('mors.db-shm');
+      expect(files).not.toContain('.initialized');
+    }
+  });
+
+  it('failure after db creation cleans up all artifacts including db file', async () => {
+    const configDir = join(testDir, 'partial-db');
+    try {
+      await initCommand({
+        configDir,
+        simulateFailureAfterDbCreate: true,
+      });
+      expect.unreachable('Should have thrown');
+    } catch (err: unknown) {
+      expect(err).toBeInstanceOf(MorsError);
+    }
+
+    // All artifacts including mors.db should be cleaned up.
+    if (existsSync(configDir)) {
+      const files = readdirSync(configDir);
+      expect(files).not.toContain('identity.json');
+      expect(files).not.toContain('identity.key');
+      expect(files).not.toContain('db.key');
+      expect(files).not.toContain('mors.db');
+      expect(files).not.toContain('mors.db-wal');
+      expect(files).not.toContain('mors.db-shm');
+      expect(files).not.toContain('.initialized');
+    }
+  });
+
+  it('workspace is not considered initialized after db key failure', async () => {
+    const configDir = join(testDir, 'partial-dbkey-notinit');
+    try {
+      await initCommand({ configDir, simulateFailureAfterDbKey: true });
+    } catch {
+      // Expected.
+    }
+    expect(() => requireInit(configDir)).toThrow(NotInitializedError);
+  });
+
+  it('workspace is not considered initialized after db creation failure', async () => {
+    const configDir = join(testDir, 'partial-db-notinit');
+    try {
+      await initCommand({ configDir, simulateFailureAfterDbCreate: true });
+    } catch {
+      // Expected.
+    }
+    expect(() => requireInit(configDir)).toThrow(NotInitializedError);
+  });
+
+  it('successful init after db key failure', async () => {
+    const configDir = join(testDir, 'retry-after-dbkey-fail');
+    try {
+      await initCommand({ configDir, simulateFailureAfterDbKey: true });
+    } catch {
+      // Expected.
+    }
+    const result = await initCommand({ configDir });
+    expect(result.alreadyInitialized).toBe(false);
+    expect(existsSync(join(configDir, '.initialized'))).toBe(true);
+  });
+
+  it('successful init after db creation failure', async () => {
+    const configDir = join(testDir, 'retry-after-db-fail');
+    try {
+      await initCommand({ configDir, simulateFailureAfterDbCreate: true });
+    } catch {
+      // Expected.
+    }
+    const result = await initCommand({ configDir });
+    expect(result.alreadyInitialized).toBe(false);
+    expect(existsSync(join(configDir, '.initialized'))).toBe(true);
+  });
+
+  it('pre-registered artifact paths ensure cleanup even if file creation is partial', async () => {
+    // This test verifies that the fix pre-registers ALL artifact paths
+    // upfront so cleanup covers files not yet tracked at failure time.
+    // We run each failure mode and verify zero artifacts remain.
+    const failureModes: Array<Record<string, boolean>> = [
+      { simulateFailureAfterIdentity: true },
+      { simulateFailureAfterDbKey: true },
+      { simulateFailureAfterDbCreate: true },
+    ];
+
+    for (const mode of failureModes) {
+      const configDir = join(testDir, `pre-reg-${Object.keys(mode)[0]}`);
+      try {
+        await initCommand({ configDir, ...mode });
+      } catch {
+        // Expected.
+      }
+
+      // Verify no init artifacts remain.
+      if (existsSync(configDir)) {
+        const files = readdirSync(configDir);
+        const initArtifacts = files.filter(
+          (f) =>
+            f === 'identity.json' ||
+            f === 'identity.key' ||
+            f === 'db.key' ||
+            f === 'mors.db' ||
+            f === 'mors.db-wal' ||
+            f === 'mors.db-shm' ||
+            f === '.initialized'
+        );
+        expect(initArtifacts).toEqual([]);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Additional edge cases
 // ---------------------------------------------------------------------------
 
