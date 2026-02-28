@@ -1,0 +1,21 @@
+{
+  "featureId": "relay-foundation-fix-relay-auth-wiring-fail-closed",
+  "reviewedAt": "2026-02-28T12:31:02Z",
+  "commitId": "1cde67e8954a0f7843abf536bde1a204d3cac17e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly addresses the prior blocking failures. Production relay startup now wires both auth dependencies (token verifier and participant store), and server request handling is fail-closed: protected routes return 401 when auth verification is unavailable/invalid and conversation routes return 403 when authorization backing is unavailable or the caller is not a participant. The original fail-open 200 paths identified in the prior review are removed.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker marked `skillFeedback.followedProcedure=true`, but manual API/SSE checks required by both the feature verification steps and skill procedure were not reported in handoff evidence.",
+      "evidence": "Feature verificationSteps include 'Manual: curl protected routes with and without valid auth and participant access'; SKILL.md step 8 requires manual CLI/API/SSE sanity checks for user-facing surfaces; handoff verification for worker session c1a7c6df-c367-4244-9665-ba1cfb55643f lists only automated test/lint/typecheck commands and no interactive checks."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/relay-foundation/scrutiny/reviews/auth-relay-guards-and-object-authorization.json",
+  "summary": "Pass. Compared against both commits and the fix-session transcript skeleton, this fix resolves the prior review's two blocking gaps by wiring runtime auth dependencies in relay index startup and enforcing fail-closed auth/authz behavior in server route handling."
+}

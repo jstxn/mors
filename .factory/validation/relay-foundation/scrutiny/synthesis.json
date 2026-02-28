@@ -1,91 +1,34 @@
 {
   "milestone": "relay-foundation",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
     "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
   },
   "reviewsSummary": {
-    "total": 5,
-    "passed": 1,
-    "failed": 4,
-    "failedFeatures": [
-      "relay-service-runtime-scaffold",
-      "auth-device-flow-cli-and-session-management",
-      "auth-relay-guards-and-object-authorization",
-      "e2ee-device-bootstrap-and-keystore-foundation"
-    ]
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "relay-service-runtime-scaffold",
-      "severity": "blocking",
-      "description": "Relay server hard-binds to 127.0.0.1 (src/relay/server.ts:128), preventing external/container ingress required for hosted relay operation."
-    },
-    {
-      "featureId": "relay-service-runtime-scaffold",
-      "severity": "blocking",
-      "description": "Feature description requires persistence bootstrap but relay entrypoint (src/relay/index.ts:14) only loads config and starts HTTP server with no persistence initialization path."
-    },
-    {
-      "featureId": "auth-device-flow-cli-and-session-management",
-      "severity": "blocking",
-      "description": "Logout does not re-gate protected command execution (VAL-AUTH-005 gap). CLI command dispatch checks init but not auth session, so protected commands work after logout."
-    },
-    {
-      "featureId": "auth-device-flow-cli-and-session-management",
-      "severity": "blocking",
-      "description": "Status flow does not validate persisted token liveness (VAL-AUTH-006 gap). Expired/revoked tokens are reported as 'authenticated' with no recovery UX in status/protected paths."
-    },
-    {
-      "featureId": "auth-relay-guards-and-object-authorization",
-      "severity": "blocking",
-      "description": "Relay production entrypoint does not provide tokenVerifier or participantStore to createRelayServer, so auth guards are not actually enforced in default runtime."
-    },
-    {
-      "featureId": "auth-relay-guards-and-object-authorization",
-      "severity": "blocking",
-      "description": "Auth and participant checks are conditional/fail-open (src/relay/server.ts:124). When verifier/store are absent, protected routes return 200 instead of 401/403, violating VAL-AUTH-003/004."
-    },
-    {
-      "featureId": "e2ee-device-bootstrap-and-keystore-foundation",
-      "severity": "blocking",
-      "description": "mors init does not call generateDeviceKeys/persistDeviceKeys (src/init.ts:133), so per-device E2EE key provisioning is not satisfied by the runtime bootstrap path."
-    },
-    {
-      "featureId": "e2ee-device-bootstrap-and-keystore-foundation",
-      "severity": "blocking",
-      "description": "Bootstrap guard helpers exist but are not integrated into any CLI/relay secure messaging path, so secure messaging commands are not actually blocked before bootstrap completion."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
-      "target": "AGENTS.md",
-      "suggestion": "Add convention: Relay auth/authz dependencies MUST fail closed. When tokenVerifier or participantStore are not provided, all protected routes must return 401/403 — never fall through to 200. No legacy/backward-compatible fail-open modes.",
-      "evidence": "auth-relay-guards-and-object-authorization implemented conditional guards (if tokenVerifier) that silently skip auth when dependency is absent, creating fail-open behavior. This ambiguity allowed the worker to choose legacy mode over strict enforcement.",
-      "isSystemic": false
-    },
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Add convention: Relay server listen address MUST default to 0.0.0.0 (all interfaces) for hosted/containerized deployment. Use MORS_RELAY_HOST env var to override for local development (127.0.0.1).",
-      "evidence": "relay-service-runtime-scaffold hard-bound to 127.0.0.1, blocking container/hosted ingress. Feature description says 'hosted relay' but no explicit binding guidance existed.",
-      "isSystemic": false
+      "target": "skills",
+      "suggestion": "Clarify mors-global-worker skill step 8 (manual CLI/API/SSE sanity checks): workers should either (a) perform and report manual checks for user-facing CLI/API changes, or (b) explicitly state N/A with justification when the feature is library-level or the surface is not manually testable in the dev environment. Workers must set followedProcedure=false when skipping required manual steps without N/A justification.",
+      "evidence": "All 4 fix features in round 2 (relay-foundation-fix-host-binding-and-persistence-bootstrap, relay-foundation-fix-cli-auth-regating-and-token-liveness, relay-foundation-fix-relay-auth-wiring-fail-closed, relay-foundation-fix-e2ee-bootstrap-runtime-integration) marked followedProcedure=true but reported only automated commandsRun with no manual/interactive check evidence. Same pattern observed in round 1 (4/5 original features).",
+      "isSystemic": true
     },
     {
       "target": "skills",
-      "suggestion": "Clarify mors-global-worker skill step 8 (manual CLI/API/SSE sanity checks): make manual checks conditional on whether the feature exposes user-facing CLI/API surfaces. Pure library/primitive features that only add internal modules + unit tests should not require manual surface checks. Workers should set followedProcedure=false when skipping required steps.",
-      "evidence": "4 of 5 features in relay-foundation had workers mark followedProcedure=true while only reporting automated commandsRun with no manual/interactive checks. The skill requires manual checks but the features were library-level primitives without exposed CLI/API commands.",
-      "isSystemic": true
+      "suggestion": "Add to mors-global-worker skill a testing caveat: when writing CLI integration tests that use spawnSync/execSync against commands that start an in-process mock server, the synchronous child process blocks the Node.js event loop, preventing the mock server from responding. Use either (a) a separate background server process, (b) async child_process.exec with proper cleanup, or (c) pure unit tests with mocked I/O for such scenarios.",
+      "evidence": "Worker session 23898abf-e853-4d6a-a0be-8999d5600754 (relay-foundation-fix-cli-auth-regating-and-token-liveness) discovered and documented this pitfall in test/auth/cli-auth-gating.test.ts:106-109 and in handoff skillFeedback.suggestedChanges. The constraint is not currently documented in the skill.",
+      "isSystemic": false
     }
   ],
-  "rejectedObservations": [
-    {
-      "observation": "tsx not declared in devDependencies, making relay:dev non-deterministic",
-      "reason": "Non-blocking code issue already captured in relay-service-runtime-scaffold review. The relay:dev script is a development convenience and tsx availability is implied by the existing npm ecosystem; not worth a library/services.yaml update at this stage."
-    }
-  ],
-  "previousRound": null
+  "rejectedObservations": [],
+  "previousRound": ".factory/validation/relay-foundation/scrutiny/synthesis-round1.json"
 }

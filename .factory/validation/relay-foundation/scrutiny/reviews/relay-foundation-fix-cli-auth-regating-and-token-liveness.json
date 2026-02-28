@@ -1,0 +1,21 @@
+{
+  "featureId": "relay-foundation-fix-cli-auth-regating-and-token-liveness",
+  "reviewedAt": "2026-02-28T12:32:03Z",
+  "commitId": "dccb7b1",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix commit addresses the two prior blocking gaps: protected command dispatch is re-gated after logout via auth lifecycle guards, and status now validates token liveness and returns actionable re-auth guidance for expired/revoked sessions.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker hit and documented an important CLI-test pitfall (sync child-process calls deadlock in-process mock-server tests), but this nuance is not currently captured in the skill procedure.",
+      "evidence": "handoff.skillFeedback.suggestedChanges in /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T12-11-42-441Z__relay-foundation-fix-cli-auth-regating-and-token-liveness__23898abf-e853-4d6a-a0be-8999d5600754.json; test/auth/cli-auth-gating.test.ts:106-109 documents the spawnSync/execSync event-loop blocking behavior; .factory/skills/mors-global-worker/SKILL.md does not mention this testing constraint."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/relay-foundation/scrutiny/reviews/auth-device-flow-cli-and-session-management.json",
+  "summary": "Reviewed feature relay-foundation-fix-cli-auth-regating-and-token-liveness as a fix for auth-device-flow-cli-and-session-management. After examining the fix transcript skeleton, prior failed review, and both commit diffs (f8899ec and dccb7b1), the implementation is sufficient to resolve the original blocking findings."
+}
