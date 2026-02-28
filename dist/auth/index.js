@@ -1,9 +1,9 @@
 /**
  * Auth module barrel exports.
  *
- * Re-exports session, device-flow, and guard primitives for the mors auth lifecycle.
+ * Re-exports session, native auth, and guard primitives for the mors auth lifecycle.
  */
-export { saveSession, loadSession, clearSession, markAuthEnabled, isAuthEnabled, } from './session.js';
-export { requestDeviceCode, pollForToken, fetchGitHubUser, validateAuthConfig, authConfigFromEnv, DeviceFlowError, AuthConfigError, TokenExpiredError, } from './device-flow.js';
+export { saveSession, loadSession, clearSession, markAuthEnabled, isAuthEnabled, saveSigningKey, loadSigningKey, } from './session.js';
+export { validateInviteToken, generateInviteToken, generateSessionToken, verifySessionToken, generateSigningKey, InvalidInviteTokenError, DeviceKeyNotBootstrappedError, NativeAuthPrerequisiteError, } from './native.js';
 export { requireAuth, verifyTokenLiveness, NotAuthenticatedError, TokenLivenessError, } from './guards.js';
 //# sourceMappingURL=index.js.map

@@ -20,8 +20,11 @@ import {
   saveSession,
   clearSession,
   markAuthEnabled,
+  saveSigningKey,
   type AuthSession,
 } from '../../src/auth/session.js';
+
+import { generateSessionToken, generateSigningKey } from '../../src/auth/native.js';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const CLI = join(ROOT, 'dist', 'index.js');
@@ -30,14 +33,21 @@ function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'mors-cli-auth-test-'));
 }
 
+/** Shared signing key for test sessions — generated once per module. */
+const TEST_SIGNING_KEY = generateSigningKey();
+
 function makeSession(overrides?: Partial<AuthSession>): AuthSession {
+  const accountId = (overrides?.accountId as string | undefined) ?? 'acct_12345';
+  const deviceId = (overrides?.deviceId as string | undefined) ?? 'device-cli-001';
+  const signingKey = TEST_SIGNING_KEY;
+  const accessToken =
+    overrides?.accessToken ?? generateSessionToken({ accountId, deviceId, signingKey });
+
   return {
-    accessToken: 'gho_test_cli_token_abc',
+    accessToken,
     tokenType: 'bearer',
-    scope: 'read:user',
-    githubUserId: 12345,
-    githubLogin: 'testuser',
-    deviceId: 'device-cli-001',
+    accountId,
+    deviceId,
     createdAt: new Date().toISOString(),
     ...overrides,
   };
@@ -46,6 +56,7 @@ function makeSession(overrides?: Partial<AuthSession>): AuthSession {
 /**
  * Initialize a mors config directory with sentinel files so init gate passes.
  * This simulates a previously-initialized instance without running full init.
+ * Also saves the test signing key so native token verification works in CLI.
  */
 function simulateInit(configDir: string): void {
   mkdirSync(configDir, { recursive: true });
@@ -61,6 +72,8 @@ function simulateInit(configDir: string): void {
   writeFileSync(join(configDir, 'identity.key'), Buffer.alloc(32, 0xaa), { mode: 0o600 });
   // Create init sentinel
   writeFileSync(join(configDir, '.initialized'), '');
+  // Save signing key so native token verification works in CLI status checks
+  saveSigningKey(configDir, TEST_SIGNING_KEY);
 }
 
 /**
@@ -314,28 +327,19 @@ describe('CLI status token liveness (VAL-AUTH-006)', () => {
     }
   });
 
-  it('status --json reports authenticated with valid token', async () => {
-    const { server, port } = await startMockServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ id: 12345, login: 'testuser' }));
+  it('status --json reports authenticated with valid native token', async () => {
+    // Native auth verifies HMAC locally — no mock server needed.
+    saveSession(tempDir, makeSession());
+
+    const result = await runCliAsync(['status', '--json'], {
+      configDir: tempDir,
     });
 
-    try {
-      saveSession(tempDir, makeSession());
-
-      const result = await runCliAsync(['status', '--json'], {
-        configDir: tempDir,
-        env: { MORS_GITHUB_API_URL: `http://127.0.0.1:${port}` },
-      });
-
-      expect(result.exitCode).toBe(0);
-      const parsed = JSON.parse(result.stdout);
-      expect(parsed.status).toBe('authenticated');
-      expect(parsed.token_valid).toBe(true);
-      expect(parsed.github_user_id).toBe(12345);
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.status).toBe('authenticated');
+    expect(parsed.token_valid).toBe(true);
+    expect(parsed.account_id).toBe('acct_12345');
   });
 
   it('status --offline --json skips liveness check and reports local session', () => {
@@ -345,7 +349,7 @@ describe('CLI status token liveness (VAL-AUTH-006)', () => {
 
     const parsed = JSON.parse(result.stdout);
     expect(parsed.status).toBe('authenticated');
-    expect(parsed.github_user_id).toBe(12345);
+    expect(parsed.account_id).toBe('acct_12345');
     // Offline mode should not include token_valid field
     expect(parsed.token_valid).toBeUndefined();
   });
@@ -388,34 +392,28 @@ describe('CLI status determinism under concurrency', () => {
   });
 
   it('authenticated-path exit code and status are consistent across 7 concurrent runs', async () => {
-    const { server, port } = await startMockServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ id: 99999, login: 'concurrencyuser' }));
-    });
+    // Native auth verifies HMAC locally — no mock server needed.
+    saveSession(
+      tempDir,
+      makeSession({ accountId: 'acct_99999', deviceId: 'device-concurrencyuser' })
+    );
 
-    try {
-      saveSession(tempDir, makeSession({ githubUserId: 99999, githubLogin: 'concurrencyuser' }));
+    // Launch 7 concurrent status checks
+    const runs = Array.from({ length: 7 }, () =>
+      runCliAsync(['status', '--json'], {
+        configDir: tempDir,
+      })
+    );
 
-      // Launch 7 concurrent status checks against the same mock server
-      const runs = Array.from({ length: 7 }, () =>
-        runCliAsync(['status', '--json'], {
-          configDir: tempDir,
-          env: { MORS_GITHUB_API_URL: `http://127.0.0.1:${port}` },
-        })
-      );
+    const results = await Promise.all(runs);
 
-      const results = await Promise.all(runs);
-
-      for (const [i, result] of results.entries()) {
-        expect(result.exitCode, `run ${i}: expected exit code 0`).toBe(0);
-        expect(result.stdout, `run ${i}: expected non-empty stdout`).not.toBe('');
-        const parsed = JSON.parse(result.stdout);
-        expect(parsed.status, `run ${i}: expected authenticated status`).toBe('authenticated');
-        expect(parsed.token_valid, `run ${i}: expected token_valid true`).toBe(true);
-        expect(parsed.github_user_id, `run ${i}: expected correct user id`).toBe(99999);
-      }
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+    for (const [i, result] of results.entries()) {
+      expect(result.exitCode, `run ${i}: expected exit code 0`).toBe(0);
+      expect(result.stdout, `run ${i}: expected non-empty stdout`).not.toBe('');
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.status, `run ${i}: expected authenticated status`).toBe('authenticated');
+      expect(parsed.token_valid, `run ${i}: expected token_valid true`).toBe(true);
+      expect(parsed.account_id, `run ${i}: expected correct user id`).toBe('acct_99999');
     }
   });
 

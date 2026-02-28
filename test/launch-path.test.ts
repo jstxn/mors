@@ -14,13 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  readFileSync,
-  existsSync,
-  mkdtempSync,
-  writeFileSync,
-  rmSync,
-} from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -57,9 +51,7 @@ function runCli(
 
   try {
     const stdout = execSync(
-      options?.input
-        ? `echo "${options.input}" | node ${CLI} ${args}`
-        : `node ${CLI} ${args}`,
+      options?.input ? `echo "${options.input}" | node ${CLI} ${args}` : `node ${CLI} ${args}`,
       {
         cwd: ROOT,
         encoding: 'utf8',
@@ -164,7 +156,10 @@ describe('VAL-LAUNCH-001: GitHub shortcut npm install in clean environment', () 
     // dist/ is pre-built, user runs commands immediately
     const tmpDir = mkdtempSync(join(tmpdir(), 'mors-gh-install-'));
     try {
-      const env = { ...(process.env as Record<string, string>), MORS_CONFIG_DIR: join(tmpDir, 'cfg') };
+      const env = {
+        ...(process.env as Record<string, string>),
+        MORS_CONFIG_DIR: join(tmpDir, 'cfg'),
+      };
 
       // Step 1: Version (no init required)
       const v = execSync(`node ${CLI} --version`, { cwd: ROOT, encoding: 'utf8', env });
@@ -482,12 +477,12 @@ describe('VAL-LAUNCH-005: installed-command first-run operational flow', () => {
     expect(result.exitCode).toBe(1);
     const parsed = JSON.parse(result.stdout.trim());
     expect(parsed.status).toBe('error');
-    expect(parsed.error).toBe('missing_oauth_config');
+    expect(parsed.error).toBe('missing_prerequisites');
     expect(parsed.missing).toBeDefined();
     expect(Array.isArray(parsed.missing)).toBe(true);
     expect(parsed.missing.length).toBeGreaterThan(0);
     // Must contain actionable guidance
-    expect(parsed.message).toContain('environment variable');
+    expect(parsed.message).toMatch(/invite.token|device.keys|init/i);
   });
 
   it('init succeeds without login (local-only flow)', () => {
@@ -520,7 +515,7 @@ describe('VAL-LAUNCH-005: installed-command first-run operational flow', () => {
       env: { GITHUB_DEVICE_CLIENT_ID: '' },
     });
     expect(loginResult.exitCode).toBe(1);
-    expect(JSON.parse(loginResult.stdout.trim()).error).toBe('missing_oauth_config');
+    expect(JSON.parse(loginResult.stdout.trim()).error).toBe('missing_prerequisites');
 
     // Step 2: Init (succeeds — local-only operation)
     const initResult = runCli('init --json', { configDir });

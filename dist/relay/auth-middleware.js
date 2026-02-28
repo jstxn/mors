@@ -3,7 +3,7 @@
  *
  * Provides:
  * - Token extraction from Authorization: Bearer <token> header
- * - Pluggable token verification (GitHub API in production, stub in tests)
+ * - Pluggable token verification (native HMAC tokens in production, stub in tests)
  * - Principal identity extraction from validated tokens
  * - Object-level authorization via participant store
  *
@@ -112,38 +112,44 @@ export function parseConversationRoute(url) {
     };
 }
 /**
- * Default token verifier that calls the GitHub API.
+ * Create a native token verifier that validates HMAC-signed session tokens.
  *
- * Uses the access token to fetch /user and extract the stable numeric ID.
- * Returns null for invalid/expired tokens (401 from GitHub).
+ * Uses the signing key to verify the session token signature and extract
+ * the principal identity (accountId + deviceId).
+ *
+ * @param signingKey - The HMAC signing key for token verification.
+ * @returns A TokenVerifier function.
  */
-export function createGitHubTokenVerifier(apiBaseUrl) {
-    const baseUrl = apiBaseUrl ?? 'https://api.github.com';
+export function createNativeTokenVerifier(signingKey) {
+    // Lazy import to avoid circular dependency at module level
+    let _verifySessionToken = null;
     return async (token) => {
         try {
-            const response = await fetch(`${baseUrl}/user`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: 'application/json',
-                    'User-Agent': 'mors-relay/0.1.0',
-                },
-            });
-            if (response.status === 401)
-                return null;
-            if (!response.ok)
-                return null;
-            const data = await response.json();
-            if (typeof data['id'] !== 'number' || typeof data['login'] !== 'string') {
-                return null;
+            if (!_verifySessionToken) {
+                const mod = await import('../auth/native.js');
+                _verifySessionToken = mod.verifySessionToken;
             }
+            const payload = _verifySessionToken(token, signingKey);
+            if (!payload)
+                return null;
             return {
-                githubUserId: data['id'],
-                githubLogin: data['login'],
+                accountId: payload.accountId,
+                deviceId: payload.deviceId,
             };
         }
         catch {
             return null;
         }
+    };
+}
+/**
+ * @deprecated Use createNativeTokenVerifier instead. Kept for backward compatibility
+ * during transition period only.
+ */
+export function createGitHubTokenVerifier(_apiBaseUrl) {
+    // Return a verifier that always rejects — GitHub auth is no longer supported
+    return async (_token) => {
+        return null;
     };
 }
 //# sourceMappingURL=auth-middleware.js.map

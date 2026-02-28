@@ -12,7 +12,11 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
-import { createRelayServer, type RelayServer, type RelayServerOptions } from '../../src/relay/server.js';
+import {
+  createRelayServer,
+  type RelayServer,
+  type RelayServerOptions,
+} from '../../src/relay/server.js';
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 import type { RelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier, AuthPrincipal } from '../../src/relay/auth-middleware.js';
@@ -38,8 +42,8 @@ function testConfig(): RelayConfig {
 /** Stub token verifier that maps known tokens to principals. */
 function stubTokenVerifier(): TokenVerifier {
   const principals = new Map<string, AuthPrincipal>([
-    ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-    ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+    ['token-alice', { accountId: 'acct_1001', deviceId: 'device-alice' }],
+    ['token-bob', { accountId: 'acct_1002', deviceId: 'device-bob' }],
   ]);
   return async (token: string) => principals.get(token) ?? null;
 }
@@ -71,7 +75,7 @@ function parseSSEChunk(raw: string): SSEEvent[] {
 
       if (field === 'id') event.id = value;
       if (field === 'event') event.event = value;
-      if (field === 'data') event.data = (event.data ? event.data + '\n' + value : value);
+      if (field === 'data') event.data = event.data ? event.data + '\n' + value : value;
     }
     if (event.event || event.data || event.id) {
       events.push(event);
@@ -150,8 +154,12 @@ function openSSE(
 
   let resolveStatus: (code: number) => void;
   let resolveHeaders: (h: http.IncomingHttpHeaders) => void;
-  const statusCode = new Promise<number>((r) => { resolveStatus = r; });
-  const headers = new Promise<http.IncomingHttpHeaders>((r) => { resolveHeaders = r; });
+  const statusCode = new Promise<number>((r) => {
+    resolveStatus = r;
+  });
+  const headers = new Promise<http.IncomingHttpHeaders>((r) => {
+    resolveHeaders = r;
+  });
 
   req = http.request(
     {
@@ -207,7 +215,7 @@ function openSSE(
         reject(
           new Error(
             `Timed out waiting for ${count} SSE events (got ${events.length} within ${timeoutMs}ms). ` +
-            `Raw chunks: ${JSON.stringify(rawChunks)}`
+              `Raw chunks: ${JSON.stringify(rawChunks)}`
           )
         );
       }, timeoutMs);
@@ -255,7 +263,7 @@ describe('SSE watch connection and event shape', () => {
       logger: () => {},
       tokenVerifier: stubTokenVerifier(),
       participantStore: {
-        async isParticipant(conversationId: string, userId: number) {
+        async isParticipant(conversationId: string, userId: string) {
           return messageStore.isParticipant(conversationId, userId);
         },
       },
@@ -305,8 +313,8 @@ describe('SSE watch connection and event shape', () => {
         const evts = await sse.waitForEvents(1);
         expect(evts[0].event).toBe('connected');
         const data = parseEventData(evts[0]);
-        expect(data.github_user_id).toBe(1001);
-        expect(data.github_login).toBe('alice');
+        expect(data.account_id).toBe('acct_1001');
+        expect(data.device_id).toBe('device-alice');
       } finally {
         sse.close();
       }
@@ -340,8 +348,8 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(1);
 
         // Send a message from Bob to Alice
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Hello Alice',
           subject: 'Greetings',
         });
@@ -361,8 +369,8 @@ describe('SSE watch connection and event shape', () => {
         expect(data.thread_id).toBeDefined();
         expect(String(data.thread_id).startsWith('thr_')).toBe(true);
         expect(data.in_reply_to).toBeNull();
-        expect(data.sender_id).toBe(1002);
-        expect(data.recipient_id).toBe(1001);
+        expect(data.sender_id).toBe('acct_1002');
+        expect(data.recipient_id).toBe('acct_1001');
         expect(data.timestamp).toBeDefined();
       } finally {
         sse.close();
@@ -375,8 +383,8 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(1);
 
         // Send a root message from Bob to Alice
-        const root = messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        const root = messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Root message',
         });
 
@@ -384,8 +392,8 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(2);
 
         // Send a reply from Alice to Bob
-        messageStore.send(1001, 'alice', {
-          recipientId: 1002,
+        messageStore.send('acct_1001', 'alice', {
+          recipientId: 'acct_1002',
           body: 'Reply to root',
           inReplyTo: root.message.id,
         });
@@ -403,8 +411,8 @@ describe('SSE watch connection and event shape', () => {
         expect(data.message_id).toBeDefined();
         expect(data.thread_id).toBe(root.message.thread_id);
         expect(data.in_reply_to).toBe(root.message.id);
-        expect(data.sender_id).toBe(1001);
-        expect(data.recipient_id).toBe(1002);
+        expect(data.sender_id).toBe('acct_1001');
+        expect(data.recipient_id).toBe('acct_1002');
         expect(data.timestamp).toBeDefined();
       } finally {
         sse.close();
@@ -417,8 +425,8 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(1);
 
         // Send a message from Bob to Alice
-        const sent = messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        const sent = messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Please ack me',
         });
 
@@ -426,7 +434,7 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(2);
 
         // Alice acks the message
-        messageStore.ack(sent.message.id, 1001);
+        messageStore.ack(sent.message.id, 'acct_1001');
 
         // Wait for message_acked event
         const evts = await sse.waitForEvents(3);
@@ -453,8 +461,8 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(1);
 
         // Send a message from Bob to Alice
-        const sent = messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        const sent = messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Please read me',
         });
 
@@ -462,7 +470,7 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(2);
 
         // Alice reads the message
-        messageStore.read(sent.message.id, 1001);
+        messageStore.read(sent.message.id, 'acct_1001');
 
         // Wait for message_read event
         const evts = await sse.waitForEvents(3);
@@ -487,12 +495,12 @@ describe('SSE watch connection and event shape', () => {
         await sse.waitForEvents(1);
 
         // Create two messages
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'First message',
         });
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Second message',
         });
 
@@ -517,8 +525,8 @@ describe('SSE watch connection and event shape', () => {
         await sseBob.waitForEvents(1); // connected
 
         // Bob sends to Alice — both should see it
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Hello Alice from Bob',
         });
 
@@ -541,9 +549,9 @@ describe('SSE watch connection and event shape', () => {
       try {
         await sseAlice.waitForEvents(1); // connected
 
-        // Bob sends to someone else (user 9999) — Alice should NOT see this
-        messageStore.send(1002, 'bob', {
-          recipientId: 9999,
+        // Bob sends to someone else (user 'acct_9999') — Alice should NOT see this
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_9999',
           body: 'Hello stranger',
         });
 

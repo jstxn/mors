@@ -23,16 +23,16 @@ import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
-const ALICE = { token: 'token-alice', userId: 1001, login: 'alice' };
-const BOB = { token: 'token-bob', userId: 1002, login: 'bob' };
-const EVE = { token: 'token-eve', userId: 1003, login: 'eve' };
+const ALICE = { token: 'token-alice', userId: 'acct_1001', login: 'alice' };
+const BOB = { token: 'token-bob', userId: 'acct_1002', login: 'bob' };
+const EVE = { token: 'token-eve', userId: 'acct_1003', login: 'eve' };
 
 /** Stub token verifier mapping test tokens to principals. */
 const stubVerifier: TokenVerifier = async (token: string) => {
-  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
-    [ALICE.token]: { githubUserId: ALICE.userId, githubLogin: ALICE.login },
-    [BOB.token]: { githubUserId: BOB.userId, githubLogin: BOB.login },
-    [EVE.token]: { githubUserId: EVE.userId, githubLogin: EVE.login },
+  const map: Record<string, { accountId: string; deviceId: string }> = {
+    [ALICE.token]: { accountId: ALICE.userId, deviceId: ALICE.login },
+    [BOB.token]: { accountId: BOB.userId, deviceId: BOB.login },
+    [EVE.token]: { accountId: EVE.userId, deviceId: EVE.login },
   };
   return map[token] ?? null;
 };
@@ -83,8 +83,8 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
     const config = loadRelayConfig({ MORS_RELAY_PORT: String(port), MORS_RELAY_HOST: '127.0.0.1' });
 
     const participantStore: ParticipantStore = {
-      async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-        return messageStore.isParticipant(conversationId, githubUserId);
+      async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+        return messageStore.isParticipant(conversationId, accountId);
       },
     };
 
@@ -160,26 +160,28 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
     });
   });
 
-  // ── Spoofed sender_login rejection ────────────────────────────────
+  // ── Spoofed sender_login is ignored (server derives from auth principal) ──
 
-  describe('spoofed sender_login rejection', () => {
-    it('rejects send with sender_login that does not match authenticated principal', async () => {
+  describe('sender_login in body is ignored (server derives from auth principal)', () => {
+    it('ignores mismatched sender_login in body and derives from auth principal', async () => {
       const { status, body } = await relayFetch(port, '/messages', {
         method: 'POST',
         token: ALICE.token,
         body: {
           recipient_id: BOB.userId,
-          body: 'Spoofed login',
-          sender_login: 'eve', // Alice claims to have Eve's login
+          body: 'Ignored login field',
+          sender_login: 'eve', // Alice sends with Eve's login — server ignores it
         },
       });
 
-      expect(status).toBe(403);
-      const result = body as Record<string, unknown>;
-      expect(result['error']).toBe('forbidden');
+      // Server ignores sender_login in body; derives from auth principal
+      expect(status).toBe(201);
+      const msg = body as Record<string, unknown>;
+      expect(msg['sender_id']).toBe(ALICE.userId);
+      expect(msg['sender_login']).toBe(ALICE.userId);
     });
 
-    it('rejects send with both spoofed sender_id and sender_login', async () => {
+    it('rejects send with spoofed sender_id even when sender_login also spoofed', async () => {
       const { status } = await relayFetch(port, '/messages', {
         method: 'POST',
         token: ALICE.token,
@@ -191,6 +193,7 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
         },
       });
 
+      // sender_id mismatch triggers 403; sender_login is irrelevant
       expect(status).toBe(403);
     });
   });
@@ -212,23 +215,24 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
       expect(status).toBe(201);
       const msg = body as Record<string, unknown>;
       expect(msg['sender_id']).toBe(ALICE.userId);
-      expect(msg['sender_login']).toBe(ALICE.login);
+      expect(msg['sender_login']).toBe(ALICE.userId);
     });
 
-    it('accepts send with sender_login matching authenticated principal', async () => {
+    it('accepts send with sender_login in body (ignored, uses auth principal)', async () => {
       const { status, body } = await relayFetch(port, '/messages', {
         method: 'POST',
         token: ALICE.token,
         body: {
           recipient_id: BOB.userId,
           body: 'Correct sender_login',
-          sender_login: 'alice', // Matches auth principal
+          sender_login: 'alice', // Body sender_login is ignored by server
         },
       });
 
       expect(status).toBe(201);
       const msg = body as Record<string, unknown>;
-      expect(msg['sender_login']).toBe(ALICE.login);
+      // Server derives sender_login from auth principal, not request body
+      expect(msg['sender_login']).toBe(ALICE.userId);
     });
 
     it('accepts send with both matching sender_id and sender_login', async () => {
@@ -239,7 +243,7 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
           recipient_id: BOB.userId,
           body: 'Both match',
           sender_id: ALICE.userId,
-          sender_login: 'alice',
+          sender_login: ALICE.userId,
         },
       });
 
@@ -263,7 +267,7 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
       expect(status).toBe(201);
       const msg = body as Record<string, unknown>;
       expect(msg['sender_id']).toBe(ALICE.userId);
-      expect(msg['sender_login']).toBe(ALICE.login);
+      expect(msg['sender_login']).toBe(ALICE.userId);
     });
 
     it('delivered messages always reflect authenticated principal identity', async () => {
@@ -292,11 +296,11 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
 
       expect(aliceMsg).toBeDefined();
       expect(aliceMsg?.['sender_id']).toBe(ALICE.userId);
-      expect(aliceMsg?.['sender_login']).toBe(ALICE.login);
+      expect(aliceMsg?.['sender_login']).toBe(ALICE.userId);
 
       expect(eveMsg).toBeDefined();
       expect(eveMsg?.['sender_id']).toBe(EVE.userId);
-      expect(eveMsg?.['sender_login']).toBe(EVE.login);
+      expect(eveMsg?.['sender_login']).toBe(EVE.userId);
     });
   });
 
@@ -352,7 +356,7 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
       expect(status).toBe(201);
       const reply = body as Record<string, unknown>;
       expect(reply['sender_id']).toBe(BOB.userId);
-      expect(reply['sender_login']).toBe(BOB.login);
+      expect(reply['sender_login']).toBe(BOB.userId);
       expect(reply['thread_id']).toBe(threadId);
       expect(reply['in_reply_to']).toBe(rootId);
     });
@@ -361,8 +365,9 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
   // ── Edge cases ────────────────────────────────────────────────────
 
   describe('edge cases', () => {
-    it('rejects sender_id=0 (invalid spoofed value)', async () => {
-      const { status } = await relayFetch(port, '/messages', {
+    it('ignores sender_id=0 (non-string, treated as absent)', async () => {
+      // sender_id=0 is not a string, so server ignores it (derives from auth principal)
+      const { status, body } = await relayFetch(port, '/messages', {
         method: 'POST',
         token: ALICE.token,
         body: {
@@ -372,24 +377,24 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
         },
       });
 
-      expect(status).toBe(403);
+      expect(status).toBe(201);
+      const msg = body as Record<string, unknown>;
+      expect(msg['sender_id']).toBe(ALICE.userId);
     });
 
-    it('ignores non-number sender_id (treated as absent, not a spoof)', async () => {
-      // A string sender_id is not a valid spoof attempt — it's just junk that should be ignored
-      const { status, body } = await relayFetch(port, '/messages', {
+    it('rejects mismatched string sender_id (spoof attempt)', async () => {
+      // A string sender_id that doesn't match the auth principal is a spoof
+      const { status } = await relayFetch(port, '/messages', {
         method: 'POST',
         token: ALICE.token,
         body: {
           recipient_id: BOB.userId,
           body: 'String sender_id',
-          sender_id: 'not-a-number',
+          sender_id: 'not-alice',
         },
       });
 
-      expect(status).toBe(201);
-      const msg = body as Record<string, unknown>;
-      expect(msg['sender_id']).toBe(ALICE.userId);
+      expect(status).toBe(403);
     });
 
     it('ignores non-string sender_login (treated as absent, not a spoof)', async () => {
@@ -406,7 +411,7 @@ describe('relay sender identity binding and spoof prevention (VAL-RELAY-008)', (
 
       expect(status).toBe(201);
       const msg = body as Record<string, unknown>;
-      expect(msg['sender_login']).toBe(ALICE.login);
+      expect(msg['sender_login']).toBe(ALICE.userId);
     });
 
     it('no spoofed delivery even with valid-looking but mismatched sender fields', async () => {

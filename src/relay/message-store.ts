@@ -30,12 +30,12 @@ export interface RelayMessage {
   thread_id: string;
   /** Parent message ID if this is a reply, null for root messages. */
   in_reply_to: string | null;
-  /** Sender GitHub user ID (from auth principal). */
-  sender_id: number;
-  /** Sender GitHub login (informational). */
+  /** Sender account ID (from auth principal). */
+  sender_id: string;
+  /** Sender display name (informational). */
   sender_login: string;
-  /** Recipient GitHub user ID. */
-  recipient_id: number;
+  /** Recipient account ID. */
+  recipient_id: string;
   /** Message body (markdown). */
   body: string;
   /** Optional subject line. */
@@ -54,8 +54,8 @@ export interface RelayMessage {
 
 /** Options for sending a message via relay. */
 export interface RelaySendOptions {
-  /** Recipient GitHub user ID. */
-  recipientId: number;
+  /** Recipient account ID. */
+  recipientId: string;
   /** Message body (markdown). */
   body: string;
   /** Optional subject line. */
@@ -120,10 +120,10 @@ export interface RelayStreamEvent {
   thread_id: string;
   /** Parent message ID (present for replies, null otherwise). */
   in_reply_to: string | null;
-  /** Sender GitHub user ID. */
-  sender_id: number;
-  /** Recipient GitHub user ID. */
-  recipient_id: number;
+  /** Sender account ID. */
+  sender_id: string;
+  /** Recipient account ID. */
+  recipient_id: string;
   /** ISO-8601 timestamp of when the event occurred. */
   timestamp: string;
 }
@@ -143,12 +143,12 @@ export type RelayStreamListener = (event: RelayStreamEvent) => void;
 export interface RelayMessageStoreSnapshot {
   /** All messages keyed by ID. */
   messages: Array<[string, RelayMessage]>;
-  /** Inbox index: recipient userId → array of message IDs. */
-  inboxIndex: Array<[number, string[]]>;
-  /** Sender index: sender userId → array of message IDs. */
-  senderIndex: Array<[number, string[]]>;
-  /** Conversation participants: conversationKey → array of user IDs. */
-  participants: Array<[string, number[]]>;
+  /** Inbox index: recipient accountId → array of message IDs. */
+  inboxIndex: Array<[string, string[]]>;
+  /** Sender index: sender accountId → array of message IDs. */
+  senderIndex: Array<[string, string[]]>;
+  /** Conversation participants: conversationKey → array of account IDs. */
+  participants: Array<[string, string[]]>;
   /** Dedupe index: compositeKey → message ID. */
   dedupeIndex: Array<[string, string]>;
   /** Ordered event log for SSE cursor resume. */
@@ -195,11 +195,11 @@ export class RelayMessageStore {
   /** All messages by ID. */
   private messages = new Map<string, RelayMessage>();
   /** Messages by recipient_id for inbox queries. */
-  private inboxIndex = new Map<number, Set<string>>();
+  private inboxIndex = new Map<string, Set<string>>();
   /** Messages by sender_id for sender view queries. */
-  private senderIndex = new Map<number, Set<string>>();
-  /** Conversation participants: conversationKey → Set<githubUserId>. */
-  private participants = new Map<string, Set<number>>();
+  private senderIndex = new Map<string, Set<string>>();
+  /** Conversation participants: conversationKey → Set<accountId>. */
+  private participants = new Map<string, Set<string>>();
   /**
    * Dedupe index: maps (sender_id, dedupe_key) → message_id.
    * Key format: `${senderId}:${dedupeKey}` for account-scoped deduplication.
@@ -217,7 +217,7 @@ export class RelayMessageStore {
   private eventIdIndex = new Map<string, number>();
 
   /** Build a dedupe index key scoped to the sender. */
-  private dedupeIndexKey(senderId: number, dedupeKey: string): string {
+  private dedupeIndexKey(senderId: string, dedupeKey: string): string {
     return `${senderId}:${dedupeKey}`;
   }
 
@@ -232,12 +232,12 @@ export class RelayMessageStore {
    * with the same key return the canonical message without creating a
    * duplicate. The dedupe scope is per-sender (sender_id + dedupe_key).
    *
-   * @param senderId - Authenticated sender's GitHub user ID.
-   * @param senderLogin - Authenticated sender's GitHub login.
+   * @param senderId - Authenticated sender's account ID.
+   * @param senderLogin - Authenticated sender's display name.
    * @param options - Send options.
    * @returns A RelaySendResult with the message and whether it was newly created.
    */
-  send(senderId: number, senderLogin: string, options: RelaySendOptions): RelaySendResult {
+  send(senderId: string, senderLogin: string, options: RelaySendOptions): RelaySendResult {
     const { recipientId, body, subject, inReplyTo, dedupeKey } = options;
 
     // Check dedupe index first — if this key was already used by this sender,
@@ -329,7 +329,7 @@ export class RelayMessageStore {
 
     // Auto-register both sender and recipient as conversation participants
     const convKey = this.conversationKey(message.thread_id);
-    const convSet = this.participants.get(convKey) ?? new Set<number>();
+    const convSet = this.participants.get(convKey) ?? new Set<string>();
     if (!this.participants.has(convKey)) {
       this.participants.set(convKey, convSet);
     }
@@ -349,11 +349,11 @@ export class RelayMessageStore {
    * Returns messages where the user is the recipient, ordered by
    * created_at descending (newest first).
    *
-   * @param userId - GitHub user ID to list inbox for.
+   * @param userId - Account ID to list inbox for.
    * @param options - Optional inbox filter options.
    * @returns Array of relay messages.
    */
-  inbox(userId: number, options?: RelayInboxOptions): RelayMessage[] {
+  inbox(userId: string, options?: RelayInboxOptions): RelayMessage[] {
     const messageIds = this.inboxIndex.get(userId);
     if (!messageIds) return [];
 
@@ -374,10 +374,10 @@ export class RelayMessageStore {
   /**
    * Get messages sent by a user (sender view).
    *
-   * @param userId - GitHub user ID.
+   * @param userId - Account ID.
    * @returns Array of relay messages sent by this user.
    */
-  sentBy(userId: number): RelayMessage[] {
+  sentBy(userId: string): RelayMessage[] {
     const messageIds = this.senderIndex.get(userId);
     if (!messageIds) return [];
 
@@ -394,12 +394,12 @@ export class RelayMessageStore {
    * Idempotent: re-reading returns the same message without re-setting read_at.
    *
    * @param messageId - Message ID to read.
-   * @param userId - GitHub user ID performing the read (for authorization).
+   * @param userId - Account ID performing the read (for authorization).
    * @returns Read result with the message and whether this was the first read.
    * @throws RelayMessageNotFoundError if message doesn't exist.
    * @throws RelayUnauthorizedError if user is not the recipient.
    */
-  read(messageId: string, userId: number): RelayReadResult {
+  read(messageId: string, userId: string): RelayReadResult {
     const message = this.messages.get(messageId);
     if (!message) {
       throw new RelayMessageNotFoundError(messageId);
@@ -436,12 +436,12 @@ export class RelayMessageStore {
    * Idempotent: re-acking returns the same result.
    *
    * @param messageId - Message ID to ack.
-   * @param userId - GitHub user ID performing the ack (for authorization).
+   * @param userId - Account ID performing the ack (for authorization).
    * @returns Ack result with the message and whether this was the first ack.
    * @throws RelayMessageNotFoundError if message doesn't exist.
    * @throws RelayUnauthorizedError if user is not the recipient.
    */
-  ack(messageId: string, userId: number): RelayAckResult {
+  ack(messageId: string, userId: string): RelayAckResult {
     const message = this.messages.get(messageId);
     if (!message) {
       throw new RelayMessageNotFoundError(messageId);
@@ -483,10 +483,10 @@ export class RelayMessageStore {
    * Check if a user is a participant in a conversation (thread).
    *
    * @param threadId - Thread ID to check.
-   * @param userId - GitHub user ID to check.
+   * @param userId - Account ID to check.
    * @returns true if the user is a participant.
    */
-  isParticipant(threadId: string, userId: number): boolean {
+  isParticipant(threadId: string, userId: string): boolean {
     const convKey = this.conversationKey(threadId);
     const members = this.participants.get(convKey);
     return members?.has(userId) ?? false;
@@ -496,10 +496,10 @@ export class RelayMessageStore {
    * Check if a user is a participant in a message's conversation.
    *
    * @param messageId - Message ID.
-   * @param userId - GitHub user ID.
+   * @param userId - Account ID.
    * @returns true if the user is a participant of the message's thread.
    */
-  isMessageParticipant(messageId: string, userId: number): boolean {
+  isMessageParticipant(messageId: string, userId: string): boolean {
     const message = this.messages.get(messageId);
     if (!message) return false;
     return this.isParticipant(message.thread_id, userId);

@@ -35,16 +35,20 @@ import {
   type KeyExchangeSession,
 } from './e2ee/key-exchange.js';
 import { ContractValidationError } from './contract/errors.js';
-import { saveSession, loadSession, clearSession, markAuthEnabled } from './auth/session.js';
 import {
-  requestDeviceCode,
-  pollForToken,
-  fetchGitHubUser,
-  validateAuthConfig,
-  authConfigFromEnv,
-  DeviceFlowError,
-  TokenExpiredError,
-} from './auth/device-flow.js';
+  saveSession,
+  loadSession,
+  clearSession,
+  markAuthEnabled,
+  saveSigningKey,
+  loadSigningKey,
+} from './auth/session.js';
+import {
+  validateInviteToken,
+  generateSessionToken,
+  generateSigningKey,
+  NativeAuthPrerequisiteError,
+} from './auth/native.js';
 import {
   requireAuth,
   verifyTokenLiveness,
@@ -52,6 +56,7 @@ import {
   TokenLivenessError,
 } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { execFileSync as execFileSyncImport } from 'node:child_process';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
@@ -491,13 +496,9 @@ function runRemoteSend(
     return;
   }
 
-  const recipientId = parseInt(opts.to, 10);
-  if (isNaN(recipientId)) {
-    formatError(
-      'Remote send requires --to <numeric_recipient_id> (GitHub user ID)',
-      json,
-      'validation_error'
-    );
+  const recipientId = opts.to.trim();
+  if (!recipientId) {
+    formatError('Remote send requires --to <recipient_account_id>', json, 'validation_error');
     process.exitCode = 1;
     return;
   }
@@ -1135,14 +1136,10 @@ function runRemoteReply(
     return;
   }
 
-  // For remote reply, --to must be a numeric recipient ID
-  const recipientId = opts.to ? parseInt(opts.to, 10) : NaN;
-  if (isNaN(recipientId)) {
-    formatError(
-      'Remote reply requires --to <numeric_recipient_id> (GitHub user ID)',
-      json,
-      'validation_error'
-    );
+  // For remote reply, --to must be a recipient account ID
+  const recipientId = opts.to?.trim() ?? '';
+  if (!recipientId) {
+    formatError('Remote reply requires --to <recipient_account_id>', json, 'validation_error');
     process.exitCode = 1;
     return;
   }
@@ -1481,8 +1478,8 @@ function runRemoteWatch(configDir: string, json: boolean): void {
  */
 function formatRemoteWatchEvent(event: RemoteWatchEvent): void {
   if (event.event === 'connected') {
-    const login = event.data.github_login ?? 'unknown';
-    console.log(`✓ Connected to remote watch as ${login}`);
+    const accountId = event.data.account_id ?? 'unknown';
+    console.log(`✓ Connected to remote watch (account: ${accountId})`);
     return;
   }
 
@@ -1574,10 +1571,10 @@ function runSetupShellCommand(_args: string[]): void {
     });
 }
 
-// ── Login command (VAL-AUTH-001, VAL-AUTH-002, VAL-AUTH-007) ─────────
+// ── Login command (VAL-AUTH-001, VAL-AUTH-002, VAL-AUTH-007, VAL-AUTH-011) ─
 
 function runLogin(_args: string[]): void {
-  const { flags } = parseArgs(_args);
+  const { flags, positional } = parseArgs(_args);
   const json = 'json' in flags;
 
   const configDir = getConfigDir();
@@ -1589,155 +1586,128 @@ function runLogin(_args: string[]): void {
       console.log(
         JSON.stringify({
           status: 'already_authenticated',
-          github_user_id: existing.githubUserId,
-          github_login: existing.githubLogin,
+          account_id: existing.accountId,
           device_id: existing.deviceId,
         })
       );
     } else {
-      console.log(`Already logged in as ${existing.githubLogin} (ID: ${existing.githubUserId})`);
+      console.log(`Already logged in (account: ${existing.accountId})`);
       console.log('Run "mors logout" first to switch accounts.');
     }
     return;
   }
 
-  // Validate OAuth config (VAL-AUTH-007)
-  const authConfig = authConfigFromEnv();
-  const validation = validateAuthConfig(authConfig);
+  // ── Prerequisites check (VAL-AUTH-007, VAL-AUTH-011) ──────────
+  const missing: string[] = [];
 
-  if (!validation.valid) {
+  // Check invite token
+  const inviteToken =
+    (flags['invite-token'] as string | undefined) ??
+    positional[0] ??
+    process.env['MORS_INVITE_TOKEN'];
+
+  if (!inviteToken) {
+    missing.push('invite_token');
+  }
+
+  // Check device keys bootstrap
+  const keysDir = getDeviceKeysDir(configDir);
+  const hasDeviceKeys =
+    existsSyncCheck(`${keysDir}/device.pub`) && existsSyncCheck(`${keysDir}/device.key`);
+  if (!hasDeviceKeys) {
+    missing.push('device_keys');
+  }
+
+  // Check init
+  const isInited = existsSyncCheck(`${configDir}/.initialized`);
+  if (!isInited) {
+    missing.push('initialized');
+  }
+
+  if (missing.length > 0) {
+    process.exitCode = 1;
+    const prereqError = new NativeAuthPrerequisiteError(missing);
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'error',
+          error: 'missing_prerequisites',
+          missing,
+          message: prereqError.message,
+        })
+      );
+    } else {
+      console.error(`Error: ${prereqError.message}`);
+    }
+    return;
+  }
+
+  // Validate invite token format (VAL-AUTH-011)
+  const inviteResult = validateInviteToken(inviteToken);
+  if (!inviteResult.valid) {
     process.exitCode = 1;
     if (json) {
       console.log(
         JSON.stringify({
           status: 'error',
-          error: 'missing_oauth_config',
-          missing: validation.missing,
-          message:
-            'Required OAuth configuration is missing. Set the following environment variables: ' +
-            validation.missing.join(', '),
+          error: 'invalid_invite_token',
+          message: inviteResult.reason ?? 'Invalid invite token.',
         })
       );
     } else {
-      console.error('Error: Required OAuth configuration is missing.');
-      console.error('Set the following environment variables:');
-      for (const m of validation.missing) {
-        console.error(`  - ${m}`);
-      }
+      console.error(`Error: ${inviteResult.reason ?? 'Invalid invite token.'}`);
+      console.error('Obtain a valid invite token from an existing mors user or admin.');
     }
     return;
   }
 
-  // Start device flow
-  runDeviceFlow(authConfig, configDir, json);
+  // Generate device ID for this installation (VAL-AUTH-009)
+  const deviceId = `device-${randomUUID()}`;
+
+  // Generate or load signing key for session tokens
+  let signingKey = loadSigningKey(configDir);
+  if (!signingKey) {
+    signingKey = generateSigningKey();
+    saveSigningKey(configDir, signingKey);
+  }
+
+  // Generate session token (HMAC-signed, VAL-AUTH-002)
+  const sessionToken = generateSessionToken({
+    accountId: inviteResult.accountId,
+    deviceId,
+    signingKey,
+  });
+
+  // Mark auth as enabled so logout re-gates protected commands (VAL-AUTH-005)
+  markAuthEnabled(configDir);
+
+  // Persist session (VAL-AUTH-002)
+  saveSession(configDir, {
+    accessToken: sessionToken,
+    tokenType: 'bearer',
+    accountId: inviteResult.accountId,
+    deviceId,
+    createdAt: new Date().toISOString(),
+  });
+
+  if (json) {
+    console.log(
+      JSON.stringify({
+        status: 'authenticated',
+        account_id: inviteResult.accountId,
+        device_id: deviceId,
+      })
+    );
+  } else {
+    console.log('\n✅ Authenticated with mors-native identity');
+    console.log(`Account: ${inviteResult.accountId}`);
+    console.log(`Device: ${deviceId}`);
+  }
 }
 
-function runDeviceFlow(
-  authConfig: ReturnType<typeof authConfigFromEnv>,
-  configDir: string,
-  json: boolean
-): void {
-  requestDeviceCode(authConfig)
-    .then((deviceCode) => {
-      // Display verification info to user (VAL-AUTH-001)
-      if (json) {
-        console.log(
-          JSON.stringify({
-            status: 'awaiting_authorization',
-            verification_uri: deviceCode.verification_uri,
-            user_code: deviceCode.user_code,
-            expires_in: deviceCode.expires_in,
-          })
-        );
-      } else {
-        console.log('\n🔐 GitHub Device Authorization');
-        console.log('─'.repeat(40));
-        console.log(`Open: ${deviceCode.verification_uri}`);
-        console.log(`Code: ${deviceCode.user_code}`);
-        console.log(
-          `\nWaiting for authorization (expires in ${Math.floor(deviceCode.expires_in / 60)}m)...`
-        );
-      }
-
-      // Poll for token (VAL-AUTH-001)
-      return pollForToken(authConfig, deviceCode.device_code, {
-        intervalMs: deviceCode.interval * 1000,
-        expiresInMs: deviceCode.expires_in * 1000,
-        onPoll: (state) => {
-          if (!json && state === 'pending') {
-            process.stdout.write('.');
-          }
-        },
-      });
-    })
-    .then(async (tokenResponse) => {
-      if (!json) {
-        console.log('\n✓ Authorization received. Fetching account info...');
-      }
-
-      // Fetch GitHub user for stable identity binding (VAL-AUTH-008)
-      const user = await fetchGitHubUser(tokenResponse.access_token);
-
-      // Generate device ID for this installation (VAL-AUTH-009)
-      const deviceId = `device-${randomUUID()}`;
-
-      // Mark auth as enabled so logout re-gates protected commands (VAL-AUTH-005)
-      markAuthEnabled(configDir);
-
-      // Persist session (VAL-AUTH-002)
-      saveSession(configDir, {
-        accessToken: tokenResponse.access_token,
-        tokenType: tokenResponse.token_type,
-        scope: tokenResponse.scope,
-        githubUserId: user.id,
-        githubLogin: user.login,
-        deviceId,
-        createdAt: new Date().toISOString(),
-      });
-
-      if (json) {
-        console.log(
-          JSON.stringify({
-            status: 'authenticated',
-            github_user_id: user.id,
-            github_login: user.login,
-            device_id: deviceId,
-          })
-        );
-      } else {
-        console.log(`\n✅ Logged in as ${user.login} (ID: ${user.id})`);
-        console.log(`Device: ${deviceId}`);
-      }
-    })
-    .catch((err: unknown) => {
-      process.exitCode = 1;
-      if (err instanceof DeviceFlowError || err instanceof TokenExpiredError) {
-        if (json) {
-          console.log(
-            JSON.stringify({
-              status: 'error',
-              error: err.name,
-              message: err.message,
-            })
-          );
-        } else {
-          console.error(`Error: ${err.message}`);
-        }
-      } else {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (json) {
-          console.log(
-            JSON.stringify({
-              status: 'error',
-              error: 'unknown',
-              message: msg,
-            })
-          );
-        } else {
-          console.error(`Error: ${msg}`);
-        }
-      }
-    });
+/** Check if a path exists on disk (sync). */
+function existsSyncCheck(filePath: string): boolean {
+  return existsSync(filePath);
 }
 
 // ── Logout command (VAL-AUTH-005) ────────────────────────────────────
@@ -1760,7 +1730,7 @@ function runLogout(_args: string[]): void {
     );
   } else {
     if (existing) {
-      console.log(`Logged out (was: ${existing.githubLogin}).`);
+      console.log(`Logged out (was: ${existing.accountId}).`);
     } else {
       console.log('No active session. Already logged out.');
     }
@@ -1797,26 +1767,24 @@ async function runStatus(_args: string[]): Promise<void> {
     return;
   }
 
-  // Verify token liveness with GitHub API (VAL-AUTH-006)
+  // Verify token liveness (VAL-AUTH-006)
   // Using await ensures deterministic output and exit-code before process exit.
-  const apiBaseUrl = process.env['MORS_GITHUB_API_URL'] || undefined;
   try {
-    const principal = await verifyTokenLiveness(session.accessToken, { apiBaseUrl });
+    const principal = await verifyTokenLiveness(session.accessToken, { configDir });
     // Token is valid — report authenticated status with live data
     if (json) {
       console.log(
         JSON.stringify({
           status: 'authenticated',
           token_valid: true,
-          github_user_id: principal.githubUserId,
-          github_login: principal.githubLogin,
-          device_id: session.deviceId,
+          account_id: principal.accountId,
+          device_id: principal.deviceId,
           created_at: session.createdAt,
         })
       );
     } else {
-      console.log(`Authenticated as ${principal.githubLogin} (ID: ${principal.githubUserId})`);
-      console.log(`Device: ${session.deviceId}`);
+      console.log(`Authenticated (account: ${principal.accountId})`);
+      console.log(`Device: ${principal.deviceId}`);
       console.log(`Session created: ${session.createdAt}`);
       console.log('Token: valid');
     }
@@ -1829,8 +1797,7 @@ async function runStatus(_args: string[]): Promise<void> {
             status: 'token_expired',
             token_valid: false,
             message: err.message,
-            github_user_id: session.githubUserId,
-            github_login: session.githubLogin,
+            account_id: session.accountId,
             device_id: session.deviceId,
           })
         );
@@ -1862,14 +1829,13 @@ function reportAuthStatus(session: import('./auth/session.js').AuthSession, json
     console.log(
       JSON.stringify({
         status: 'authenticated',
-        github_user_id: session.githubUserId,
-        github_login: session.githubLogin,
+        account_id: session.accountId,
         device_id: session.deviceId,
         created_at: session.createdAt,
       })
     );
   } else {
-    console.log(`Authenticated as ${session.githubLogin} (ID: ${session.githubUserId})`);
+    console.log(`Authenticated (account: ${session.accountId})`);
     console.log(`Device: ${session.deviceId}`);
     console.log(`Session created: ${session.createdAt}`);
   }

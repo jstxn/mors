@@ -52,8 +52,8 @@ function controllableTokenVerifier(): {
   restoreToken: (token: string, principal: AuthPrincipal) => void;
 } {
   const principals = new Map<string, AuthPrincipal>([
-    ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-    ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+    ['token-alice', { accountId: "acct_1001", deviceId: 'device-alice' }],
+    ['token-bob', { accountId: "acct_1002", deviceId: 'device-bob' }],
   ]);
 
   const verifier: TokenVerifier = async (token: string) => {
@@ -341,7 +341,7 @@ describe('cross-surface async/stream consistency', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -361,7 +361,7 @@ describe('cross-surface async/stream consistency', () => {
       const sendResp = await rawRequest(server.port, '/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipient_id: 1002, body: 'No auth' }),
+        body: JSON.stringify({ recipient_id: 'acct_1002', body: 'No auth' }),
       });
       expect(sendResp.statusCode).toBe(401);
 
@@ -400,7 +400,7 @@ describe('cross-surface async/stream consistency', () => {
           Authorization: 'Bearer token-alice',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ recipient_id: 1002, body: 'Expired auth' }),
+        body: JSON.stringify({ recipient_id: 'acct_1002', body: 'Expired auth' }),
       });
       expect(sendResp.statusCode).toBe(401);
 
@@ -425,7 +425,7 @@ describe('cross-surface async/stream consistency', () => {
       const sendResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'Valid auth test' },
+        body: { recipient_id: 'acct_1002', body: 'Valid auth test' },
       });
       expect(sendResp.status).toBe(201);
 
@@ -466,7 +466,7 @@ describe('cross-surface async/stream consistency', () => {
         const sendResp = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'After expiry' },
+          body: { recipient_id: 'acct_1002', body: 'After expiry' },
         });
         expect(sendResp.status).toBe(401);
 
@@ -487,7 +487,7 @@ describe('cross-surface async/stream consistency', () => {
       const sendFail = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'Should fail' },
+        body: { recipient_id: 'acct_1002', body: 'Should fail' },
       });
       expect(sendFail.status).toBe(401);
 
@@ -500,13 +500,13 @@ describe('cross-surface async/stream consistency', () => {
       expect(sseFail.statusCode).toBe(401);
 
       // Restore token
-      tokenControl.restoreToken('token-alice', { githubUserId: 1001, githubLogin: 'alice' });
+      tokenControl.restoreToken('token-alice', { accountId: "acct_1001", deviceId: 'device-alice' });
 
       // Both should succeed
       const sendOk = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'After restore' },
+        body: { recipient_id: 'acct_1002', body: 'After restore' },
       });
       expect(sendOk.status).toBe(201);
 
@@ -524,7 +524,7 @@ describe('cross-surface async/stream consistency', () => {
       const sendResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-bob',
-        body: { recipient_id: 1001, body: 'Auth boundary test' },
+        body: { recipient_id: 'acct_1001', body: 'Auth boundary test' },
       });
       expect(sendResp.status).toBe(201);
       const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
@@ -571,13 +571,13 @@ describe('cross-surface async/stream consistency', () => {
         logger: () => {},
         tokenVerifier: async (token: string) => {
           const map: Record<string, AuthPrincipal> = {
-            'token-alice': { githubUserId: 1001, githubLogin: 'alice' },
-            'token-bob': { githubUserId: 1002, githubLogin: 'bob' },
+            'token-alice': { accountId: "acct_1001", deviceId: 'device-alice' },
+            'token-bob': { accountId: "acct_1002", deviceId: 'device-bob' },
           };
           return map[token] ?? null;
         },
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -603,14 +603,14 @@ describe('cross-surface async/stream consistency', () => {
         const send1 = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Deduped message', dedupe_key: dedupeKey },
+          body: { recipient_id: 'acct_1002', body: 'Deduped message', dedupe_key: dedupeKey },
         });
         expect(send1.status).toBe(201);
 
         const send2 = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Deduped message', dedupe_key: dedupeKey },
+          body: { recipient_id: 'acct_1002', body: 'Deduped message', dedupe_key: dedupeKey },
         });
         expect(send2.status).toBe(200); // idempotent
 
@@ -650,7 +650,7 @@ describe('cross-surface async/stream consistency', () => {
         const root = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Root for reply dedupe' },
+          body: { recipient_id: 'acct_1002', body: 'Root for reply dedupe' },
         });
         const rootMsg = root.body as Record<string, unknown>;
         const rootMsgId = rootMsg['id'] as string;
@@ -666,7 +666,7 @@ describe('cross-surface async/stream consistency', () => {
           method: 'POST',
           token: 'token-bob',
           body: {
-            recipient_id: 1001,
+            recipient_id: 'acct_1001',
             body: 'Deduped reply',
             in_reply_to: rootMsgId,
             dedupe_key: replyKey,
@@ -678,7 +678,7 @@ describe('cross-surface async/stream consistency', () => {
           method: 'POST',
           token: 'token-bob',
           body: {
-            recipient_id: 1001,
+            recipient_id: 'acct_1001',
             body: 'Deduped reply',
             in_reply_to: rootMsgId,
             dedupe_key: replyKey,
@@ -720,7 +720,7 @@ describe('cross-surface async/stream consistency', () => {
         const sendResp = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Ack idempotency test' },
+          body: { recipient_id: 'acct_1002', body: 'Ack idempotency test' },
         });
         const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
 
@@ -785,7 +785,7 @@ describe('cross-surface async/stream consistency', () => {
         const sendResp = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Read idempotency test' },
+          body: { recipient_id: 'acct_1002', body: 'Read idempotency test' },
         });
         const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
         await sseBob.waitForEvents(2);
@@ -832,7 +832,7 @@ describe('cross-surface async/stream consistency', () => {
         const sendResp = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Full lifecycle' },
+          body: { recipient_id: 'acct_1002', body: 'Full lifecycle' },
         });
         const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
         await sseBob.waitForEvents(2); // connected + message_created
@@ -893,7 +893,7 @@ describe('cross-surface async/stream consistency', () => {
           await relayFetch(server.port, '/messages', {
             method: 'POST',
             token: 'token-alice',
-            body: { recipient_id: 1002, body: 'Multi-retry', dedupe_key: key },
+            body: { recipient_id: 'acct_1002', body: 'Multi-retry', dedupe_key: key },
           });
         }
 
@@ -955,13 +955,13 @@ describe('cross-surface async/stream consistency', () => {
         logger: () => {},
         tokenVerifier: async (token: string) => {
           const map: Record<string, AuthPrincipal> = {
-            'token-alice': { githubUserId: 1001, githubLogin: 'alice' },
-            'token-bob': { githubUserId: 1002, githubLogin: 'bob' },
+            'token-alice': { accountId: "acct_1001", deviceId: 'device-alice' },
+            'token-bob': { accountId: "acct_1002", deviceId: 'device-bob' },
           };
           return map[token] ?? null;
         },
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -985,7 +985,7 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Before disconnect' },
+          body: { recipient_id: 'acct_1002', body: 'Before disconnect' },
         });
         await sse1.waitForEvents(2); // connected + message_created
         const lastEventId = sse1.events[sse1.events.length - 1].id;
@@ -997,12 +997,12 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'During disconnect 1' },
+          body: { recipient_id: 'acct_1002', body: 'During disconnect 1' },
         });
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'During disconnect 2' },
+          body: { recipient_id: 'acct_1002', body: 'During disconnect 2' },
         });
 
         // Phase 3: reconnect with cursor
@@ -1044,7 +1044,7 @@ describe('cross-surface async/stream consistency', () => {
       const sendResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'Interrupted lifecycle' },
+        body: { recipient_id: 'acct_1002', body: 'Interrupted lifecycle' },
       });
       const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
 
@@ -1117,7 +1117,7 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Message 1' },
+          body: { recipient_id: 'acct_1002', body: 'Message 1' },
         });
 
         await sse1.waitForEvents(2); // connected + message_created
@@ -1131,7 +1131,7 @@ describe('cross-surface async/stream consistency', () => {
       await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'Message 2' },
+        body: { recipient_id: 'acct_1002', body: 'Message 2' },
       });
 
       // Phase 3: Bob reconnects, catches up, then disconnects again
@@ -1149,7 +1149,7 @@ describe('cross-surface async/stream consistency', () => {
       await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'Message 3' },
+        body: { recipient_id: 'acct_1002', body: 'Message 3' },
       });
 
       // Phase 5: Bob reconnects final time
@@ -1183,7 +1183,7 @@ describe('cross-surface async/stream consistency', () => {
       const rootResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: 1002, body: 'Root message' },
+        body: { recipient_id: 'acct_1002', body: 'Root message' },
       });
       const rootMsg = rootResp.body as Record<string, unknown>;
       const rootId = rootMsg['id'] as string;
@@ -1211,7 +1211,7 @@ describe('cross-surface async/stream consistency', () => {
           method: 'POST',
           token: 'token-alice',
           body: {
-            recipient_id: 1002,
+            recipient_id: 'acct_1002',
             body: 'Reply during disconnect',
             in_reply_to: rootId,
           },
@@ -1274,7 +1274,7 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Event ID stability' },
+          body: { recipient_id: 'acct_1002', body: 'Event ID stability' },
         });
 
         await sse1.waitForEvents(2); // connected + message_created
@@ -1328,12 +1328,12 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Msg A' },
+          body: { recipient_id: 'acct_1002', body: 'Msg A' },
         });
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Msg B' },
+          body: { recipient_id: 'acct_1002', body: 'Msg B' },
         });
 
         await sse1.waitForEvents(3); // connected + 2 events
@@ -1343,7 +1343,7 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Msg C (during disconnect)' },
+          body: { recipient_id: 'acct_1002', body: 'Msg C (during disconnect)' },
         });
 
         // Phase 3: Reconnect with cursor1 → replays A, B, C
@@ -1394,7 +1394,7 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'Before disconnect' },
+          body: { recipient_id: 'acct_1002', body: 'Before disconnect' },
         });
         await sse1.waitForEvents(2);
         sse1.close();
@@ -1403,7 +1403,7 @@ describe('cross-surface async/stream consistency', () => {
         await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: 1002, body: 'During disconnect' },
+          body: { recipient_id: 'acct_1002', body: 'During disconnect' },
         });
 
         // Reconnect
@@ -1416,7 +1416,7 @@ describe('cross-surface async/stream consistency', () => {
           await relayFetch(server.port, '/messages', {
             method: 'POST',
             token: 'token-alice',
-            body: { recipient_id: 1002, body: 'After reconnect (live)' },
+            body: { recipient_id: 'acct_1002', body: 'After reconnect (live)' },
           });
           await sse2.waitForEvents(4); // + live message_created
 

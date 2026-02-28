@@ -54,7 +54,7 @@ export class RelayMessageStore {
     inboxIndex = new Map();
     /** Messages by sender_id for sender view queries. */
     senderIndex = new Map();
-    /** Conversation participants: conversationKey → Set<githubUserId>. */
+    /** Conversation participants: conversationKey → Set<accountId>. */
     participants = new Map();
     /**
      * Dedupe index: maps (sender_id, dedupe_key) → message_id.
@@ -86,8 +86,8 @@ export class RelayMessageStore {
      * with the same key return the canonical message without creating a
      * duplicate. The dedupe scope is per-sender (sender_id + dedupe_key).
      *
-     * @param senderId - Authenticated sender's GitHub user ID.
-     * @param senderLogin - Authenticated sender's GitHub login.
+     * @param senderId - Authenticated sender's account ID.
+     * @param senderLogin - Authenticated sender's display name.
      * @param options - Send options.
      * @returns A RelaySendResult with the message and whether it was newly created.
      */
@@ -185,7 +185,7 @@ export class RelayMessageStore {
      * Returns messages where the user is the recipient, ordered by
      * created_at descending (newest first).
      *
-     * @param userId - GitHub user ID to list inbox for.
+     * @param userId - Account ID to list inbox for.
      * @param options - Optional inbox filter options.
      * @returns Array of relay messages.
      */
@@ -206,7 +206,7 @@ export class RelayMessageStore {
     /**
      * Get messages sent by a user (sender view).
      *
-     * @param userId - GitHub user ID.
+     * @param userId - Account ID.
      * @returns Array of relay messages sent by this user.
      */
     sentBy(userId) {
@@ -225,7 +225,7 @@ export class RelayMessageStore {
      * Idempotent: re-reading returns the same message without re-setting read_at.
      *
      * @param messageId - Message ID to read.
-     * @param userId - GitHub user ID performing the read (for authorization).
+     * @param userId - Account ID performing the read (for authorization).
      * @returns Read result with the message and whether this was the first read.
      * @throws RelayMessageNotFoundError if message doesn't exist.
      * @throws RelayUnauthorizedError if user is not the recipient.
@@ -261,7 +261,7 @@ export class RelayMessageStore {
      * Idempotent: re-acking returns the same result.
      *
      * @param messageId - Message ID to ack.
-     * @param userId - GitHub user ID performing the ack (for authorization).
+     * @param userId - Account ID performing the ack (for authorization).
      * @returns Ack result with the message and whether this was the first ack.
      * @throws RelayMessageNotFoundError if message doesn't exist.
      * @throws RelayUnauthorizedError if user is not the recipient.
@@ -301,7 +301,7 @@ export class RelayMessageStore {
      * Check if a user is a participant in a conversation (thread).
      *
      * @param threadId - Thread ID to check.
-     * @param userId - GitHub user ID to check.
+     * @param userId - Account ID to check.
      * @returns true if the user is a participant.
      */
     isParticipant(threadId, userId) {
@@ -313,7 +313,7 @@ export class RelayMessageStore {
      * Check if a user is a participant in a message's conversation.
      *
      * @param messageId - Message ID.
-     * @param userId - GitHub user ID.
+     * @param userId - Account ID.
      * @returns true if the user is a participant of the message's thread.
      */
     isMessageParticipant(messageId, userId) {

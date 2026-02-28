@@ -13,7 +13,7 @@
 import { loadRelayConfig } from './config.js';
 import { bootstrapRelay } from './bootstrap.js';
 import { createRelayServer, type RelayServerOptions } from './server.js';
-import { createGitHubTokenVerifier } from './auth-middleware.js';
+import { createNativeTokenVerifier } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
 
 /**
@@ -27,8 +27,10 @@ import { RelayMessageStore } from './message-store.js';
  */
 export function createProductionServerOptions(): RelayServerOptions {
   // Wire production auth dependencies — fail-closed by default.
-  // Token verification uses the GitHub API to validate bearer tokens.
-  const tokenVerifier = createGitHubTokenVerifier();
+  // Token verification uses HMAC-signed native session tokens.
+  // The signing key is loaded from environment or defaults to a generated key.
+  const signingKey = process.env['MORS_RELAY_SIGNING_KEY'] ?? '';
+  const tokenVerifier = createNativeTokenVerifier(signingKey);
 
   // Wire the in-memory message store for async messaging routes.
   // This ensures /messages, /inbox, and /messages/:id routes are active
@@ -39,8 +41,8 @@ export function createProductionServerOptions(): RelayServerOptions {
   // When a message is sent, both sender and recipient are registered as
   // participants in the thread, enabling object-level authorization checks.
   const participantStore = {
-    async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-      return messageStore.isParticipant(conversationId, githubUserId);
+    async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+      return messageStore.isParticipant(conversationId, accountId);
     },
   };
 

@@ -16,7 +16,7 @@ import { RelayMessageStore } from '../../src/relay/message-store.js';
 describe('RelayMessageStore persistence boundary', () => {
   it('snapshot returns a JSON-serializable plain object', () => {
     const store = new RelayMessageStore();
-    store.send(1001, 'alice', { recipientId: 1002, body: 'hello' });
+    store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'hello' });
 
     const snapshot = store.snapshot();
     // Must be JSON-serializable (round-trip through JSON)
@@ -27,13 +27,13 @@ describe('RelayMessageStore persistence boundary', () => {
 
   it('fromSnapshot recreates store with identical message state', () => {
     const store = new RelayMessageStore();
-    const { message } = store.send(1001, 'alice', { recipientId: 1002, body: 'test msg' });
+    const { message } = store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'test msg' });
 
     const snapshot = store.snapshot();
     const restored = RelayMessageStore.fromSnapshot(snapshot);
 
     // Restored store returns same message via inbox
-    const inbox = restored.inbox(1002);
+    const inbox = restored.inbox('acct_1002');
     expect(inbox.length).toBe(1);
     expect(inbox[0].id).toBe(message.id);
     expect(inbox[0].body).toBe('test msg');
@@ -42,14 +42,14 @@ describe('RelayMessageStore persistence boundary', () => {
 
   it('fromSnapshot preserves read and ack state', () => {
     const store = new RelayMessageStore();
-    const { message } = store.send(1001, 'alice', { recipientId: 1002, body: 'read+ack test' });
-    store.read(message.id, 1002);
-    store.ack(message.id, 1002);
+    const { message } = store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'read+ack test' });
+    store.read(message.id, 'acct_1002');
+    store.ack(message.id, 'acct_1002');
 
     const snapshot = store.snapshot();
     const restored = RelayMessageStore.fromSnapshot(snapshot);
 
-    const inbox = restored.inbox(1002);
+    const inbox = restored.inbox('acct_1002');
     expect(inbox[0].state).toBe('acked');
     expect(inbox[0].read_at).not.toBeNull();
     expect(inbox[0].acked_at).not.toBeNull();
@@ -57,8 +57,8 @@ describe('RelayMessageStore persistence boundary', () => {
 
   it('fromSnapshot preserves dedupe index across boundary', () => {
     const store = new RelayMessageStore();
-    const { message } = store.send(1001, 'alice', {
-      recipientId: 1002,
+    const { message } = store.send('acct_1001', 'alice', {
+      recipientId: 'acct_1002',
       body: 'deduped',
       dedupeKey: 'dk-001',
     });
@@ -67,8 +67,8 @@ describe('RelayMessageStore persistence boundary', () => {
     const restored = RelayMessageStore.fromSnapshot(snapshot);
 
     // Retry with same dedupe key should return canonical message
-    const retry = restored.send(1001, 'alice', {
-      recipientId: 1002,
+    const retry = restored.send('acct_1001', 'alice', {
+      recipientId: 'acct_1002',
       body: 'deduped',
       dedupeKey: 'dk-001',
     });
@@ -78,9 +78,9 @@ describe('RelayMessageStore persistence boundary', () => {
 
   it('fromSnapshot preserves thread participant tracking', () => {
     const store = new RelayMessageStore();
-    const { message: root } = store.send(1001, 'alice', { recipientId: 1002, body: 'root' });
-    store.send(1002, 'bob', {
-      recipientId: 1001,
+    const { message: root } = store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'root' });
+    store.send('acct_1002', 'bob', {
+      recipientId: 'acct_1001',
       body: 'reply',
       inReplyTo: root.id,
     });
@@ -89,21 +89,21 @@ describe('RelayMessageStore persistence boundary', () => {
     const restored = RelayMessageStore.fromSnapshot(snapshot);
 
     // Both participants should be recognized
-    expect(restored.isParticipant(root.thread_id, 1001)).toBe(true);
-    expect(restored.isParticipant(root.thread_id, 1002)).toBe(true);
+    expect(restored.isParticipant(root.thread_id, 'acct_1001')).toBe(true);
+    expect(restored.isParticipant(root.thread_id, 'acct_1002')).toBe(true);
     // Non-participant should not be
-    expect(restored.isParticipant(root.thread_id, 9999)).toBe(false);
+    expect(restored.isParticipant(root.thread_id, 'acct_9999')).toBe(false);
   });
 
   it('fromSnapshot preserves event log for SSE cursor resume', () => {
     const store = new RelayMessageStore();
-    store.send(1001, 'alice', { recipientId: 1002, body: 'msg1' });
-    store.send(1001, 'alice', { recipientId: 1002, body: 'msg2' });
+    store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'msg1' });
+    store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'msg2' });
 
     // Register a cursor position to test eventIdIndex preservation
     store.registerCursorPosition('cursor-test-001');
 
-    store.send(1001, 'alice', { recipientId: 1002, body: 'msg3' });
+    store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'msg3' });
 
     const snapshot = store.snapshot();
     const restored = RelayMessageStore.fromSnapshot(snapshot);
@@ -116,16 +116,16 @@ describe('RelayMessageStore persistence boundary', () => {
 
   it('fromSnapshot produces an independent store (no shared references)', () => {
     const store = new RelayMessageStore();
-    const { message } = store.send(1001, 'alice', { recipientId: 1002, body: 'original' });
+    const { message } = store.send('acct_1001', 'alice', { recipientId: 'acct_1002', body: 'original' });
 
     const snapshot = store.snapshot();
     const restored = RelayMessageStore.fromSnapshot(snapshot);
 
     // Mutate the original store — restored store should be unaffected
-    store.ack(message.id, 1002);
+    store.ack(message.id, 'acct_1002');
 
-    const originalInbox = store.inbox(1002);
-    const restoredInbox = restored.inbox(1002);
+    const originalInbox = store.inbox('acct_1002');
+    const restoredInbox = restored.inbox('acct_1002');
 
     expect(originalInbox[0].state).toBe('acked');
     expect(restoredInbox[0].state).toBe('delivered'); // unchanged
@@ -133,14 +133,14 @@ describe('RelayMessageStore persistence boundary', () => {
 
   it('snapshot + JSON round-trip + fromSnapshot produces equivalent store', () => {
     const store = new RelayMessageStore();
-    const { message: root } = store.send(1001, 'alice', {
-      recipientId: 1002,
+    const { message: root } = store.send('acct_1001', 'alice', {
+      recipientId: 'acct_1002',
       body: 'root',
       dedupeKey: 'rt-001',
     });
-    store.read(root.id, 1002);
-    store.send(1002, 'bob', {
-      recipientId: 1001,
+    store.read(root.id, 'acct_1002');
+    store.send('acct_1002', 'bob', {
+      recipientId: 'acct_1001',
       body: 'reply',
       inReplyTo: root.id,
     });
@@ -151,8 +151,8 @@ describe('RelayMessageStore persistence boundary', () => {
     const restored = RelayMessageStore.fromSnapshot(parsed);
 
     // Verify full state
-    const aliceInbox = restored.inbox(1001);
-    const bobInbox = restored.inbox(1002);
+    const aliceInbox = restored.inbox('acct_1001');
+    const bobInbox = restored.inbox('acct_1002');
     expect(aliceInbox.length).toBe(1);
     expect(bobInbox.length).toBe(1);
     expect(bobInbox[0].read_at).not.toBeNull();

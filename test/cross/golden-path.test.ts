@@ -76,8 +76,8 @@ function testConfig(): RelayConfig {
 }
 
 /** Standard test principals. */
-const ALICE_PRINCIPAL: AuthPrincipal = { githubUserId: 1001, githubLogin: 'alice' };
-const BOB_PRINCIPAL: AuthPrincipal = { githubUserId: 1002, githubLogin: 'bob' };
+const ALICE_PRINCIPAL: AuthPrincipal = { accountId: "acct_1001", deviceId: 'device-alice' };
+const BOB_PRINCIPAL: AuthPrincipal = { accountId: "acct_1002", deviceId: 'device-bob' };
 
 /** Controllable token verifier for test auth. */
 function controllableTokenVerifier(): {
@@ -357,7 +357,7 @@ describe('cross-area golden-path hardening', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -375,7 +375,7 @@ describe('cross-area golden-path hardening', () => {
       // Step 1: Unauthenticated user cannot send (simulates pre-login state)
       const noAuthSend = await relayFetch(server.port, '/messages', {
         method: 'POST',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Before login' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Before login' },
       });
       expect(noAuthSend.status).toBe(401);
 
@@ -385,7 +385,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: 'Hello Bob, this is the golden path!',
         },
       });
@@ -394,8 +394,8 @@ describe('cross-area golden-path hardening', () => {
       const msgId = sentMsg['id'] as string;
       expect(msgId).toMatch(/^msg_/);
       expect(sentMsg['thread_id']).toMatch(/^thr_/);
-      expect(sentMsg['sender_id']).toBe(ALICE_PRINCIPAL.githubUserId);
-      expect(sentMsg['recipient_id']).toBe(BOB_PRINCIPAL.githubUserId);
+      expect(sentMsg['sender_id']).toBe(ALICE_PRINCIPAL.accountId);
+      expect(sentMsg['recipient_id']).toBe(BOB_PRINCIPAL.accountId);
       expect(sentMsg['state']).toBe('delivered');
       expect(sentMsg['read_at']).toBeNull();
       expect(sentMsg['acked_at']).toBeNull();
@@ -447,7 +447,7 @@ describe('cross-area golden-path hardening', () => {
       const rootResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Root message' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Root message' },
       });
       expect(rootResp.status).toBe(201);
       const rootMsg = rootResp.body as Record<string, unknown>;
@@ -464,7 +464,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-bob',
         body: {
-          recipient_id: ALICE_PRINCIPAL.githubUserId,
+          recipient_id: ALICE_PRINCIPAL.accountId,
           body: 'Reply to root',
           in_reply_to: rootId,
         },
@@ -511,7 +511,7 @@ describe('cross-area golden-path hardening', () => {
         const sendResp = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'SSE golden path' },
+          body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'SSE golden path' },
         });
         const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
         await sseBob.waitForEvents(2); // connected + message_created
@@ -554,7 +554,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: 'Deduped golden path',
           dedupe_key: dedupeKey,
         },
@@ -565,7 +565,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: 'Deduped golden path',
           dedupe_key: dedupeKey,
         },
@@ -607,7 +607,7 @@ describe('cross-area golden-path hardening', () => {
           return map[token] ?? null;
         },
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -635,7 +635,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(encrypted),
         },
       });
@@ -698,7 +698,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(encRoot),
         },
       });
@@ -712,7 +712,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-bob',
         body: {
-          recipient_id: ALICE_PRINCIPAL.githubUserId,
+          recipient_id: ALICE_PRINCIPAL.accountId,
           body: JSON.stringify(encReply),
           in_reply_to: rootId,
         },
@@ -770,7 +770,7 @@ describe('cross-area golden-path hardening', () => {
           method: 'POST',
           token: 'token-alice',
           body: {
-            recipient_id: BOB_PRINCIPAL.githubUserId,
+            recipient_id: BOB_PRINCIPAL.accountId,
             body: JSON.stringify(encrypted),
           },
         });
@@ -802,7 +802,7 @@ describe('cross-area golden-path hardening', () => {
     let tempDir: string;
 
     // Multi-device setup: Bob has two devices (bob-d1, bob-d2), Alice has one.
-    // Both Bob devices are "on the same account" (same githubUserId).
+    // Both Bob devices are "on the same account" (same accountId).
     const BOB_D1_TOKEN = 'token-bob-d1';
     const BOB_D2_TOKEN = 'token-bob-d2';
 
@@ -821,7 +821,7 @@ describe('cross-area golden-path hardening', () => {
           return map[token] ?? null;
         },
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -895,7 +895,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(encForD1),
         },
       });
@@ -907,7 +907,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(encForD2),
         },
       });
@@ -955,7 +955,7 @@ describe('cross-area golden-path hardening', () => {
         const sendResp = await relayFetch(server.port, '/messages', {
           method: 'POST',
           token: 'token-alice',
-          body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Multi-device SSE test' },
+          body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Multi-device SSE test' },
         });
         const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
 
@@ -997,12 +997,12 @@ describe('cross-area golden-path hardening', () => {
       const send1 = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Message 1' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Message 1' },
       });
       const send2 = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Message 2' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Message 2' },
       });
 
       const msg1Id = (send1.body as Record<string, unknown>)['id'] as string;
@@ -1076,7 +1076,7 @@ describe('cross-area golden-path hardening', () => {
           return map[token] ?? null;
         },
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -1121,7 +1121,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(preEncrypted),
         },
       });
@@ -1166,7 +1166,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(postEncrypted),
         },
       });
@@ -1241,7 +1241,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: JSON.stringify(encrypted),
         },
       });
@@ -1305,7 +1305,7 @@ describe('cross-area golden-path hardening', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -1352,7 +1352,7 @@ describe('cross-area golden-path hardening', () => {
       const sendResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Surviving restart' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Surviving restart' },
       });
       expect(sendResp.status).toBe(201);
       const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
@@ -1403,7 +1403,7 @@ describe('cross-area golden-path hardening', () => {
       const sendResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Acked before restart' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Acked before restart' },
       });
       const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
 
@@ -1451,17 +1451,17 @@ describe('cross-area golden-path hardening', () => {
       const send1 = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Msg 1 - will be delivered' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Msg 1 - will be delivered' },
       });
       const send2 = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Msg 2 - will be read' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Msg 2 - will be read' },
       });
       const send3 = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Msg 3 - will be acked' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Msg 3 - will be acked' },
       });
 
       const msg1Id = (send1.body as Record<string, unknown>)['id'] as string;
@@ -1516,7 +1516,7 @@ describe('cross-area golden-path hardening', () => {
       const sendResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Pre-restart message' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Pre-restart message' },
       });
       const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
 
@@ -1562,7 +1562,7 @@ describe('cross-area golden-path hardening', () => {
       await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Pre-restart' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Pre-restart' },
       });
 
       // Restart: persist → rehydrate across a real persistence boundary
@@ -1572,7 +1572,7 @@ describe('cross-area golden-path hardening', () => {
       const newSend = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Post-restart new message' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Post-restart new message' },
       });
       expect(newSend.status).toBe(201);
       const newMsgId = (newSend.body as Record<string, unknown>)['id'] as string;
@@ -1604,7 +1604,7 @@ describe('cross-area golden-path hardening', () => {
       const rootResp = await relayFetch(server.port, '/messages', {
         method: 'POST',
         token: 'token-alice',
-        body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Root before restart' },
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: 'Root before restart' },
       });
       const rootId = (rootResp.body as Record<string, unknown>)['id'] as string;
       const threadId = (rootResp.body as Record<string, unknown>)['thread_id'] as string;
@@ -1613,7 +1613,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-bob',
         body: {
-          recipient_id: ALICE_PRINCIPAL.githubUserId,
+          recipient_id: ALICE_PRINCIPAL.accountId,
           body: 'Reply before restart',
           in_reply_to: rootId,
         },
@@ -1637,7 +1637,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: 'Reply after restart',
           in_reply_to: replyId,
         },
@@ -1656,7 +1656,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: 'Deduped across restart',
           dedupe_key: dedupeKey,
         },
@@ -1672,7 +1672,7 @@ describe('cross-area golden-path hardening', () => {
         method: 'POST',
         token: 'token-alice',
         body: {
-          recipient_id: BOB_PRINCIPAL.githubUserId,
+          recipient_id: BOB_PRINCIPAL.accountId,
           body: 'Deduped across restart',
           dedupe_key: dedupeKey,
         },

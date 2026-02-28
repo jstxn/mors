@@ -3,7 +3,7 @@
  *
  * Provides:
  * - requireAuth: Gate that checks for a valid local session (re-gates after logout)
- * - verifyTokenLiveness: Validates an access token is still active with GitHub API
+ * - verifyTokenLiveness: Validates a session token is still valid via HMAC verification
  * - NotAuthenticatedError: Thrown when no session exists with login guidance
  * - TokenLivenessError: Thrown when a token is expired/revoked with re-auth guidance
  *
@@ -24,8 +24,7 @@ export declare class NotAuthenticatedError extends MorsError {
     constructor(message?: string);
 }
 /**
- * Thrown when a token is expired, revoked, or otherwise invalid when validated
- * against the GitHub API.
+ * Thrown when a token is expired, revoked, or otherwise invalid.
  *
  * Provides actionable re-auth guidance to run `mors login`.
  * Never includes the token value in the error message.
@@ -54,26 +53,30 @@ export declare class TokenLivenessError extends MorsError {
 export declare function requireAuth(configDir: string): AuthSession | null;
 /** Options for verifyTokenLiveness. */
 export interface TokenLivenessOptions {
-    /** Base URL for the GitHub API. Defaults to https://api.github.com */
-    apiBaseUrl?: string;
+    /** Signing key for HMAC verification. If not provided, loaded from configDir. */
+    signingKey?: string;
+    /** Config directory for loading signing key. */
+    configDir?: string;
 }
 /** Result of a successful token liveness check. */
 export interface TokenLivenessResult {
-    /** Stable GitHub numeric user ID. */
-    githubUserId: number;
-    /** Current GitHub login (informational). */
-    githubLogin: string;
+    /** Stable mors account ID. */
+    accountId: string;
+    /** Device ID from the session token. */
+    deviceId: string;
 }
 /**
- * Verify that an access token is still active by calling the GitHub API.
+ * Verify that a session token is still valid.
  *
- * This detects expired, revoked, or otherwise invalid tokens rather than
- * silently treating a locally-persisted session as valid.
+ * This verifies the HMAC signature of the session token and extracts
+ * the principal identity. Detects tampered, revoked, or otherwise
+ * invalid tokens rather than silently treating a locally-persisted
+ * session as valid.
  *
- * @param accessToken - The GitHub OAuth access token to verify.
+ * @param accessToken - The mors session token to verify.
  * @param options - Optional configuration.
  * @returns Principal identity from the valid token.
- * @throws TokenLivenessError if the token is expired, revoked, or invalid.
+ * @throws TokenLivenessError if the token is invalid or cannot be verified.
  */
 export declare function verifyTokenLiveness(accessToken: string, options?: TokenLivenessOptions): Promise<TokenLivenessResult>;
 //# sourceMappingURL=guards.d.ts.map

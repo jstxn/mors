@@ -15,7 +15,11 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
-import { createRelayServer, type RelayServer, type RelayServerOptions } from '../../src/relay/server.js';
+import {
+  createRelayServer,
+  type RelayServer,
+  type RelayServerOptions,
+} from '../../src/relay/server.js';
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 import type { RelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier, AuthPrincipal } from '../../src/relay/auth-middleware.js';
@@ -51,8 +55,8 @@ function controllableTokenVerifier(): {
   restoreToken: (token: string, principal: AuthPrincipal) => void;
 } {
   const principals = new Map<string, AuthPrincipal>([
-    ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-    ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+    ['token-alice', { accountId: 'acct_1001', deviceId: 'device-alice' }],
+    ['token-bob', { accountId: 'acct_1002', deviceId: 'device-bob' }],
   ]);
 
   const verifier: TokenVerifier = async (token: string) => {
@@ -143,9 +147,15 @@ function openSSE(
   let resolveStatus: (code: number) => void;
   let resolveHeaders: (h: http.IncomingHttpHeaders) => void;
   let resolveClose: () => void;
-  const statusCode = new Promise<number>((r) => { resolveStatus = r; });
-  const headers = new Promise<http.IncomingHttpHeaders>((r) => { resolveHeaders = r; });
-  const onClose = new Promise<void>((r) => { resolveClose = r; });
+  const statusCode = new Promise<number>((r) => {
+    resolveStatus = r;
+  });
+  const headers = new Promise<http.IncomingHttpHeaders>((r) => {
+    resolveHeaders = r;
+  });
+  const onClose = new Promise<void>((r) => {
+    resolveClose = r;
+  });
 
   function processEvents(parsed: SSEEvent[]): void {
     events.push(...parsed);
@@ -217,7 +227,7 @@ function openSSE(
         reject(
           new Error(
             `Timed out waiting for ${count} SSE events (got ${events.length} within ${timeoutMs}ms). ` +
-            `Events: ${JSON.stringify(events)}`
+              `Events: ${JSON.stringify(events)}`
           )
         );
       }, timeoutMs);
@@ -242,7 +252,7 @@ function openSSE(
         reject(
           new Error(
             `Timed out waiting for event type "${eventType}" within ${timeoutMs}ms. ` +
-            `Events so far: ${JSON.stringify(events)}`
+              `Events so far: ${JSON.stringify(events)}`
           )
         );
       }, timeoutMs);
@@ -257,7 +267,16 @@ function openSSE(
     });
   }
 
-  return { events, rawChunks, statusCode, headers, close, waitForEvents, waitForEventType, onClose };
+  return {
+    events,
+    rawChunks,
+    statusCode,
+    headers,
+    close,
+    waitForEvents,
+    waitForEventType,
+    onClose,
+  };
 }
 
 /** Make a raw HTTP request and return the response. */
@@ -300,7 +319,6 @@ function rawRequest(
 // ── Test suite ───────────────────────────────────────────────────────
 
 describe('SSE auth expiry and fallback mode', () => {
-
   // ── VAL-STREAM-006: Mid-stream auth expiry handling ──────────────
 
   describe('mid-stream auth expiry (VAL-STREAM-006)', () => {
@@ -315,7 +333,7 @@ describe('SSE auth expiry and fallback mode', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -384,8 +402,8 @@ describe('SSE auth expiry and fallback mode', () => {
         await sse.waitForEvents(1); // connected
 
         // Send a message before expiry — should arrive
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Before expiry',
         });
         await sse.waitForEvents(2); // connected + message_created
@@ -397,10 +415,7 @@ describe('SSE auth expiry and fallback mode', () => {
         await sse.waitForEventType('auth_expired', 3000);
 
         // Wait for connection close
-        await Promise.race([
-          sse.onClose,
-          new Promise<void>((r) => setTimeout(r, 1000)),
-        ]);
+        await Promise.race([sse.onClose, new Promise<void>((r) => setTimeout(r, 1000))]);
 
         // Count events — should be: connected, message_created, auth_expired
         // No further events after auth_expired
@@ -426,7 +441,10 @@ describe('SSE auth expiry and fallback mode', () => {
         sse1.close();
 
         // Re-auth: restore Alice's token (simulates successful re-login)
-        tokenControl.restoreToken('token-alice', { githubUserId: 1001, githubLogin: 'alice' });
+        tokenControl.restoreToken('token-alice', {
+          accountId: 'acct_1001',
+          deviceId: 'device-alice',
+        });
 
         // New connection should succeed
         const sse2 = openSSE(server.port, 'token-alice');
@@ -435,8 +453,8 @@ describe('SSE auth expiry and fallback mode', () => {
           expect(evts2[0].event).toBe('connected');
 
           const data = parseEventData(evts2[0]);
-          expect(data.github_user_id).toBe(1001);
-          expect(data.github_login).toBe('alice');
+          expect(data.account_id).toBe('acct_1001');
+          expect(data.device_id).toBe('device-alice');
         } finally {
           sse2.close();
         }
@@ -452,8 +470,8 @@ describe('SSE auth expiry and fallback mode', () => {
         const connectedId = sse1.events[0].id;
 
         // Send a message before expiry
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Before disconnect',
         });
         await sse1.waitForEvents(2);
@@ -464,13 +482,16 @@ describe('SSE auth expiry and fallback mode', () => {
         sse1.close();
 
         // Events happen while disconnected
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'During auth gap',
         });
 
         // Re-auth
-        tokenControl.restoreToken('token-alice', { githubUserId: 1001, githubLogin: 'alice' });
+        tokenControl.restoreToken('token-alice', {
+          accountId: 'acct_1001',
+          deviceId: 'device-alice',
+        });
 
         // Reconnect with cursor — should catch up missed events
         const sse2 = openSSE(server.port, 'token-alice', { lastEventId: connectedId });
@@ -493,8 +514,8 @@ describe('SSE auth expiry and fallback mode', () => {
         await sse.waitForEvents(1); // connected
 
         // Send a message to create a known event position
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Before expiry',
         });
         const evts = await sse.waitForEvents(2);
@@ -529,8 +550,8 @@ describe('SSE auth expiry and fallback mode', () => {
         await sseAlice.waitForEventType('auth_expired', 3000);
 
         // Bob should still be connected and receive events
-        messageStore.send(1001, 'alice', {
-          recipientId: 1002,
+        messageStore.send('acct_1001', 'alice', {
+          recipientId: 'acct_1002',
           body: 'Message for Bob',
         });
 
@@ -584,7 +605,9 @@ describe('SSE auth expiry and fallback mode', () => {
       // Create a mock server that returns 503 (service unavailable)
       const mockServer = http.createServer((_req, res) => {
         res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'service_unavailable', detail: 'SSE temporarily disabled' }));
+        res.end(
+          JSON.stringify({ error: 'service_unavailable', detail: 'SSE temporarily disabled' })
+        );
       });
 
       const port = await new Promise<number>((resolve) => {
@@ -618,7 +641,7 @@ describe('SSE auth expiry and fallback mode', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -654,7 +677,7 @@ describe('SSE auth expiry and fallback mode', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -695,7 +718,7 @@ describe('SSE auth expiry and fallback mode', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -713,7 +736,7 @@ describe('SSE auth expiry and fallback mode', () => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            recipient_id: 1001,
+            recipient_id: 'acct_1001',
             body: 'Hello in degraded mode',
           }),
         });

@@ -24,12 +24,12 @@ export interface RelayMessage {
     thread_id: string;
     /** Parent message ID if this is a reply, null for root messages. */
     in_reply_to: string | null;
-    /** Sender GitHub user ID (from auth principal). */
-    sender_id: number;
-    /** Sender GitHub login (informational). */
+    /** Sender account ID (from auth principal). */
+    sender_id: string;
+    /** Sender display name (informational). */
     sender_login: string;
-    /** Recipient GitHub user ID. */
-    recipient_id: number;
+    /** Recipient account ID. */
+    recipient_id: string;
     /** Message body (markdown). */
     body: string;
     /** Optional subject line. */
@@ -47,8 +47,8 @@ export interface RelayMessage {
 }
 /** Options for sending a message via relay. */
 export interface RelaySendOptions {
-    /** Recipient GitHub user ID. */
-    recipientId: number;
+    /** Recipient account ID. */
+    recipientId: string;
     /** Message body (markdown). */
     body: string;
     /** Optional subject line. */
@@ -101,10 +101,10 @@ export interface RelayStreamEvent {
     thread_id: string;
     /** Parent message ID (present for replies, null otherwise). */
     in_reply_to: string | null;
-    /** Sender GitHub user ID. */
-    sender_id: number;
-    /** Recipient GitHub user ID. */
-    recipient_id: number;
+    /** Sender account ID. */
+    sender_id: string;
+    /** Recipient account ID. */
+    recipient_id: string;
     /** ISO-8601 timestamp of when the event occurred. */
     timestamp: string;
 }
@@ -120,12 +120,12 @@ export type RelayStreamListener = (event: RelayStreamEvent) => void;
 export interface RelayMessageStoreSnapshot {
     /** All messages keyed by ID. */
     messages: Array<[string, RelayMessage]>;
-    /** Inbox index: recipient userId → array of message IDs. */
-    inboxIndex: Array<[number, string[]]>;
-    /** Sender index: sender userId → array of message IDs. */
-    senderIndex: Array<[number, string[]]>;
-    /** Conversation participants: conversationKey → array of user IDs. */
-    participants: Array<[string, number[]]>;
+    /** Inbox index: recipient accountId → array of message IDs. */
+    inboxIndex: Array<[string, string[]]>;
+    /** Sender index: sender accountId → array of message IDs. */
+    senderIndex: Array<[string, string[]]>;
+    /** Conversation participants: conversationKey → array of account IDs. */
+    participants: Array<[string, string[]]>;
     /** Dedupe index: compositeKey → message ID. */
     dedupeIndex: Array<[string, string]>;
     /** Ordered event log for SSE cursor resume. */
@@ -158,7 +158,7 @@ export declare class RelayMessageStore {
     private inboxIndex;
     /** Messages by sender_id for sender view queries. */
     private senderIndex;
-    /** Conversation participants: conversationKey → Set<githubUserId>. */
+    /** Conversation participants: conversationKey → Set<accountId>. */
     private participants;
     /**
      * Dedupe index: maps (sender_id, dedupe_key) → message_id.
@@ -188,30 +188,30 @@ export declare class RelayMessageStore {
      * with the same key return the canonical message without creating a
      * duplicate. The dedupe scope is per-sender (sender_id + dedupe_key).
      *
-     * @param senderId - Authenticated sender's GitHub user ID.
-     * @param senderLogin - Authenticated sender's GitHub login.
+     * @param senderId - Authenticated sender's account ID.
+     * @param senderLogin - Authenticated sender's display name.
      * @param options - Send options.
      * @returns A RelaySendResult with the message and whether it was newly created.
      */
-    send(senderId: number, senderLogin: string, options: RelaySendOptions): RelaySendResult;
+    send(senderId: string, senderLogin: string, options: RelaySendOptions): RelaySendResult;
     /**
      * List inbox messages for a user.
      *
      * Returns messages where the user is the recipient, ordered by
      * created_at descending (newest first).
      *
-     * @param userId - GitHub user ID to list inbox for.
+     * @param userId - Account ID to list inbox for.
      * @param options - Optional inbox filter options.
      * @returns Array of relay messages.
      */
-    inbox(userId: number, options?: RelayInboxOptions): RelayMessage[];
+    inbox(userId: string, options?: RelayInboxOptions): RelayMessage[];
     /**
      * Get messages sent by a user (sender view).
      *
-     * @param userId - GitHub user ID.
+     * @param userId - Account ID.
      * @returns Array of relay messages sent by this user.
      */
-    sentBy(userId: number): RelayMessage[];
+    sentBy(userId: string): RelayMessage[];
     /**
      * Read a message by ID.
      *
@@ -219,12 +219,12 @@ export declare class RelayMessageStore {
      * Idempotent: re-reading returns the same message without re-setting read_at.
      *
      * @param messageId - Message ID to read.
-     * @param userId - GitHub user ID performing the read (for authorization).
+     * @param userId - Account ID performing the read (for authorization).
      * @returns Read result with the message and whether this was the first read.
      * @throws RelayMessageNotFoundError if message doesn't exist.
      * @throws RelayUnauthorizedError if user is not the recipient.
      */
-    read(messageId: string, userId: number): RelayReadResult;
+    read(messageId: string, userId: string): RelayReadResult;
     /**
      * Acknowledge a message by ID.
      *
@@ -235,12 +235,12 @@ export declare class RelayMessageStore {
      * Idempotent: re-acking returns the same result.
      *
      * @param messageId - Message ID to ack.
-     * @param userId - GitHub user ID performing the ack (for authorization).
+     * @param userId - Account ID performing the ack (for authorization).
      * @returns Ack result with the message and whether this was the first ack.
      * @throws RelayMessageNotFoundError if message doesn't exist.
      * @throws RelayUnauthorizedError if user is not the recipient.
      */
-    ack(messageId: string, userId: number): RelayAckResult;
+    ack(messageId: string, userId: string): RelayAckResult;
     /**
      * Get a message by ID (for any authorized viewer).
      *
@@ -252,18 +252,18 @@ export declare class RelayMessageStore {
      * Check if a user is a participant in a conversation (thread).
      *
      * @param threadId - Thread ID to check.
-     * @param userId - GitHub user ID to check.
+     * @param userId - Account ID to check.
      * @returns true if the user is a participant.
      */
-    isParticipant(threadId: string, userId: number): boolean;
+    isParticipant(threadId: string, userId: string): boolean;
     /**
      * Check if a user is a participant in a message's conversation.
      *
      * @param messageId - Message ID.
-     * @param userId - GitHub user ID.
+     * @param userId - Account ID.
      * @returns true if the user is a participant of the message's thread.
      */
-    isMessageParticipant(messageId: string, userId: number): boolean;
+    isMessageParticipant(messageId: string, userId: string): boolean;
     /**
      * Subscribe to stream events.
      *

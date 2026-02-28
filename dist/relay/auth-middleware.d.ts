@@ -3,7 +3,7 @@
  *
  * Provides:
  * - Token extraction from Authorization: Bearer <token> header
- * - Pluggable token verification (GitHub API in production, stub in tests)
+ * - Pluggable token verification (native HMAC tokens in production, stub in tests)
  * - Principal identity extraction from validated tokens
  * - Object-level authorization via participant store
  *
@@ -20,10 +20,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 /** Authenticated principal identity derived from a validated token. */
 export interface AuthPrincipal {
-    /** Stable GitHub numeric user ID (identity key). */
-    githubUserId: number;
-    /** Current GitHub login (informational, may change). */
-    githubLogin: string;
+    /** Stable mors account ID (identity key). */
+    accountId: string;
+    /** Device ID from the session token. */
+    deviceId: string;
 }
 /**
  * Token verifier function.
@@ -31,7 +31,7 @@ export interface AuthPrincipal {
  * Given a bearer token, returns the authenticated principal identity
  * or null if the token is invalid/expired/revoked.
  *
- * In production, this calls the GitHub API (/user).
+ * In production, this verifies HMAC-signed native session tokens.
  * In tests, this is a stub that maps tokens to principals.
  */
 export type TokenVerifier = (token: string) => Promise<AuthPrincipal | null>;
@@ -42,7 +42,7 @@ export type TokenVerifier = (token: string) => Promise<AuthPrincipal | null>;
  * Returns true if the user has access, false otherwise.
  */
 export interface ParticipantStore {
-    isParticipant(conversationId: string, githubUserId: number): Promise<boolean>;
+    isParticipant(conversationId: string, accountId: string): Promise<boolean>;
 }
 /** Auth result from extractAndVerify. */
 export type AuthResult = {
@@ -94,10 +94,18 @@ export interface ConversationRoute {
  */
 export declare function parseConversationRoute(url: string): ConversationRoute | null;
 /**
- * Default token verifier that calls the GitHub API.
+ * Create a native token verifier that validates HMAC-signed session tokens.
  *
- * Uses the access token to fetch /user and extract the stable numeric ID.
- * Returns null for invalid/expired tokens (401 from GitHub).
+ * Uses the signing key to verify the session token signature and extract
+ * the principal identity (accountId + deviceId).
+ *
+ * @param signingKey - The HMAC signing key for token verification.
+ * @returns A TokenVerifier function.
  */
-export declare function createGitHubTokenVerifier(apiBaseUrl?: string): TokenVerifier;
+export declare function createNativeTokenVerifier(signingKey: string): TokenVerifier;
+/**
+ * @deprecated Use createNativeTokenVerifier instead. Kept for backward compatibility
+ * during transition period only.
+ */
+export declare function createGitHubTokenVerifier(_apiBaseUrl?: string): TokenVerifier;
 //# sourceMappingURL=auth-middleware.d.ts.map

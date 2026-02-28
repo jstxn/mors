@@ -439,8 +439,8 @@ describe('E2EE cipher runtime', () => {
       // Simulate a relay wire payload (what would be transmitted/stored)
       const wirePayload = JSON.stringify({
         encrypted_body: encrypted,
-        sender_id: 42,
-        recipient_id: 99,
+        sender_id: 'acct_42',
+        recipient_id: 'acct_99',
       });
 
       // Canary must not appear anywhere in the wire payload
@@ -458,13 +458,13 @@ describe('E2EE cipher runtime', () => {
 // ciphertext-only wire payloads, successful recipient decrypt, and
 // tamper detection in the real relay send/read flow.
 
-const ALICE_RELAY = { token: 'token-alice-e2ee', userId: 2001, login: 'alice-e2ee' };
-const BOB_RELAY = { token: 'token-bob-e2ee', userId: 2002, login: 'bob-e2ee' };
+const ALICE_RELAY = { token: 'token-alice-e2ee', userId: 'acct_2001', login: 'alice-e2ee' };
+const BOB_RELAY = { token: 'token-bob-e2ee', userId: 'acct_2002', login: 'bob-e2ee' };
 
 const e2eeStubVerifier: TokenVerifier = async (token: string) => {
-  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
-    [ALICE_RELAY.token]: { githubUserId: ALICE_RELAY.userId, githubLogin: ALICE_RELAY.login },
-    [BOB_RELAY.token]: { githubUserId: BOB_RELAY.userId, githubLogin: BOB_RELAY.login },
+  const map: Record<string, { accountId: string; deviceId: string }> = {
+    [ALICE_RELAY.token]: { accountId: ALICE_RELAY.userId, deviceId: ALICE_RELAY.login },
+    [BOB_RELAY.token]: { accountId: BOB_RELAY.userId, deviceId: BOB_RELAY.login },
   };
   return map[token] ?? null;
 };
@@ -493,8 +493,8 @@ describe('E2EE relay transport integration', () => {
       logger: () => {},
       tokenVerifier: e2eeStubVerifier,
       participantStore: {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       },
       messageStore,

@@ -19,16 +19,16 @@ import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
-const ALICE = { token: 'token-alice', userId: 1001, login: 'alice' };
-const BOB = { token: 'token-bob', userId: 1002, login: 'bob' };
-const EVE = { token: 'token-eve', userId: 1003, login: 'eve' };
+const ALICE = { token: 'token-alice', userId: 'acct_1001', login: 'alice' };
+const BOB = { token: 'token-bob', userId: 'acct_1002', login: 'bob' };
+const EVE = { token: 'token-eve', userId: 'acct_1003', login: 'eve' };
 
 /** Stub token verifier mapping test tokens to principals. */
 const stubVerifier: TokenVerifier = async (token: string) => {
-  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
-    [ALICE.token]: { githubUserId: ALICE.userId, githubLogin: ALICE.login },
-    [BOB.token]: { githubUserId: BOB.userId, githubLogin: BOB.login },
-    [EVE.token]: { githubUserId: EVE.userId, githubLogin: EVE.login },
+  const map: Record<string, { accountId: string; deviceId: string }> = {
+    [ALICE.token]: { accountId: ALICE.userId, deviceId: ALICE.login },
+    [BOB.token]: { accountId: BOB.userId, deviceId: BOB.login },
+    [EVE.token]: { accountId: EVE.userId, deviceId: EVE.login },
   };
   return map[token] ?? null;
 };
@@ -80,8 +80,8 @@ describe('relay async messaging core', () => {
 
     // Create participant store backed by message store
     const participantStore: ParticipantStore = {
-      async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-        return messageStore.isParticipant(conversationId, githubUserId);
+      async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+        return messageStore.isParticipant(conversationId, accountId);
       },
     };
 
@@ -121,7 +121,7 @@ describe('relay async messaging core', () => {
       expect(msg['id']).toMatch(/^msg_/);
       expect(msg['thread_id']).toMatch(/^thr_/);
       expect(msg['sender_id']).toBe(ALICE.userId);
-      expect(msg['sender_login']).toBe(ALICE.login);
+      expect(msg['sender_login']).toBe(ALICE.userId);
       expect(msg['recipient_id']).toBe(BOB.userId);
       expect(msg['body']).toBe('Hello from Alice!');
       expect(msg['state']).toBe('delivered');

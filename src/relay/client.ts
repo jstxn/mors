@@ -66,7 +66,7 @@ export interface RelayClientOptions {
 
 /** Payload for a send operation queued offline. */
 export interface SendPayload {
-  recipientId: number;
+  recipientId: string;
   body: string;
   subject?: string;
   inReplyTo?: string;
@@ -88,9 +88,9 @@ export interface RelayMessageResponse {
   id: string;
   thread_id: string;
   in_reply_to: string | null;
-  sender_id: number;
+  sender_id: string;
   sender_login: string;
-  recipient_id: number;
+  recipient_id: string;
   body: string;
   subject: string | null;
   state: string;
@@ -133,7 +133,7 @@ export interface AckResult {
 /** Options for sending an encrypted message via relay. */
 export interface EncryptedSendOptions {
   /** Recipient GitHub user ID. */
-  recipientId: number;
+  recipientId: string;
   /** Plaintext message body to encrypt before sending. */
   body: string;
   /** Optional subject line (not encrypted — metadata). */
@@ -241,7 +241,7 @@ export class RelayClient {
    * across retries, queue flushes, and reconnects.
    */
   async send(options: {
-    recipientId: number;
+    recipientId: string;
     body: string;
     subject?: string;
     inReplyTo?: string;

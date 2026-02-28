@@ -270,8 +270,8 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         id: connectedEventId,
         event: 'connected',
         data: JSON.stringify({
-          github_user_id: principal.githubUserId,
-          github_login: principal.githubLogin,
+          account_id: principal.accountId,
+          device_id: principal.deviceId,
         }),
       });
 
@@ -293,8 +293,8 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         for (const streamEvent of missedEvents) {
           // Filter: only deliver events relevant to this principal
           if (
-            streamEvent.sender_id !== principal.githubUserId &&
-            streamEvent.recipient_id !== principal.githubUserId
+            streamEvent.sender_id !== principal.accountId &&
+            streamEvent.recipient_id !== principal.accountId
           ) {
             continue;
           }
@@ -339,8 +339,8 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
           // Filter: only deliver events relevant to this principal.
           // A user sees events for messages where they are sender or recipient.
           if (
-            streamEvent.sender_id !== principal.githubUserId &&
-            streamEvent.recipient_id !== principal.githubUserId
+            streamEvent.sender_id !== principal.accountId &&
+            streamEvent.recipient_id !== principal.accountId
           ) {
             return;
           }
@@ -450,23 +450,13 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
 
       // ── Sender spoofing prevention (VAL-RELAY-008) ──────────────
       // Actor identity is always derived from the authenticated principal.
-      // If the client provides sender_id or sender_login fields with valid
+      // If the client provides sender_id fields with valid
       // types that don't match the auth principal, reject as a spoof attempt.
-      // Invalid types (e.g. string sender_id) are silently ignored as junk.
       const clientSenderId = body['sender_id'];
-      if (typeof clientSenderId === 'number' && clientSenderId !== principal.githubUserId) {
+      if (typeof clientSenderId === 'string' && clientSenderId !== principal.accountId) {
         send403(
           res,
           'Sender identity mismatch. The sender_id field does not match the authenticated principal. Sender identity is derived from your auth token.'
-        );
-        return;
-      }
-
-      const clientSenderLogin = body['sender_login'];
-      if (typeof clientSenderLogin === 'string' && clientSenderLogin !== principal.githubLogin) {
-        send403(
-          res,
-          'Sender identity mismatch. The sender_login field does not match the authenticated principal. Sender identity is derived from your auth token.'
         );
         return;
       }
@@ -477,10 +467,10 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       const inReplyTo = body['in_reply_to'];
       const dedupeKey = body['dedupe_key'];
 
-      if (typeof recipientId !== 'number') {
+      if (typeof recipientId !== 'string' || recipientId.trim().length === 0) {
         sendJson(res, 400, {
           error: 'validation_error',
-          detail: 'recipient_id is required and must be a number.',
+          detail: 'recipient_id is required and must be a non-empty string.',
         });
         return;
       }
@@ -494,7 +484,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
 
       let result: RelaySendResult;
       try {
-        result = messageStore.send(principal.githubUserId, principal.githubLogin, {
+        result = messageStore.send(principal.accountId, principal.accountId, {
           recipientId,
           body: messageBody,
           subject: typeof subject === 'string' ? subject : undefined,
@@ -523,7 +513,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       const urlObj = new URL(url, `http://localhost`);
       const unreadOnly = urlObj.searchParams.get('unread') === 'true';
 
-      const messages = messageStore.inbox(principal.githubUserId, { unreadOnly });
+      const messages = messageStore.inbox(principal.accountId, { unreadOnly });
       sendJson(res, 200, { count: messages.length, messages });
       return;
     }
@@ -540,7 +530,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
             return;
           }
           try {
-            const result = messageStore.read(messageId, principal.githubUserId);
+            const result = messageStore.read(messageId, principal.accountId);
             sendJson(res, 200, { message: result.message, first_read: result.firstRead });
           } catch (err: unknown) {
             if (err instanceof RelayMessageNotFoundError) {
@@ -560,7 +550,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
             return;
           }
           try {
-            const result = messageStore.ack(messageId, principal.githubUserId);
+            const result = messageStore.ack(messageId, principal.accountId);
             sendJson(res, 200, { message: result.message, first_ack: result.firstAck });
           } catch (err: unknown) {
             if (err instanceof RelayMessageNotFoundError) {
@@ -587,7 +577,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
           }
 
           // Authorization: only sender or recipient can view
-          if (!messageStore.isMessageParticipant(messageId, principal.githubUserId)) {
+          if (!messageStore.isMessageParticipant(messageId, principal.accountId)) {
             send403(res, 'Not a participant of this conversation. Access denied.');
             return;
           }
@@ -610,7 +600,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
 
       const isAllowed = await participantStore.isParticipant(
         convRoute.conversationId,
-        principal.githubUserId
+        principal.accountId
       );
       if (!isAllowed) {
         send403(
@@ -627,8 +617,8 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       sendJson(res, 200, {
         conversationId: convRoute.conversationId,
         principal: {
-          githubUserId: principal.githubUserId,
-          githubLogin: principal.githubLogin,
+          accountId: principal.accountId,
+          deviceId: principal.deviceId,
         },
       });
       return;

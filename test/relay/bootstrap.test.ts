@@ -22,7 +22,7 @@ import { getTestPort } from '../helpers/test-port.js';
 const TEST_TOKEN = 'test-token-bootstrap';
 const stubVerifier: TokenVerifier = async (token: string) => {
   if (token === TEST_TOKEN) {
-    return { githubUserId: 1, githubLogin: 'test-user' };
+    return { accountId: "acct_1", deviceId: 'device-test-user' };
   }
   return null;
 };

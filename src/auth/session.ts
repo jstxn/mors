@@ -6,8 +6,8 @@
  * - Graceful handling of corrupt/missing session files
  * - Schema validation on load to reject partial data
  *
- * Session identity is bound to the stable GitHub numeric user ID
- * (not the mutable login/username string) per VAL-AUTH-008.
+ * Session identity is bound to the stable mors-native account ID
+ * (derived from invite-token bootstrap) per VAL-AUTH-008.
  *
  * Each device gets its own config directory and session file,
  * enabling multi-device support (VAL-AUTH-009).
@@ -29,23 +29,22 @@ const SESSION_FILE = 'session.json';
  */
 const AUTH_MARKER_FILE = '.auth-enabled';
 
+/** Signing key file name. */
+const SIGNING_KEY_FILE = '.signing-key';
+
 /**
  * Persisted auth session data.
  *
- * The githubUserId is the stable identity key — it does not change
- * when a user renames their GitHub account (VAL-AUTH-008).
+ * The accountId is the stable identity key — derived from invite-token
+ * bootstrap and immutable after creation (VAL-AUTH-008).
  */
 export interface AuthSession {
-  /** GitHub OAuth access token. */
+  /** Mors-native session token (HMAC-signed). */
   accessToken: string;
-  /** Token type (typically "bearer"). */
+  /** Token type (always "bearer"). */
   tokenType: string;
-  /** OAuth scope granted. */
-  scope: string;
-  /** Stable GitHub numeric user ID (identity key). */
-  githubUserId: number;
-  /** Current GitHub login (informational, may change). */
-  githubLogin: string;
+  /** Stable mors account ID (identity key, derived from invite token). */
+  accountId: string;
   /** Unique device identifier for this installation. */
   deviceId: string;
   /** ISO-8601 timestamp of session creation. */
@@ -58,9 +57,7 @@ export interface AuthSession {
 const REQUIRED_SESSION_FIELDS: (keyof AuthSession)[] = [
   'accessToken',
   'tokenType',
-  'scope',
-  'githubUserId',
-  'githubLogin',
+  'accountId',
   'deviceId',
   'createdAt',
 ];
@@ -129,16 +126,14 @@ export function loadSession(configDir: string): AuthSession | null {
   }
 
   // Type-check critical fields
-  if (typeof obj['accessToken'] !== 'string' || typeof obj['githubUserId'] !== 'number') {
+  if (typeof obj['accessToken'] !== 'string' || typeof obj['accountId'] !== 'string') {
     return null;
   }
 
   return {
     accessToken: obj['accessToken'] as string,
     tokenType: obj['tokenType'] as string,
-    scope: obj['scope'] as string,
-    githubUserId: obj['githubUserId'] as number,
-    githubLogin: obj['githubLogin'] as string,
+    accountId: obj['accountId'] as string,
     deviceId: obj['deviceId'] as string,
     createdAt: obj['createdAt'] as string,
   };
@@ -195,4 +190,37 @@ export function markAuthEnabled(configDir: string): void {
  */
 export function isAuthEnabled(configDir: string): boolean {
   return existsSync(join(configDir, AUTH_MARKER_FILE));
+}
+
+/**
+ * Save the signing key for session token generation/verification.
+ *
+ * @param configDir - The config directory.
+ * @param signingKey - Hex-encoded signing key.
+ */
+export function saveSigningKey(configDir: string, signingKey: string): void {
+  mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+  chmodSync(configDir, DIR_MODE);
+
+  const keyPath = join(configDir, SIGNING_KEY_FILE);
+  writeFileSync(keyPath, signingKey + '\n', { mode: SESSION_FILE_MODE });
+  chmodSync(keyPath, SESSION_FILE_MODE);
+}
+
+/**
+ * Load the signing key from disk.
+ *
+ * @param configDir - The config directory.
+ * @returns The signing key string, or null if not found.
+ */
+export function loadSigningKey(configDir: string): string | null {
+  const keyPath = join(configDir, SIGNING_KEY_FILE);
+
+  if (!existsSync(keyPath)) return null;
+
+  try {
+    return readFileSync(keyPath, 'utf-8').trim();
+  } catch {
+    return null;
+  }
 }

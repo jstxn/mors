@@ -50,8 +50,8 @@ function testConfig(): RelayConfig {
 /** Stub token verifier that maps known tokens to principals. */
 function stubTokenVerifier(): TokenVerifier {
   const principals = new Map<string, AuthPrincipal>([
-    ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-    ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+    ['token-alice', { accountId: 'acct_1001', deviceId: 'device-alice' }],
+    ['token-bob', { accountId: 'acct_1002', deviceId: 'device-bob' }],
   ]);
   return async (token: string) => principals.get(token) ?? null;
 }
@@ -63,8 +63,8 @@ function controllableTokenVerifier(): {
   restoreToken: (token: string, principal: AuthPrincipal) => void;
 } {
   const principals = new Map<string, AuthPrincipal>([
-    ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-    ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+    ['token-alice', { accountId: 'acct_1001', deviceId: 'device-alice' }],
+    ['token-bob', { accountId: 'acct_1002', deviceId: 'device-bob' }],
   ]);
 
   const verifier: TokenVerifier = async (token: string) => {
@@ -132,7 +132,7 @@ describe('CLI watch --remote integration', () => {
         logger: () => {},
         tokenVerifier: stubTokenVerifier(),
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -155,8 +155,8 @@ describe('CLI watch --remote integration', () => {
       try {
         const evts = await collectEvents(handle, 1);
         expect(evts[0].event).toBe('connected');
-        expect(evts[0].data.github_user_id).toBe(1001);
-        expect(evts[0].data.github_login).toBe('alice');
+        expect(evts[0].data.account_id).toBe('acct_1001');
+        expect(evts[0].data.device_id).toBe('device-alice');
         expect(handle.state).toBe('connected');
       } finally {
         handle.stop();
@@ -173,8 +173,8 @@ describe('CLI watch --remote integration', () => {
         await collectEvents(handle, 1); // connected
 
         // Send a message to alice
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Hello from remote watch test',
         });
 
@@ -183,8 +183,8 @@ describe('CLI watch --remote integration', () => {
         expect(msgEvt).toBeDefined();
         // SSE events contain metadata (not full body) per server event shape
         const msgData = (msgEvt as RemoteWatchEvent).data;
-        expect(msgData.sender_id).toBe(1002);
-        expect(msgData.recipient_id).toBe(1001);
+        expect(msgData.sender_id).toBe('acct_1002');
+        expect(msgData.recipient_id).toBe('acct_1001');
         expect(msgData.message_id).toBeDefined();
         expect(msgData.thread_id).toBeDefined();
         expect((msgEvt as RemoteWatchEvent).id).toBeDefined();
@@ -222,7 +222,7 @@ describe('CLI watch --remote integration', () => {
         logger: () => {},
         tokenVerifier: stubTokenVerifier(),
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -247,8 +247,8 @@ describe('CLI watch --remote integration', () => {
         await collectEvents(handle1, 1); // connected
 
         // Send a message
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Before disconnect',
         });
         await collectEvents(handle1, 2);
@@ -258,8 +258,8 @@ describe('CLI watch --remote integration', () => {
         handle1.stop();
 
         // Send another message while disconnected
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'During disconnect',
         });
 
@@ -298,8 +298,8 @@ describe('CLI watch --remote integration', () => {
         expect(connectedId).toBeDefined();
 
         // Send a message
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Track event ID',
         });
         await collectEvents(handle, 2);
@@ -373,7 +373,7 @@ describe('CLI watch --remote integration', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },
@@ -454,7 +454,7 @@ describe('CLI watch --remote integration', () => {
         logger: () => {},
         tokenVerifier: tokenControl.verifier,
         participantStore: {
-          async isParticipant(conversationId: string, userId: number) {
+          async isParticipant(conversationId: string, userId: string) {
             return messageStore.isParticipant(conversationId, userId);
           },
         },

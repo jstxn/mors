@@ -20,14 +20,14 @@ import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
-const ALICE = { token: 'token-alice', userId: 1001, login: 'alice' };
-const BOB = { token: 'token-bob', userId: 1002, login: 'bob' };
+const ALICE = { token: 'token-alice', userId: 'acct_1001', login: 'alice' };
+const BOB = { token: 'token-bob', userId: 'acct_1002', login: 'bob' };
 
 /** Stub token verifier mapping test tokens to principals. */
 const stubVerifier: TokenVerifier = async (token: string) => {
-  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
-    [ALICE.token]: { githubUserId: ALICE.userId, githubLogin: ALICE.login },
-    [BOB.token]: { githubUserId: BOB.userId, githubLogin: BOB.login },
+  const map: Record<string, { accountId: string; deviceId: string }> = {
+    [ALICE.token]: { accountId: ALICE.userId, deviceId: ALICE.login },
+    [BOB.token]: { accountId: BOB.userId, deviceId: BOB.login },
   };
   return map[token] ?? null;
 };

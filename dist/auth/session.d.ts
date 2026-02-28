@@ -6,8 +6,8 @@
  * - Graceful handling of corrupt/missing session files
  * - Schema validation on load to reject partial data
  *
- * Session identity is bound to the stable GitHub numeric user ID
- * (not the mutable login/username string) per VAL-AUTH-008.
+ * Session identity is bound to the stable mors-native account ID
+ * (derived from invite-token bootstrap) per VAL-AUTH-008.
  *
  * Each device gets its own config directory and session file,
  * enabling multi-device support (VAL-AUTH-009).
@@ -15,20 +15,16 @@
 /**
  * Persisted auth session data.
  *
- * The githubUserId is the stable identity key — it does not change
- * when a user renames their GitHub account (VAL-AUTH-008).
+ * The accountId is the stable identity key — derived from invite-token
+ * bootstrap and immutable after creation (VAL-AUTH-008).
  */
 export interface AuthSession {
-    /** GitHub OAuth access token. */
+    /** Mors-native session token (HMAC-signed). */
     accessToken: string;
-    /** Token type (typically "bearer"). */
+    /** Token type (always "bearer"). */
     tokenType: string;
-    /** OAuth scope granted. */
-    scope: string;
-    /** Stable GitHub numeric user ID (identity key). */
-    githubUserId: number;
-    /** Current GitHub login (informational, may change). */
-    githubLogin: string;
+    /** Stable mors account ID (identity key, derived from invite token). */
+    accountId: string;
     /** Unique device identifier for this installation. */
     deviceId: string;
     /** ISO-8601 timestamp of session creation. */
@@ -84,4 +80,18 @@ export declare function markAuthEnabled(configDir: string): void;
  * @returns true if the auth-enabled marker exists.
  */
 export declare function isAuthEnabled(configDir: string): boolean;
+/**
+ * Save the signing key for session token generation/verification.
+ *
+ * @param configDir - The config directory.
+ * @param signingKey - Hex-encoded signing key.
+ */
+export declare function saveSigningKey(configDir: string, signingKey: string): void;
+/**
+ * Load the signing key from disk.
+ *
+ * @param configDir - The config directory.
+ * @returns The signing key string, or null if not found.
+ */
+export declare function loadSigningKey(configDir: string): string | null;
 //# sourceMappingURL=session.d.ts.map

@@ -3,7 +3,7 @@
  *
  * Provides:
  * - Token extraction from Authorization: Bearer <token> header
- * - Pluggable token verification (GitHub API in production, stub in tests)
+ * - Pluggable token verification (native HMAC tokens in production, stub in tests)
  * - Principal identity extraction from validated tokens
  * - Object-level authorization via participant store
  *
@@ -24,10 +24,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 /** Authenticated principal identity derived from a validated token. */
 export interface AuthPrincipal {
-  /** Stable GitHub numeric user ID (identity key). */
-  githubUserId: number;
-  /** Current GitHub login (informational, may change). */
-  githubLogin: string;
+  /** Stable mors account ID (identity key). */
+  accountId: string;
+  /** Device ID from the session token. */
+  deviceId: string;
 }
 
 /**
@@ -36,7 +36,7 @@ export interface AuthPrincipal {
  * Given a bearer token, returns the authenticated principal identity
  * or null if the token is invalid/expired/revoked.
  *
- * In production, this calls the GitHub API (/user).
+ * In production, this verifies HMAC-signed native session tokens.
  * In tests, this is a stub that maps tokens to principals.
  */
 export type TokenVerifier = (token: string) => Promise<AuthPrincipal | null>;
@@ -48,7 +48,7 @@ export type TokenVerifier = (token: string) => Promise<AuthPrincipal | null>;
  * Returns true if the user has access, false otherwise.
  */
 export interface ParticipantStore {
-  isParticipant(conversationId: string, githubUserId: number): Promise<boolean>;
+  isParticipant(conversationId: string, accountId: string): Promise<boolean>;
 }
 
 /** Auth result from extractAndVerify. */
@@ -99,7 +99,7 @@ export function extractBearerToken(authHeader: string | undefined): string | nul
  */
 export async function extractAndVerify(
   req: IncomingMessage,
-  verifier: TokenVerifier,
+  verifier: TokenVerifier
 ): Promise<AuthResult> {
   const authHeader = req.headers['authorization'];
   const token = extractBearerToken(authHeader);
@@ -175,38 +175,45 @@ export function parseConversationRoute(url: string): ConversationRoute | null {
 }
 
 /**
- * Default token verifier that calls the GitHub API.
+ * Create a native token verifier that validates HMAC-signed session tokens.
  *
- * Uses the access token to fetch /user and extract the stable numeric ID.
- * Returns null for invalid/expired tokens (401 from GitHub).
+ * Uses the signing key to verify the session token signature and extract
+ * the principal identity (accountId + deviceId).
+ *
+ * @param signingKey - The HMAC signing key for token verification.
+ * @returns A TokenVerifier function.
  */
-export function createGitHubTokenVerifier(apiBaseUrl?: string): TokenVerifier {
-  const baseUrl = apiBaseUrl ?? 'https://api.github.com';
+export function createNativeTokenVerifier(signingKey: string): TokenVerifier {
+  // Lazy import to avoid circular dependency at module level
+  let _verifySessionToken: typeof import('../auth/native.js').verifySessionToken | null = null;
 
   return async (token: string): Promise<AuthPrincipal | null> => {
     try {
-      const response = await fetch(`${baseUrl}/user`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json',
-          'User-Agent': 'mors-relay/0.1.0',
-        },
-      });
-
-      if (response.status === 401) return null;
-      if (!response.ok) return null;
-
-      const data = await response.json() as Record<string, unknown>;
-      if (typeof data['id'] !== 'number' || typeof data['login'] !== 'string') {
-        return null;
+      if (!_verifySessionToken) {
+        const mod = await import('../auth/native.js');
+        _verifySessionToken = mod.verifySessionToken;
       }
 
+      const payload = _verifySessionToken(token, signingKey);
+      if (!payload) return null;
+
       return {
-        githubUserId: data['id'] as number,
-        githubLogin: data['login'] as string,
+        accountId: payload.accountId,
+        deviceId: payload.deviceId,
       };
     } catch {
       return null;
     }
+  };
+}
+
+/**
+ * @deprecated Use createNativeTokenVerifier instead. Kept for backward compatibility
+ * during transition period only.
+ */
+export function createGitHubTokenVerifier(_apiBaseUrl?: string): TokenVerifier {
+  // Return a verifier that always rejects — GitHub auth is no longer supported
+  return async (_token: string): Promise<AuthPrincipal | null> => {
+    return null;
   };
 }

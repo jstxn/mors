@@ -19,14 +19,14 @@ import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
-const ALICE = { token: 'token-alice', userId: 1001, login: 'alice' };
-const BOB = { token: 'token-bob', userId: 1002, login: 'bob' };
+const ALICE = { token: 'token-alice', userId: 'acct_1001', login: 'alice' };
+const BOB = { token: 'token-bob', userId: 'acct_1002', login: 'bob' };
 
 /** Stub token verifier mapping test tokens to principals. */
 const stubVerifier: TokenVerifier = async (token: string) => {
-  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
-    [ALICE.token]: { githubUserId: ALICE.userId, githubLogin: ALICE.login },
-    [BOB.token]: { githubUserId: BOB.userId, githubLogin: BOB.login },
+  const map: Record<string, { accountId: string; deviceId: string }> = {
+    [ALICE.token]: { accountId: ALICE.userId, deviceId: ALICE.login },
+    [BOB.token]: { accountId: BOB.userId, deviceId: BOB.login },
   };
   return map[token] ?? null;
 };
@@ -77,8 +77,8 @@ describe('relay offline queue and transient retry recovery', () => {
     const config = loadRelayConfig({ MORS_RELAY_PORT: String(port), MORS_RELAY_HOST: '127.0.0.1' });
 
     const participantStore: ParticipantStore = {
-      async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-        return messageStore.isParticipant(conversationId, githubUserId);
+      async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+        return messageStore.isParticipant(conversationId, accountId);
       },
     };
 
@@ -143,8 +143,8 @@ describe('relay offline queue and transient retry recovery', () => {
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const participantStore: ParticipantStore = {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       };
       server = createRelayServer(config, {
@@ -192,8 +192,8 @@ describe('relay offline queue and transient retry recovery', () => {
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const participantStore: ParticipantStore = {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       };
       server = createRelayServer(config, {
@@ -260,8 +260,8 @@ describe('relay offline queue and transient retry recovery', () => {
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const participantStore: ParticipantStore = {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       };
       server = createRelayServer(config, {
@@ -300,8 +300,8 @@ describe('relay offline queue and transient retry recovery', () => {
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const participantStore: ParticipantStore = {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       };
       server = createRelayServer(config, {
@@ -336,8 +336,8 @@ describe('relay offline queue and transient retry recovery', () => {
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const participantStore: ParticipantStore = {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       };
       server = createRelayServer(config, {
@@ -673,8 +673,8 @@ describe('relay offline queue and transient retry recovery', () => {
         MORS_RELAY_HOST: '127.0.0.1',
       });
       const participantStore: ParticipantStore = {
-        async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-          return messageStore.isParticipant(conversationId, githubUserId);
+        async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+          return messageStore.isParticipant(conversationId, accountId);
         },
       };
       server = createRelayServer(config, {

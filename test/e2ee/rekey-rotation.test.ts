@@ -371,8 +371,8 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
 
       // Store in relay with ciphertext body
       const store = new RelayMessageStore();
-      const result = store.send(42, 'alice', {
-        recipientId: 99,
+      const result = store.send('acct_42', 'alice', {
+        recipientId: 'acct_99',
         body: ciphertextBody,
       });
 
@@ -395,9 +395,9 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       const ciphertextBody = JSON.stringify(encrypted);
 
       const store = new RelayMessageStore();
-      store.send(42, 'alice', { recipientId: 99, body: ciphertextBody });
+      store.send('acct_42', 'alice', { recipientId: 'acct_99', body: ciphertextBody });
 
-      const inbox = store.inbox(99);
+      const inbox = store.inbox('acct_99');
       const serialized = JSON.stringify(inbox);
       expect(serialized).not.toContain(canary);
       expect(serialized).not.toContain('SUPER_SECRET');
@@ -410,8 +410,8 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       const encrypted = encryptMessage(sharedSecret, canary);
 
       const store = new RelayMessageStore();
-      const { message } = store.send(42, 'alice', {
-        recipientId: 99,
+      const { message } = store.send('acct_42', 'alice', {
+        recipientId: 'acct_99',
         body: JSON.stringify(encrypted),
       });
 
@@ -430,8 +430,8 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       // The relay message store itself never contains plaintext when
       // the client properly sends ciphertext as the body.
       const store = new RelayMessageStore();
-      const result = store.send(42, 'alice', {
-        recipientId: 99,
+      const result = store.send('acct_42', 'alice', {
+        recipientId: 'acct_99',
         body: JSON.stringify(encrypted),
       });
 
@@ -447,18 +447,18 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       const encrypted = encryptMessage(sharedSecret, canary);
 
       const store = new RelayMessageStore();
-      const { message } = store.send(42, 'alice', {
-        recipientId: 99,
+      const { message } = store.send('acct_42', 'alice', {
+        recipientId: 'acct_99',
         body: JSON.stringify(encrypted),
       });
 
       // Read
-      const readResult = store.read(message.id, 99);
+      const readResult = store.read(message.id, 'acct_99');
       const readSerialized = JSON.stringify(readResult);
       expect(readSerialized).not.toContain(canary);
 
       // Ack
-      const ackResult = store.ack(message.id, 99);
+      const ackResult = store.ack(message.id, 'acct_99');
       const ackSerialized = JSON.stringify(ackResult);
       expect(ackSerialized).not.toContain(canary);
     });
@@ -473,8 +473,8 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       const messageIds: string[] = [];
       for (const canary of canaries) {
         const encrypted = encryptMessage(sharedSecret, canary);
-        const { message } = store.send(42, 'alice', {
-          recipientId: 99,
+        const { message } = store.send('acct_42', 'alice', {
+          recipientId: 'acct_99',
           body: JSON.stringify(encrypted),
         });
         messageIds.push(message.id);
@@ -482,17 +482,17 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
 
       // Read all messages
       for (const id of messageIds) {
-        store.read(id, 99);
+        store.read(id, 'acct_99');
       }
 
       // Ack all messages
       for (const id of messageIds) {
-        store.ack(id, 99);
+        store.ack(id, 'acct_99');
       }
 
       // Full state scan: inbox, sentBy, get each
-      const inbox = store.inbox(99);
-      const sent = store.sentBy(42);
+      const inbox = store.inbox('acct_99');
+      const sent = store.sentBy('acct_42');
       const allMessages = messageIds.map((id) => store.get(id));
 
       const fullStateSerialized = JSON.stringify({ inbox, sent, allMessages });
@@ -509,8 +509,8 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
 
       // Simulate what the relay HTTP handler would return
       const store = new RelayMessageStore();
-      const { message } = store.send(42, 'alice', {
-        recipientId: 99,
+      const { message } = store.send('acct_42', 'alice', {
+        recipientId: 'acct_99',
         body: JSON.stringify(encrypted),
       });
 

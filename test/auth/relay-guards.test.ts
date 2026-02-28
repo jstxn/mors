@@ -15,7 +15,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig } from '../../src/relay/config.js';
-import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
+import type { TokenVerifier, AuthPrincipal } from '../../src/relay/auth-middleware.js';
 import { getTestPort } from '../helpers/test-port.js';
 
 /** Helper to make HTTP requests to the relay server. */
@@ -34,12 +34,12 @@ async function fetchRelay(
  * Maps access tokens to principal identities.
  */
 function createStubVerifier(
-  tokenMap: Record<string, { githubUserId: number; githubLogin: string }>
+  tokenMap: Record<string, { accountId: string; deviceId: string }>
 ): TokenVerifier {
   return async (token: string) => {
     const user = tokenMap[token];
     if (!user) return null;
-    return { githubUserId: user.githubUserId, githubLogin: user.githubLogin };
+    return { accountId: user.accountId, deviceId: user.deviceId };
   };
 }
 
@@ -201,8 +201,8 @@ describe('relay auth guards', () => {
   describe('403 for non-participant access', () => {
     const validToken = 'valid-token-alice';
     const tokenMap = {
-      [validToken]: { githubUserId: 100, githubLogin: 'alice' },
-      'valid-token-bob': { githubUserId: 200, githubLogin: 'bob' },
+      [validToken]: { accountId: 'acct_100', deviceId: 'device-alice' },
+      'valid-token-bob': { accountId: 'acct_200', deviceId: 'device-bob' },
     };
 
     it('returns 403 when authenticated user is not a participant of the conversation', async () => {
@@ -212,9 +212,9 @@ describe('relay auth guards', () => {
       server = createRelayServer(config, {
         tokenVerifier: verifier,
         participantStore: {
-          isParticipant: async (conversationId: string, githubUserId: number) => {
+          isParticipant: async (conversationId: string, accountId: string) => {
             // Only bob (200) is participant of conv-1
-            return conversationId === 'conv-1' && githubUserId === 200;
+            return conversationId === 'conv-1' && accountId === 'acct_200';
           },
         },
       });
@@ -239,8 +239,8 @@ describe('relay auth guards', () => {
       server = createRelayServer(config, {
         tokenVerifier: verifier,
         participantStore: {
-          isParticipant: async (conversationId: string, githubUserId: number) => {
-            return conversationId === 'conv-1' && githubUserId === 200;
+          isParticipant: async (conversationId: string, accountId: string) => {
+            return conversationId === 'conv-1' && accountId === 'acct_200';
           },
         },
         onConversationAccess: () => {
@@ -264,8 +264,8 @@ describe('relay auth guards', () => {
       server = createRelayServer(config, {
         tokenVerifier: verifier,
         participantStore: {
-          isParticipant: async (conversationId: string, githubUserId: number) => {
-            return conversationId === 'conv-1' && githubUserId === 200;
+          isParticipant: async (conversationId: string, accountId: string) => {
+            return conversationId === 'conv-1' && accountId === 'acct_200';
           },
         },
       });
@@ -288,7 +288,7 @@ describe('relay auth guards', () => {
       server = createRelayServer(config, {
         tokenVerifier: verifier,
         participantStore: {
-          isParticipant: async (_conversationId: string, _githubUserId: number) => {
+          isParticipant: async (_conversationId: string, _accountId: string) => {
             // No one has access to conv-secret
             return false;
           },
@@ -328,12 +328,12 @@ describe('relay auth guards', () => {
       let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier(tokenMap);
-      let capturedPrincipal: { githubUserId: number; githubLogin: string } | null = null;
+      let capturedPrincipal: { accountId: string; deviceId: string } | null = null;
       server = createRelayServer(config, {
         tokenVerifier: verifier,
         participantStore: {
-          isParticipant: async (_conversationId: string, githubUserId: number) => {
-            return githubUserId === 200;
+          isParticipant: async (_conversationId: string, accountId: string) => {
+            return accountId === 'acct_200';
           },
         },
         onConversationAccess: (principal) => {
@@ -347,9 +347,9 @@ describe('relay auth guards', () => {
         headers: { Authorization: 'Bearer valid-token-bob' },
       });
       expect(capturedPrincipal).not.toBeNull();
-      const p = capturedPrincipal as unknown as { githubUserId: number; githubLogin: string };
-      expect(p.githubUserId).toBe(200);
-      expect(p.githubLogin).toBe('bob');
+      const p = capturedPrincipal as unknown as AuthPrincipal;
+      expect(p.accountId).toBe('acct_200');
+      expect(p.deviceId).toBe('device-bob');
     });
   });
 
@@ -360,7 +360,7 @@ describe('relay auth guards', () => {
       let port = getTestPort();
       const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
       const verifier = createStubVerifier({
-        'valid-token': { githubUserId: 300, githubLogin: 'charlie' },
+        'valid-token': { accountId: 'acct_300', deviceId: 'device-charlie' },
       });
       server = createRelayServer(config, {
         tokenVerifier: verifier,
@@ -493,7 +493,7 @@ describe('relay auth guards', () => {
 
   describe('fail-closed when participantStore is absent', () => {
     const tokenMap = {
-      'valid-token-alice': { githubUserId: 100, githubLogin: 'alice' },
+      'valid-token-alice': { accountId: 'acct_100', deviceId: 'device-alice' },
     };
 
     it('returns 403 on conversation endpoint when authenticated but no participantStore', async () => {

@@ -184,8 +184,8 @@ export function createRelayServer(config, options) {
                 id: connectedEventId,
                 event: 'connected',
                 data: JSON.stringify({
-                    github_user_id: principal.githubUserId,
-                    github_login: principal.githubLogin,
+                    account_id: principal.accountId,
+                    device_id: principal.deviceId,
                 }),
             });
             // Track this connection
@@ -203,8 +203,8 @@ export function createRelayServer(config, options) {
                 const missedEvents = messageStore.getEventsSince(lastEventId);
                 for (const streamEvent of missedEvents) {
                     // Filter: only deliver events relevant to this principal
-                    if (streamEvent.sender_id !== principal.githubUserId &&
-                        streamEvent.recipient_id !== principal.githubUserId) {
+                    if (streamEvent.sender_id !== principal.accountId &&
+                        streamEvent.recipient_id !== principal.accountId) {
                         continue;
                     }
                     writeSSE(res, {
@@ -243,8 +243,8 @@ export function createRelayServer(config, options) {
                         return;
                     // Filter: only deliver events relevant to this principal.
                     // A user sees events for messages where they are sender or recipient.
-                    if (streamEvent.sender_id !== principal.githubUserId &&
-                        streamEvent.recipient_id !== principal.githubUserId) {
+                    if (streamEvent.sender_id !== principal.accountId &&
+                        streamEvent.recipient_id !== principal.accountId) {
                         return;
                     }
                     writeSSE(res, {
@@ -339,17 +339,11 @@ export function createRelayServer(config, options) {
             }
             // ── Sender spoofing prevention (VAL-RELAY-008) ──────────────
             // Actor identity is always derived from the authenticated principal.
-            // If the client provides sender_id or sender_login fields with valid
+            // If the client provides sender_id fields with valid
             // types that don't match the auth principal, reject as a spoof attempt.
-            // Invalid types (e.g. string sender_id) are silently ignored as junk.
             const clientSenderId = body['sender_id'];
-            if (typeof clientSenderId === 'number' && clientSenderId !== principal.githubUserId) {
+            if (typeof clientSenderId === 'string' && clientSenderId !== principal.accountId) {
                 send403(res, 'Sender identity mismatch. The sender_id field does not match the authenticated principal. Sender identity is derived from your auth token.');
-                return;
-            }
-            const clientSenderLogin = body['sender_login'];
-            if (typeof clientSenderLogin === 'string' && clientSenderLogin !== principal.githubLogin) {
-                send403(res, 'Sender identity mismatch. The sender_login field does not match the authenticated principal. Sender identity is derived from your auth token.');
                 return;
             }
             const recipientId = body['recipient_id'];
@@ -357,10 +351,10 @@ export function createRelayServer(config, options) {
             const subject = body['subject'];
             const inReplyTo = body['in_reply_to'];
             const dedupeKey = body['dedupe_key'];
-            if (typeof recipientId !== 'number') {
+            if (typeof recipientId !== 'string' || recipientId.trim().length === 0) {
                 sendJson(res, 400, {
                     error: 'validation_error',
-                    detail: 'recipient_id is required and must be a number.',
+                    detail: 'recipient_id is required and must be a non-empty string.',
                 });
                 return;
             }
@@ -373,7 +367,7 @@ export function createRelayServer(config, options) {
             }
             let result;
             try {
-                result = messageStore.send(principal.githubUserId, principal.githubLogin, {
+                result = messageStore.send(principal.accountId, principal.accountId, {
                     recipientId,
                     body: messageBody,
                     subject: typeof subject === 'string' ? subject : undefined,
@@ -400,7 +394,7 @@ export function createRelayServer(config, options) {
         if ((url === '/inbox' || url.startsWith('/inbox?')) && method === 'GET' && messageStore) {
             const urlObj = new URL(url, `http://localhost`);
             const unreadOnly = urlObj.searchParams.get('unread') === 'true';
-            const messages = messageStore.inbox(principal.githubUserId, { unreadOnly });
+            const messages = messageStore.inbox(principal.accountId, { unreadOnly });
             sendJson(res, 200, { count: messages.length, messages });
             return;
         }
@@ -415,7 +409,7 @@ export function createRelayServer(config, options) {
                         return;
                     }
                     try {
-                        const result = messageStore.read(messageId, principal.githubUserId);
+                        const result = messageStore.read(messageId, principal.accountId);
                         sendJson(res, 200, { message: result.message, first_read: result.firstRead });
                     }
                     catch (err) {
@@ -437,7 +431,7 @@ export function createRelayServer(config, options) {
                         return;
                     }
                     try {
-                        const result = messageStore.ack(messageId, principal.githubUserId);
+                        const result = messageStore.ack(messageId, principal.accountId);
                         sendJson(res, 200, { message: result.message, first_ack: result.firstAck });
                     }
                     catch (err) {
@@ -464,7 +458,7 @@ export function createRelayServer(config, options) {
                         return;
                     }
                     // Authorization: only sender or recipient can view
-                    if (!messageStore.isMessageParticipant(messageId, principal.githubUserId)) {
+                    if (!messageStore.isMessageParticipant(messageId, principal.accountId)) {
                         send403(res, 'Not a participant of this conversation. Access denied.');
                         return;
                     }
@@ -482,7 +476,7 @@ export function createRelayServer(config, options) {
                 send403(res, 'Authorization service unavailable. Participant store is not configured.');
                 return;
             }
-            const isAllowed = await participantStore.isParticipant(convRoute.conversationId, principal.githubUserId);
+            const isAllowed = await participantStore.isParticipant(convRoute.conversationId, principal.accountId);
             if (!isAllowed) {
                 send403(res, `Not a participant of conversation "${convRoute.conversationId}". Access denied.`);
                 return;
@@ -493,8 +487,8 @@ export function createRelayServer(config, options) {
             sendJson(res, 200, {
                 conversationId: convRoute.conversationId,
                 principal: {
-                    githubUserId: principal.githubUserId,
-                    githubLogin: principal.githubLogin,
+                    accountId: principal.accountId,
+                    deviceId: principal.deviceId,
                 },
             });
             return;

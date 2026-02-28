@@ -631,8 +631,7 @@ describe('CLI bootstrap guard on real command paths', () => {
         accessToken: 'gho_test_token',
         tokenType: 'bearer',
         scope: 'read:user',
-        githubUserId: 12345,
-        githubLogin: 'testuser',
+        accountId: "acct_12345",
         deviceId: 'device-001',
         createdAt: new Date().toISOString(),
       })
@@ -715,8 +714,7 @@ describe('CLI bootstrap guard on real command paths', () => {
         accessToken: 'gho_test_token',
         tokenType: 'bearer',
         scope: 'read:user',
-        githubUserId: 12345,
-        githubLogin: 'testuser',
+        accountId: "acct_12345",
         deviceId: 'device-001',
         createdAt: new Date().toISOString(),
       })

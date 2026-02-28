@@ -1,9 +1,9 @@
 /**
- * Tests for auth lifecycle gaps: re-gating after logout and token liveness.
+ * Tests for auth lifecycle: re-gating after logout and token liveness.
  *
  * Covers:
  * - VAL-AUTH-005: Protected commands fail with login-required guidance after logout
- * - VAL-AUTH-006: Expired/revoked tokens are detected rather than reported as authenticated
+ * - VAL-AUTH-006: Expired/revoked tokens are detected
  * - Recovery guidance points user to re-login path
  */
 
@@ -16,6 +16,7 @@ import {
   saveSession,
   clearSession,
   markAuthEnabled,
+  saveSigningKey,
   type AuthSession,
 } from '../../src/auth/session.js';
 
@@ -26,17 +27,20 @@ import {
   TokenLivenessError,
 } from '../../src/auth/guards.js';
 
+import {
+  generateSessionToken,
+  generateSigningKey,
+} from '../../src/auth/native.js';
+
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'mors-auth-lifecycle-test-'));
 }
 
 function makeSession(overrides?: Partial<AuthSession>): AuthSession {
   return {
-    accessToken: 'gho_test_token_abc123',
+    accessToken: 'mors-session.test-payload.test-sig',
     tokenType: 'bearer',
-    scope: 'read:user',
-    githubUserId: 12345,
-    githubLogin: 'testuser',
+    accountId: 'acct_test_12345',
     deviceId: 'device-abc-001',
     createdAt: new Date().toISOString(),
     ...overrides,
@@ -54,47 +58,31 @@ describe('auth/guards', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  // ── VAL-AUTH-005: requireAuth re-gates after logout ───────────────
-
   describe('requireAuth', () => {
     it('returns session when auth is enabled and valid session exists', () => {
       const session = makeSession();
       markAuthEnabled(tempDir);
       saveSession(tempDir, session);
-
       const result = requireAuth(tempDir);
       expect(result).not.toBeNull();
-      expect(result).toHaveProperty('accessToken', session.accessToken);
-      expect(result).toHaveProperty('githubUserId', session.githubUserId);
+      expect(result).toHaveProperty('accountId', session.accountId);
     });
 
-    it('returns null when user has never logged in (no auth marker)', () => {
-      // No auth marker, no session → local-only mode, no auth required
-      const result = requireAuth(tempDir);
-      expect(result).toBeNull();
+    it('returns null when user has never logged in', () => {
+      expect(requireAuth(tempDir)).toBeNull();
     });
 
-    it('throws NotAuthenticatedError after logout clears session (auth was enabled)', () => {
+    it('throws NotAuthenticatedError after logout', () => {
       const session = makeSession();
-      // Simulate login: mark auth as enabled + save session
       markAuthEnabled(tempDir);
       saveSession(tempDir, session);
-
-      // Verify session exists first
-      const loaded = requireAuth(tempDir);
-      expect(loaded).toHaveProperty('githubUserId', 12345);
-
-      // Simulate logout: clear session but auth marker remains
+      expect(requireAuth(tempDir)).toHaveProperty('accountId', 'acct_test_12345');
       clearSession(tempDir);
-
-      // Now protected commands should fail with re-auth guidance
       expect(() => requireAuth(tempDir)).toThrow(NotAuthenticatedError);
     });
 
     it('NotAuthenticatedError includes actionable login guidance', () => {
-      // Enable auth so requireAuth actually enforces it
       markAuthEnabled(tempDir);
-
       try {
         requireAuth(tempDir);
         expect.unreachable('Should have thrown');
@@ -104,244 +92,95 @@ describe('auth/guards', () => {
       }
     });
 
-    it('throws NotAuthenticatedError for corrupt session file when auth is enabled', () => {
+    it('throws for corrupt session file when auth is enabled', () => {
       markAuthEnabled(tempDir);
       writeFileSync(join(tempDir, 'session.json'), 'not valid json!!!', { mode: 0o600 });
       expect(() => requireAuth(tempDir)).toThrow(NotAuthenticatedError);
     });
 
-    it('throws NotAuthenticatedError for session with missing fields when auth is enabled', () => {
+    it('throws for session with missing fields when auth is enabled', () => {
       markAuthEnabled(tempDir);
-      writeFileSync(join(tempDir, 'session.json'), JSON.stringify({ accessToken: 'partial' }), {
-        mode: 0o600,
-      });
+      writeFileSync(join(tempDir, 'session.json'), JSON.stringify({ accessToken: 'partial' }), { mode: 0o600 });
       expect(() => requireAuth(tempDir)).toThrow(NotAuthenticatedError);
     });
   });
 
-  // ── VAL-AUTH-006: Token liveness validation ───────────────────────
-
   describe('verifyTokenLiveness', () => {
-    it('resolves with principal for a valid token', async () => {
-      const { createServer } = await import('node:http');
-
-      const server = createServer((_req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ id: 12345, login: 'testuser' }));
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        const result = await verifyTokenLiveness('gho_valid_token', {
-          apiBaseUrl: `http://127.0.0.1:${port}`,
-        });
-
-        expect(result).toHaveProperty('githubUserId', 12345);
-        expect(result).toHaveProperty('githubLogin', 'testuser');
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
+    it('resolves with principal for a valid native session token', async () => {
+      const signingKey = generateSigningKey();
+      const token = generateSessionToken({ accountId: 'acct_valid_123', deviceId: 'device-test-001', signingKey });
+      saveSigningKey(tempDir, signingKey);
+      const result = await verifyTokenLiveness(token, { configDir: tempDir });
+      expect(result).toHaveProperty('accountId', 'acct_valid_123');
+      expect(result).toHaveProperty('deviceId', 'device-test-001');
     });
 
-    it('throws TokenLivenessError for expired token (401)', async () => {
-      const { createServer } = await import('node:http');
-
-      const server = createServer((_req, res) => {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Bad credentials' }));
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        await expect(
-          verifyTokenLiveness('gho_expired_token', {
-            apiBaseUrl: `http://127.0.0.1:${port}`,
-          })
-        ).rejects.toThrow(TokenLivenessError);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
+    it('throws TokenLivenessError for tampered token', async () => {
+      const signingKey = generateSigningKey();
+      const token = generateSessionToken({ accountId: 'acct_tamper', deviceId: 'device-002', signingKey });
+      saveSigningKey(tempDir, signingKey);
+      const tampered = token.replace(/.$/, 'X');
+      await expect(verifyTokenLiveness(tampered, { configDir: tempDir })).rejects.toThrow(TokenLivenessError);
     });
 
-    it('TokenLivenessError includes actionable re-auth guidance', async () => {
-      const { createServer } = await import('node:http');
+    it('throws TokenLivenessError for wrong signing key', async () => {
+      const key1 = generateSigningKey();
+      const key2 = generateSigningKey();
+      const token = generateSessionToken({ accountId: 'acct_wrong_key', deviceId: 'device-003', signingKey: key1 });
+      saveSigningKey(tempDir, key2);
+      await expect(verifyTokenLiveness(token, { configDir: tempDir })).rejects.toThrow(TokenLivenessError);
+    });
 
-      const server = createServer((_req, res) => {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Bad credentials' }));
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
+    it('TokenLivenessError includes re-auth guidance', async () => {
+      const signingKey = generateSigningKey();
+      saveSigningKey(tempDir, signingKey);
       try {
-        await verifyTokenLiveness('gho_expired_token', {
-          apiBaseUrl: `http://127.0.0.1:${port}`,
-        });
+        await verifyTokenLiveness('invalid-token', { configDir: tempDir });
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(TokenLivenessError);
-        const error = err as TokenLivenessError;
-        expect(error.message).toContain('mors login');
-        expect(error.message).toMatch(/expired|revoked/i);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
+        expect((err as TokenLivenessError).message).toContain('mors login');
+        expect((err as TokenLivenessError).message).toMatch(/expired|revoked/i);
       }
     });
 
-    it('throws TokenLivenessError for revoked token (401)', async () => {
-      const { createServer } = await import('node:http');
-
-      const server = createServer((_req, res) => {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'token revoked' }));
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        await expect(
-          verifyTokenLiveness('gho_revoked_token', {
-            apiBaseUrl: `http://127.0.0.1:${port}`,
-          })
-        ).rejects.toThrow(TokenLivenessError);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
-    });
-
-    it('throws TokenLivenessError for server error (5xx)', async () => {
-      const { createServer } = await import('node:http');
-
-      const server = createServer((_req, res) => {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Internal Server Error' }));
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        await expect(
-          verifyTokenLiveness('gho_valid_token', {
-            apiBaseUrl: `http://127.0.0.1:${port}`,
-          })
-        ).rejects.toThrow(TokenLivenessError);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
-    });
-
-    it('throws TokenLivenessError when API returns invalid user data', async () => {
-      const { createServer } = await import('node:http');
-
-      const server = createServer((_req, res) => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ name: 'test' })); // missing id and login
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        await expect(
-          verifyTokenLiveness('gho_valid_token', {
-            apiBaseUrl: `http://127.0.0.1:${port}`,
-          })
-        ).rejects.toThrow(TokenLivenessError);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-      }
+    it('throws when no signing key is available', async () => {
+      await expect(verifyTokenLiveness('some-token', { configDir: tempDir })).rejects.toThrow(TokenLivenessError);
     });
 
     it('does not leak token value in error message', async () => {
-      const { createServer } = await import('node:http');
-
-      const tokenCanary = 'gho_secret_canary_do_not_leak_xyz';
-
-      const server = createServer((_req, res) => {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ message: 'Bad credentials' }));
-      });
-
-      await new Promise<void>((resolve) => {
-        server.listen(0, '127.0.0.1', () => resolve());
-      });
-
-      const addr = server.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-
+      const canary = 'mors-session.secret_canary_do_not_leak.fake';
+      const signingKey = generateSigningKey();
+      saveSigningKey(tempDir, signingKey);
       try {
-        await verifyTokenLiveness(tokenCanary, {
-          apiBaseUrl: `http://127.0.0.1:${port}`,
-        });
+        await verifyTokenLiveness(canary, { configDir: tempDir });
         expect.unreachable('Should have thrown');
       } catch (err) {
         expect(err).toBeInstanceOf(TokenLivenessError);
-        expect((err as TokenLivenessError).message).not.toContain(tokenCanary);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
+        expect((err as TokenLivenessError).message).not.toContain(canary);
       }
     });
   });
 
-  // ── VAL-AUTH-006: Error types and recovery guidance ────────────────
-
   describe('error types', () => {
     it('NotAuthenticatedError has descriptive name', () => {
-      const err = new NotAuthenticatedError();
-      expect(err.name).toBe('NotAuthenticatedError');
+      expect(new NotAuthenticatedError().name).toBe('NotAuthenticatedError');
     });
-
     it('NotAuthenticatedError includes login guidance', () => {
-      const err = new NotAuthenticatedError();
-      expect(err.message).toContain('mors login');
+      expect(new NotAuthenticatedError().message).toContain('mors login');
     });
-
     it('TokenLivenessError has descriptive name', () => {
-      const err = new TokenLivenessError();
-      expect(err.name).toBe('TokenLivenessError');
+      expect(new TokenLivenessError().name).toBe('TokenLivenessError');
     });
-
     it('TokenLivenessError includes re-auth guidance', () => {
       const err = new TokenLivenessError();
       expect(err.message).toContain('mors login');
       expect(err.message).toMatch(/expired|revoked/i);
     });
-
     it('TokenLivenessError accepts optional detail', () => {
-      const err = new TokenLivenessError('GitHub API returned 401');
+      const err = new TokenLivenessError('signing key invalid');
       expect(err.message).toContain('mors login');
-      expect(err.message).toContain('GitHub API returned 401');
+      expect(err.message).toContain('signing key invalid');
     });
   });
 });

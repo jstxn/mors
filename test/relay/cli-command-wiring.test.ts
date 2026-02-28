@@ -26,14 +26,14 @@ import { getTestPort } from '../helpers/test-port.js';
 
 // ── Test identities ─────────────────────────────────────────────────
 
-const ALICE = { token: 'token-alice', userId: 1001, login: 'alice' };
-const BOB = { token: 'token-bob', userId: 1002, login: 'bob' };
+const ALICE = { token: 'token-alice', userId: 'acct_1001', login: 'alice' };
+const BOB = { token: 'token-bob', userId: 'acct_1002', login: 'bob' };
 
 /** Stub token verifier mapping test tokens to principals. */
 const stubVerifier: TokenVerifier = async (token: string) => {
-  const map: Record<string, { githubUserId: number; githubLogin: string }> = {
-    [ALICE.token]: { githubUserId: ALICE.userId, githubLogin: ALICE.login },
-    [BOB.token]: { githubUserId: BOB.userId, githubLogin: BOB.login },
+  const map: Record<string, { accountId: string; deviceId: string }> = {
+    [ALICE.token]: { accountId: ALICE.userId, deviceId: ALICE.login },
+    [BOB.token]: { accountId: BOB.userId, deviceId: BOB.login },
   };
   return map[token] ?? null;
 };
@@ -45,9 +45,7 @@ function makeSession(overrides?: Partial<AuthSession>): AuthSession {
   return {
     accessToken: 'token-alice',
     tokenType: 'bearer',
-    scope: 'read:user',
-    githubUserId: ALICE.userId,
-    githubLogin: ALICE.login,
+    accountId: ALICE.userId,
     deviceId: 'device-cli-001',
     createdAt: new Date().toISOString(),
     ...overrides,
@@ -138,8 +136,8 @@ describe('CLI command wiring to RelayClient (remote mode)', () => {
     });
 
     const participantStore: ParticipantStore = {
-      async isParticipant(conversationId: string, githubUserId: number): Promise<boolean> {
-        return messageStore.isParticipant(conversationId, githubUserId);
+      async isParticipant(conversationId: string, accountId: string): Promise<boolean> {
+        return messageStore.isParticipant(conversationId, accountId);
       },
     };
 
@@ -405,7 +403,7 @@ describe('CLI fallback guidance when remote prerequisites absent', () => {
     saveSession(tempDir, makeSession());
 
     const result = await runCliAsync(
-      ['send', '--to', '1002', '--body', 'test', '--remote', '--json'],
+      ['send', '--to', 'acct_1002', '--body', 'test', '--remote', '--json'],
       {
         configDir: tempDir,
         env: {
@@ -426,7 +424,7 @@ describe('CLI fallback guidance when remote prerequisites absent', () => {
     // No session saved → cleared/logged out
 
     const result = await runCliAsync(
-      ['send', '--to', '1002', '--body', 'test', '--remote', '--json'],
+      ['send', '--to', 'acct_1002', '--body', 'test', '--remote', '--json'],
       {
         configDir: tempDir,
         env: { MORS_RELAY_BASE_URL: 'http://127.0.0.1:3100' },

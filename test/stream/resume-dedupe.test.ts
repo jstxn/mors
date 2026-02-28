@@ -42,8 +42,8 @@ function testConfig(): RelayConfig {
 /** Stub token verifier that maps known tokens to principals. */
 function stubTokenVerifier(): TokenVerifier {
   const principals = new Map<string, AuthPrincipal>([
-    ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-    ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+    ['token-alice', { accountId: "acct_1001", deviceId: 'device-alice' }],
+    ['token-bob', { accountId: "acct_1002", deviceId: 'device-bob' }],
   ]);
   return async (token: string) => principals.get(token) ?? null;
 }
@@ -204,7 +204,7 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       logger: () => {},
       tokenVerifier: stubTokenVerifier(),
       participantStore: {
-        async isParticipant(conversationId: string, userId: number) {
+        async isParticipant(conversationId: string, userId: string) {
           return messageStore.isParticipant(conversationId, userId);
         },
       },
@@ -228,8 +228,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         await sse1.waitForEvents(1); // connected event
 
         // Send a message from Bob to Alice
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'First message',
         });
 
@@ -241,12 +241,12 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         sse1.close();
 
         // Step 2: While disconnected, more events happen
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Second message (during disconnect)',
         });
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Third message (during disconnect)',
         });
       } finally {
@@ -270,8 +270,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         // Verify the replayed events have correct data
         const data0 = parseEventData(messageEvents[0]);
         const data1 = parseEventData(messageEvents[1]);
-        expect(data0.sender_id).toBe(1002);
-        expect(data1.sender_id).toBe(1002);
+        expect(data0.sender_id).toBe('acct_1002');
+        expect(data1.sender_id).toBe('acct_1002');
       } finally {
         sse2.close();
       }
@@ -283,8 +283,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1); // connected
 
-        const sent = messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        const sent = messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Root message',
         });
 
@@ -293,12 +293,12 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         sse1.close();
 
         // While disconnected: reply + ack
-        messageStore.send(1001, 'alice', {
-          recipientId: 1002,
+        messageStore.send('acct_1001', 'alice', {
+          recipientId: 'acct_1002',
           body: 'Reply from Alice',
           inReplyTo: sent.message.id,
         });
-        messageStore.ack(sent.message.id, 1001);
+        messageStore.ack(sent.message.id, 'acct_1001');
 
         // Reconnect
         const sse2 = openSSE(server.port, 'token-alice', { lastEventId: lastId });
@@ -325,8 +325,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1);
 
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'For Alice',
         });
 
@@ -335,12 +335,12 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         sse1.close();
 
         // While disconnected: event for Alice + event NOT for Alice
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Also for Alice',
         });
-        messageStore.send(1002, 'bob', {
-          recipientId: 9999,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_9999',
           body: 'Not for Alice (different recipient)',
         });
 
@@ -353,7 +353,7 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
           expect(msgEvents.length).toBe(1);
 
           const data = parseEventData(msgEvents[0]);
-          expect(data.recipient_id).toBe(1001);
+          expect(data.recipient_id).toBe('acct_1001');
         } finally {
           sse2.close();
         }
@@ -368,8 +368,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1);
 
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'A message',
         });
 
@@ -402,8 +402,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1);
 
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Before disconnect',
         });
 
@@ -412,8 +412,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         sse1.close();
 
         // Event during disconnect
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'During disconnect',
         });
 
@@ -424,8 +424,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
           await sse2.waitForEvents(2);
 
           // Now send a live event
-          messageStore.send(1002, 'bob', {
-            recipientId: 1001,
+          messageStore.send('acct_1002', 'bob', {
+            recipientId: 'acct_1001',
             body: 'After reconnect (live)',
           });
 
@@ -447,16 +447,16 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
   describe('deterministic startup (VAL-STREAM-004)', () => {
     it('does not emit historical create events for pre-existing messages on fresh connect', async () => {
       // Create messages before any SSE connection
-      messageStore.send(1002, 'bob', {
-        recipientId: 1001,
+      messageStore.send('acct_1002', 'bob', {
+        recipientId: 'acct_1001',
         body: 'Pre-existing message 1',
       });
-      messageStore.send(1002, 'bob', {
-        recipientId: 1001,
+      messageStore.send('acct_1002', 'bob', {
+        recipientId: 'acct_1001',
         body: 'Pre-existing message 2',
       });
-      messageStore.send(1002, 'bob', {
-        recipientId: 1001,
+      messageStore.send('acct_1002', 'bob', {
+        recipientId: 'acct_1001',
         body: 'Pre-existing message 3',
       });
 
@@ -478,8 +478,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
 
     it('emits only new events occurring after connection is established', async () => {
       // Pre-existing messages
-      messageStore.send(1002, 'bob', {
-        recipientId: 1001,
+      messageStore.send('acct_1002', 'bob', {
+        recipientId: 'acct_1001',
         body: 'Pre-existing message',
       });
 
@@ -489,8 +489,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         await sse.waitForEvents(1); // connected
 
         // Send a new message AFTER connection
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'New message after connect',
         });
 
@@ -499,7 +499,7 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         expect(msgEvents.length).toBe(1);
 
         const data = parseEventData(msgEvents[0]);
-        expect(data.sender_id).toBe(1002);
+        expect(data.sender_id).toBe('acct_1002');
       } finally {
         sse.close();
       }
@@ -508,8 +508,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
     it('concurrent initial connections do not receive historical create events', async () => {
       // Pre-existing messages
       for (let i = 0; i < 5; i++) {
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: `Pre-existing #${i}`,
         });
       }
@@ -544,8 +544,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1);
 
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Message for dedupe check',
         });
 
@@ -557,8 +557,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         sse1.close();
 
         // Send another message while disconnected
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'During disconnect for dedupe',
         });
 
@@ -591,8 +591,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
 
         // Send 3 messages
         for (let i = 0; i < 3; i++) {
-          messageStore.send(1002, 'bob', {
-            recipientId: 1001,
+          messageStore.send('acct_1002', 'bob', {
+            recipientId: 'acct_1001',
             body: `Message ${i}`,
           });
         }
@@ -638,8 +638,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1);
 
-        const sent = messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        const sent = messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Message for read+ack dedupe',
         });
 
@@ -647,8 +647,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         const cursorAfterCreate = sse1.events[0].id; // connected event as cursor
 
         // Read and ack
-        messageStore.read(sent.message.id, 1001);
-        messageStore.ack(sent.message.id, 1001);
+        messageStore.read(sent.message.id, 'acct_1001');
+        messageStore.ack(sent.message.id, 'acct_1001');
 
         const evts1 = await sse1.waitForEvents(4); // connected + created + read + acked
         const readEvt = evts1.find((e) => e.event === 'message_read');
@@ -685,20 +685,20 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse.waitForEvents(1);
 
-        const sent = messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        const sent = messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Idempotent test message',
         });
         await sse.waitForEvents(2);
 
         // First read and ack
-        messageStore.read(sent.message.id, 1001);
-        messageStore.ack(sent.message.id, 1001);
+        messageStore.read(sent.message.id, 'acct_1001');
+        messageStore.ack(sent.message.id, 'acct_1001');
         await sse.waitForEvents(4);
 
         // Re-read and re-ack (idempotent)
-        messageStore.read(sent.message.id, 1001);
-        messageStore.ack(sent.message.id, 1001);
+        messageStore.read(sent.message.id, 'acct_1001');
+        messageStore.ack(sent.message.id, 'acct_1001');
 
         // Wait — no additional events should appear
         await new Promise((r) => setTimeout(r, 200));
@@ -715,14 +715,14 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         await sse.waitForEvents(1);
 
         // Bob sends to Alice
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'From Bob',
         });
 
         // Alice sends to Bob (Alice sees as sender)
-        messageStore.send(1001, 'alice', {
-          recipientId: 1002,
+        messageStore.send('acct_1001', 'alice', {
+          recipientId: 'acct_1002',
           body: 'From Alice',
         });
 
@@ -745,8 +745,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
   describe('edge cases', () => {
     it('reconnect with unknown Last-Event-ID falls back to no replay', async () => {
       // If the cursor is unknown (e.g., server restarted), treat as fresh connection
-      messageStore.send(1002, 'bob', {
-        recipientId: 1001,
+      messageStore.send('acct_1002', 'bob', {
+        recipientId: 'acct_1001',
         body: 'Pre-existing message',
       });
 
@@ -781,20 +781,20 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         const initialCursor = sse0.events[0].id;
 
         // Create events while sse0 is connected
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Event A',
         });
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Event B',
         });
         await sse0.waitForEvents(3); // connected + 2 events
         sse0.close();
 
         // Step 2: More events happen while disconnected
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Event C (during disconnect)',
         });
 
@@ -839,9 +839,9 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       // (not the connected event ID), so the client can resume correctly after re-auth.
 
       // Setup controllable auth
-      const principals = new Map<string, { githubUserId: number; githubLogin: string }>([
-        ['token-alice', { githubUserId: 1001, githubLogin: 'alice' }],
-        ['token-bob', { githubUserId: 1002, githubLogin: 'bob' }],
+      const principals = new Map<string, AuthPrincipal>([
+        ['token-alice', { accountId: "acct_1001", deviceId: 'device-alice' }],
+        ['token-bob', { accountId: "acct_1002", deviceId: 'device-bob' }],
       ]);
       const controlledVerifier = async (token: string) => principals.get(token) ?? null;
 
@@ -864,12 +864,12 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         const initialCursor = sse0.events[0].id;
 
         // Create events
-        controlledStore.send(1002, 'bob', {
-          recipientId: 1001,
+        controlledStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Event for replay',
         });
-        controlledStore.send(1002, 'bob', {
-          recipientId: 1001,
+        controlledStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Another event for replay',
         });
 
@@ -919,9 +919,9 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
         const cursor0 = sse0.events[0].id;
 
         // Create events
-        messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 1' });
-        messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 2' });
-        messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 3' });
+        messageStore.send('acct_1002', 'bob', { recipientId: 'acct_1001', body: 'Msg 1' });
+        messageStore.send('acct_1002', 'bob', { recipientId: 'acct_1001', body: 'Msg 2' });
+        messageStore.send('acct_1002', 'bob', { recipientId: 'acct_1001', body: 'Msg 3' });
 
         await sse0.waitForEvents(4); // connected + 3 events
         sse0.close();
@@ -936,7 +936,7 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
           sse1.close();
 
           // Create another event after disconnect
-          messageStore.send(1002, 'bob', { recipientId: 1001, body: 'Msg 4 (new)' });
+          messageStore.send('acct_1002', 'bob', { recipientId: 'acct_1001', body: 'Msg 4 (new)' });
 
           // Reconnect using the last replayed event ID as cursor
           const sse2 = openSSE(server.port, 'token-alice', { lastEventId: lastReplayedId });
@@ -962,8 +962,8 @@ describe('SSE resume, cursor determinism, and deduplication', () => {
       try {
         await sse1.waitForEvents(1);
 
-        messageStore.send(1002, 'bob', {
-          recipientId: 1001,
+        messageStore.send('acct_1002', 'bob', {
+          recipientId: 'acct_1001',
           body: 'Event to replay',
         });
 

@@ -6,8 +6,8 @@
  * - Graceful handling of corrupt/missing session files
  * - Schema validation on load to reject partial data
  *
- * Session identity is bound to the stable GitHub numeric user ID
- * (not the mutable login/username string) per VAL-AUTH-008.
+ * Session identity is bound to the stable mors-native account ID
+ * (derived from invite-token bootstrap) per VAL-AUTH-008.
  *
  * Each device gets its own config directory and session file,
  * enabling multi-device support (VAL-AUTH-009).
@@ -26,15 +26,15 @@ const SESSION_FILE = 'session.json';
  * enabling auth gating after logout.
  */
 const AUTH_MARKER_FILE = '.auth-enabled';
+/** Signing key file name. */
+const SIGNING_KEY_FILE = '.signing-key';
 /**
  * Required fields for session validation.
  */
 const REQUIRED_SESSION_FIELDS = [
     'accessToken',
     'tokenType',
-    'scope',
-    'githubUserId',
-    'githubLogin',
+    'accountId',
     'deviceId',
     'createdAt',
 ];
@@ -94,15 +94,13 @@ export function loadSession(configDir) {
         }
     }
     // Type-check critical fields
-    if (typeof obj['accessToken'] !== 'string' || typeof obj['githubUserId'] !== 'number') {
+    if (typeof obj['accessToken'] !== 'string' || typeof obj['accountId'] !== 'string') {
         return null;
     }
     return {
         accessToken: obj['accessToken'],
         tokenType: obj['tokenType'],
-        scope: obj['scope'],
-        githubUserId: obj['githubUserId'],
-        githubLogin: obj['githubLogin'],
+        accountId: obj['accountId'],
         deviceId: obj['deviceId'],
         createdAt: obj['createdAt'],
     };
@@ -155,5 +153,35 @@ export function markAuthEnabled(configDir) {
  */
 export function isAuthEnabled(configDir) {
     return existsSync(join(configDir, AUTH_MARKER_FILE));
+}
+/**
+ * Save the signing key for session token generation/verification.
+ *
+ * @param configDir - The config directory.
+ * @param signingKey - Hex-encoded signing key.
+ */
+export function saveSigningKey(configDir, signingKey) {
+    mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+    chmodSync(configDir, DIR_MODE);
+    const keyPath = join(configDir, SIGNING_KEY_FILE);
+    writeFileSync(keyPath, signingKey + '\n', { mode: SESSION_FILE_MODE });
+    chmodSync(keyPath, SESSION_FILE_MODE);
+}
+/**
+ * Load the signing key from disk.
+ *
+ * @param configDir - The config directory.
+ * @returns The signing key string, or null if not found.
+ */
+export function loadSigningKey(configDir) {
+    const keyPath = join(configDir, SIGNING_KEY_FILE);
+    if (!existsSync(keyPath))
+        return null;
+    try {
+        return readFileSync(keyPath, 'utf-8').trim();
+    }
+    catch {
+        return null;
+    }
 }
 //# sourceMappingURL=session.js.map

@@ -3,7 +3,7 @@
  *
  * Provides:
  * - requireAuth: Gate that checks for a valid local session (re-gates after logout)
- * - verifyTokenLiveness: Validates an access token is still active with GitHub API
+ * - verifyTokenLiveness: Validates a session token is still valid via HMAC verification
  * - NotAuthenticatedError: Thrown when no session exists with login guidance
  * - TokenLivenessError: Thrown when a token is expired/revoked with re-auth guidance
  *
@@ -15,7 +15,7 @@
  */
 
 import { MorsError } from '../errors.js';
-import { loadSession, isAuthEnabled, type AuthSession } from './session.js';
+import { loadSession, loadSigningKey, isAuthEnabled, type AuthSession } from './session.js';
 
 // ── Error types ──────────────────────────────────────────────────────
 
@@ -34,8 +34,7 @@ export class NotAuthenticatedError extends MorsError {
 }
 
 /**
- * Thrown when a token is expired, revoked, or otherwise invalid when validated
- * against the GitHub API.
+ * Thrown when a token is expired, revoked, or otherwise invalid.
  *
  * Provides actionable re-auth guidance to run `mors login`.
  * Never includes the token value in the error message.
@@ -90,64 +89,58 @@ export function requireAuth(configDir: string): AuthSession | null {
 
 /** Options for verifyTokenLiveness. */
 export interface TokenLivenessOptions {
-  /** Base URL for the GitHub API. Defaults to https://api.github.com */
-  apiBaseUrl?: string;
+  /** Signing key for HMAC verification. If not provided, loaded from configDir. */
+  signingKey?: string;
+  /** Config directory for loading signing key. */
+  configDir?: string;
 }
 
 /** Result of a successful token liveness check. */
 export interface TokenLivenessResult {
-  /** Stable GitHub numeric user ID. */
-  githubUserId: number;
-  /** Current GitHub login (informational). */
-  githubLogin: string;
+  /** Stable mors account ID. */
+  accountId: string;
+  /** Device ID from the session token. */
+  deviceId: string;
 }
 
 /**
- * Verify that an access token is still active by calling the GitHub API.
+ * Verify that a session token is still valid.
  *
- * This detects expired, revoked, or otherwise invalid tokens rather than
- * silently treating a locally-persisted session as valid.
+ * This verifies the HMAC signature of the session token and extracts
+ * the principal identity. Detects tampered, revoked, or otherwise
+ * invalid tokens rather than silently treating a locally-persisted
+ * session as valid.
  *
- * @param accessToken - The GitHub OAuth access token to verify.
+ * @param accessToken - The mors session token to verify.
  * @param options - Optional configuration.
  * @returns Principal identity from the valid token.
- * @throws TokenLivenessError if the token is expired, revoked, or invalid.
+ * @throws TokenLivenessError if the token is invalid or cannot be verified.
  */
 export async function verifyTokenLiveness(
   accessToken: string,
   options?: TokenLivenessOptions
 ): Promise<TokenLivenessResult> {
-  const baseUrl = options?.apiBaseUrl ?? 'https://api.github.com';
+  const { verifySessionToken } = await import('./native.js');
 
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}/user`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-        'User-Agent': 'mors-cli/0.1.0',
-      },
-    });
-  } catch {
-    throw new TokenLivenessError('Unable to reach GitHub API to verify token');
+  // Resolve signing key
+  let signingKey = options?.signingKey;
+  if (!signingKey && options?.configDir) {
+    signingKey = loadSigningKey(options.configDir) ?? undefined;
   }
 
-  if (response.status === 401) {
-    throw new TokenLivenessError('GitHub API returned 401 — token is expired or revoked');
+  if (!signingKey) {
+    throw new TokenLivenessError('Unable to verify token — signing key not available');
   }
 
-  if (!response.ok) {
-    throw new TokenLivenessError(`GitHub API returned HTTP ${response.status}`);
-  }
-
-  const data = (await response.json()) as Record<string, unknown>;
-
-  if (typeof data['id'] !== 'number' || typeof data['login'] !== 'string') {
-    throw new TokenLivenessError('GitHub API returned invalid user data');
+  const payload = verifySessionToken(accessToken, signingKey);
+  if (!payload) {
+    throw new TokenLivenessError(
+      'Session token signature is invalid — token may be expired or revoked'
+    );
   }
 
   return {
-    githubUserId: data['id'] as number,
-    githubLogin: data['login'] as string,
+    accountId: payload.accountId,
+    deviceId: payload.deviceId,
   };
 }
