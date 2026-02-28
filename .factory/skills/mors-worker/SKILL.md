@@ -28,7 +28,8 @@ Use for `mors` CLI, schema, storage, security, and integration-test features in 
 5. Run feature-level verification first (targeted tests/commands), then full validators from services manifest.
 6. Perform manual CLI sanity checks for touched command paths and capture observed behavior.
 7. Ensure no long-running orphan processes remain (especially `mors watch` test runs).
-8. Commit only feature-related project files; return thorough handoff with concrete evidence.
+8. Set handoff `skillFeedback.followedProcedure` accurately: if strict red/green order was not followed (outside scaffold exception), set it to false and list deviations.
+9. Commit only feature-related project files; return thorough handoff with concrete evidence.
 
 ## Example Handoff
 
