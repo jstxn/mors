@@ -1,0 +1,28 @@
+{
+  "name": "mors",
+  "version": "0.1.0",
+  "description": "Markdown-first encrypted local CLI messaging",
+  "type": "module",
+  "bin": {
+    "mors": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true,
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.3.2",
+    "eslint": "^10.0.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "vitest": "^4.0.18"
+  }
+}

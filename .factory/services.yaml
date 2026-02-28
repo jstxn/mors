@@ -2,7 +2,7 @@ commands:
   install: npm install
   lint: npm run lint
   typecheck: npm run typecheck
-  test: npm run test -- --test-concurrency=7
+  test: npm run test -- --maxConcurrency=7
   build: npm run build
 
 services: {}
