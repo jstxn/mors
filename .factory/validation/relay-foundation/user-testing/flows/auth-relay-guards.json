@@ -1,0 +1,31 @@
+{
+  "flowId": "auth-relay-guards",
+  "assertions": {
+    "VAL-AUTH-003": {
+      "status": "pass",
+      "evidence": "curl checks against running relay (http://localhost:3100) returned: events_missing=401, conv_missing=401, events_invalid=401, conv_invalid=401, events_expired=401, conv_expired=401, health=200. 401 JSON bodies for protected routes included error=\"unauthorized\" with detail indicating missing/malformed Authorization header or invalid/expired token. Conversation ID used: auth-relay-conv-1."
+    },
+    "VAL-AUTH-004": {
+      "status": "pass",
+      "evidence": "Production relay surface correctly fail-closed (401 on protected conversation/SSE endpoints for non-valid tokens), confirming auth guard enforcement. Direct module import check: parseConversationRoute('/conversations/auth-relay-conv-1/messages') => {conversationId:'auth-relay-conv-1', subpath:'/messages'}; non-conversation route returns null. Unit evidence for object-level 403 behavior executed via npx vitest run test/auth/relay-guards.test.ts --maxConcurrency=7: 25/25 tests passed, including non-participant 403 and no-mutation guard assertions with stub verifier/participant store."
+    },
+    "VAL-AUTH-008": {
+      "status": "pass",
+      "evidence": "Using src/auth/session.ts saveSession/loadSession via tsx: saved session in /tmp/mors-ut-auth-relay-1 with githubUserId=12345 and githubLogin='oldname', then overwrote with same githubUserId=12345 and githubLogin='newname'. loadSession returned githubUserId=12345 and githubLogin='newname', demonstrating stable identity key independent of mutable login text. Source check confirms AuthSession declares githubUserId: number."
+    },
+    "VAL-AUTH-009": {
+      "status": "pass",
+      "evidence": "Created isolated dirs /tmp/mors-ut-auth-relay-1 and /tmp/mors-ut-auth-relay-2. Saved sessions with same githubUserId=12345 but deviceId values auth-relay-device-1 and auth-relay-device-2 respectively. loadSession from each dir returned same account identity and distinct device IDs, confirming multi-device model under one account."
+    },
+    "VAL-AUTH-010": {
+      "status": "pass",
+      "evidence": "After saveSession in /tmp/mors-ut-auth-relay-1, stat checks showed directory mode 0o700 and session file mode 0o600. session.json contains token (expected persisted auth artifact). Wrapped loadSession with console method interception and observed zero console calls (no token/log emission). Source grep checks for token leakage in console logs found no matches for console.*(accessToken|token|Bearer) in src/."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "curl",
+    "node/tsx direct module import"
+  ]
+}

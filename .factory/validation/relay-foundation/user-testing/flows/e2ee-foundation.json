@@ -1,0 +1,22 @@
+{
+  "flowId": "e2ee-foundation",
+  "assertions": {
+    "VAL-E2EE-001": {
+      "status": "pass",
+      "evidence": "Pre-bootstrap assert threw DeviceNotBootstrappedError; bootstrap persisted in /tmp/mors-ut-e2ee-1/e2ee; requireDeviceBootstrap returned bundle (deviceId=device_b9b6c1728d70c66de04587d082288ec2, fingerprint=080a2680b2ca5699a905453fe24a1a090810ac163a1227b422bfe8b33d9a9561); public key lengths x25519=32, ed25519=32; private key file modes x25519=600, ed25519=600."
+    },
+    "VAL-E2EE-002": {
+      "status": "pass",
+      "evidence": "Pre-exchange requireKeyExchange threw KeyExchangeNotCompleteError; A(device_92542faafb2abcac52acb95533425d31)↔B(device_90f4923f6ae2113e376c815f1b849cc6) key exchange completed; isKeyExchangeComplete(A,B)=true; loaded sessions present; shared secrets are symmetric and non-zero 32-byte values; session file modes A->B=600, B->A=600."
+    },
+    "VAL-E2EE-008": {
+      "status": "pass",
+      "evidence": "validateConversationType('direct') succeeded; 'group' and 'channel' threw GroupE2EEUnsupportedError; messages include unsupported wording."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "node/tsx direct module import"
+  ]
+}

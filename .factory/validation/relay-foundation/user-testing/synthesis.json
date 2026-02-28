@@ -1,0 +1,36 @@
+{
+  "milestone": "relay-foundation",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-AUTH-001",
+    "VAL-AUTH-002",
+    "VAL-AUTH-003",
+    "VAL-AUTH-004",
+    "VAL-AUTH-005",
+    "VAL-AUTH-006",
+    "VAL-AUTH-007",
+    "VAL-AUTH-008",
+    "VAL-AUTH-009",
+    "VAL-AUTH-010",
+    "VAL-E2EE-001",
+    "VAL-E2EE-002",
+    "VAL-E2EE-008"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance sections for CLI and Relay API surfaces with isolation rules, auth testing patterns, E2EE testing patterns, and evidence format requirements",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}

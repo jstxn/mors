@@ -1,0 +1,30 @@
+{
+  "flowId": "auth-cli-lifecycle",
+  "assertions": {
+    "VAL-AUTH-001": {
+      "status": "pass",
+      "evidence": "validateAuthConfig invalid=true with missing=[GITHUB_DEVICE_CLIENT_ID (GitHub OAuth App client ID)]; requestDeviceCode export exists"
+    },
+    "VAL-AUTH-002": {
+      "status": "pass",
+      "evidence": "saveSession/loadSession roundtrip succeeded in /tmp/mors-ut-auth-cli-1 with githubUserId=10101 and deviceId=device-ut-1"
+    },
+    "VAL-AUTH-005": {
+      "status": "pass",
+      "evidence": "clearSession removed local session in /tmp/mors-ut-auth-cli-2; requireAuth re-gated with NotAuthenticatedError"
+    },
+    "VAL-AUTH-006": {
+      "status": "pass",
+      "evidence": "TokenExpiredError and TokenLivenessError include re-auth guidance; verifyTokenLiveness(bogus) against mock /user endpoint threw TokenLivenessError"
+    },
+    "VAL-AUTH-007": {
+      "status": "pass",
+      "evidence": "validateAuthConfig flagged missing OAuth vars=[GITHUB_DEVICE_CLIENT_ID, GITHUB_DEVICE_SCOPE, GITHUB_DEVICE_ENDPOINT, GITHUB_TOKEN_ENDPOINT]; AuthConfigError message includes missing vars + setup guidance"
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "node/tsx direct module import"
+  ]
+}
