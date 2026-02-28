@@ -24,6 +24,7 @@ import {
   type AuthPrincipal,
   isPublicRoute,
   extractAndVerify,
+  extractBearerToken,
   send401,
   send403,
   parseConversationRoute,
@@ -62,6 +63,15 @@ export interface RelayServerOptions {
    * When provided, enables /messages, /inbox, and /messages/:id routes.
    */
   messageStore?: RelayMessageStore;
+  /**
+   * Interval in milliseconds for periodic SSE token revalidation.
+   * During an active SSE connection, the server re-verifies the bearer token
+   * at this interval. If the token is no longer valid, an `auth_expired` event
+   * is sent and the connection is closed (VAL-STREAM-006).
+   *
+   * Default: 60000 (60 seconds). Set to 0 to disable revalidation.
+   */
+  sseAuthRevalidateMs?: number;
 }
 
 /** Relay server handle with lifecycle methods. */
@@ -179,10 +189,13 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
   const participantStore = options?.participantStore;
   const onConversationAccess = options?.onConversationAccess;
   const messageStore = options?.messageStore;
+  const sseAuthRevalidateMs = options?.sseAuthRevalidateMs ?? 60000;
   const startTime = Date.now();
 
   // Track active SSE connections for clean shutdown
   const sseConnections = new Set<ServerResponse>();
+  // Track revalidation timers for clean shutdown
+  const sseRevalidationTimers = new Set<ReturnType<typeof setInterval>>();
 
   /**
    * Async request handler. Separated from createServer callback to
@@ -302,10 +315,20 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         }
       }
 
+      // Track the last event ID sent to this connection for auth expiry recovery.
+      // The connected event ID is the initial cursor position; as events are
+      // delivered, this advances so the auth_expired event can include the
+      // last valid event ID for the client to resume from after re-auth.
+      let lastSentEventId = connectedEventId;
+
       // Subscribe to message store stream events for live delivery (if available)
       let unsubscribe: (() => void) | undefined;
+      let authExpired = false; // Guard against delivering events after auth expiry
       if (messageStore) {
         unsubscribe = messageStore.onStreamEvent((streamEvent: RelayStreamEvent) => {
+          // Do not deliver events after auth has expired (VAL-STREAM-006)
+          if (authExpired) return;
+
           // Filter: only deliver events relevant to this principal.
           // A user sees events for messages where they are sender or recipient.
           if (
@@ -327,7 +350,70 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
               timestamp: streamEvent.timestamp,
             }),
           });
+          lastSentEventId = streamEvent.event_id;
         });
+      }
+
+      // ── Periodic token revalidation (VAL-STREAM-006) ──────────────
+      // Re-verify the bearer token at configured intervals during the SSE
+      // connection. If the token becomes invalid (expired, revoked), send
+      // an auth_expired event with recovery guidance and close the stream.
+      // This ensures mid-stream auth expiry is surfaced explicitly rather
+      // than leaving the client in a silently stale state.
+      let revalidationTimer: ReturnType<typeof setInterval> | null = null;
+      const bearerToken = extractBearerToken(req.headers['authorization']);
+
+      if (sseAuthRevalidateMs > 0 && tokenVerifier && bearerToken) {
+        revalidationTimer = setInterval(async () => {
+          if (authExpired) return;
+
+          try {
+            const revalidated = await tokenVerifier(bearerToken);
+            if (!revalidated) {
+              // Token is no longer valid — send auth_expired event and close
+              authExpired = true;
+
+              // Unsubscribe from live events immediately to prevent further delivery
+              if (unsubscribe) {
+                unsubscribe();
+                unsubscribe = undefined;
+              }
+
+              const authExpiredEventId = generateEventId();
+              writeSSE(res, {
+                id: authExpiredEventId,
+                event: 'auth_expired',
+                data: JSON.stringify({
+                  error: 'token_expired',
+                  detail:
+                    'Your authentication token has expired or been revoked. Run "mors login" to re-authenticate.',
+                  last_event_id: lastSentEventId,
+                }),
+              });
+
+              // Register the auth_expired event as a cursor position for completeness
+              if (messageStore) {
+                messageStore.registerCursorPosition(authExpiredEventId);
+              }
+
+              // Clean up timer
+              if (revalidationTimer) {
+                clearInterval(revalidationTimer);
+                sseRevalidationTimers.delete(revalidationTimer);
+                revalidationTimer = null;
+              }
+
+              // Close the connection
+              res.end();
+            }
+          } catch {
+            // Revalidation errors are transient — do not close the stream.
+            // The next interval will retry.
+            logger('SSE auth revalidation check failed (transient), will retry');
+          }
+        }, sseAuthRevalidateMs);
+
+        sseRevalidationTimers.add(revalidationTimer);
       }
 
       // Clean up on client disconnect
@@ -335,6 +421,10 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
         sseConnections.delete(res);
         if (unsubscribe) {
           unsubscribe();
+        }
+        if (revalidationTimer) {
+          clearInterval(revalidationTimer);
+          sseRevalidationTimers.delete(revalidationTimer);
         }
       });
 
@@ -587,6 +677,12 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       }
 
       return new Promise((resolve) => {
+        // Clear all revalidation timers first
+        for (const timer of sseRevalidationTimers) {
+          clearInterval(timer);
+        }
+        sseRevalidationTimers.clear();
+
         // Terminate active SSE connections so close doesn't hang
         for (const conn of sseConnections) {
           conn.end();

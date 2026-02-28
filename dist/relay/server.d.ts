@@ -41,6 +41,15 @@ export interface RelayServerOptions {
      * When provided, enables /messages, /inbox, and /messages/:id routes.
      */
     messageStore?: RelayMessageStore;
+    /**
+     * Interval in milliseconds for periodic SSE token revalidation.
+     * During an active SSE connection, the server re-verifies the bearer token
+     * at this interval. If the token is no longer valid, an `auth_expired` event
+     * is sent and the connection is closed (VAL-STREAM-006).
+     *
+     * Default: 60000 (60 seconds). Set to 0 to disable revalidation.
+     */
+    sseAuthRevalidateMs?: number;
 }
 /** Relay server handle with lifecycle methods. */
 export interface RelayServer {
