@@ -402,6 +402,68 @@ export class RelayMessageStore {
     conversationKey(threadId) {
         return `thread:${threadId}`;
     }
+    // ── Persistence (snapshot / rehydrate) ──────────────────────────────
+    /**
+     * Create a JSON-serializable snapshot of the entire store state.
+     *
+     * The snapshot captures all messages, indexes, dedupe state, participant
+     * tracking, and the SSE event log with its cursor index. It contains
+     * only plain values (arrays/objects) so it survives a JSON round-trip.
+     *
+     * Use together with `RelayMessageStore.fromSnapshot()` to cross a real
+     * persistence boundary (persist → new process → rehydrate).
+     */
+    snapshot() {
+        return {
+            messages: Array.from(this.messages.entries()).map(([k, v]) => [k, { ...v }]),
+            inboxIndex: Array.from(this.inboxIndex.entries()).map(([k, v]) => [k, Array.from(v)]),
+            senderIndex: Array.from(this.senderIndex.entries()).map(([k, v]) => [k, Array.from(v)]),
+            participants: Array.from(this.participants.entries()).map(([k, v]) => [k, Array.from(v)]),
+            dedupeIndex: Array.from(this.dedupeIndex.entries()),
+            eventLog: this.eventLog.map((e) => ({ ...e })),
+            eventIdIndex: Array.from(this.eventIdIndex.entries()),
+        };
+    }
+    /**
+     * Create a new `RelayMessageStore` from a previously-saved snapshot.
+     *
+     * The returned store is fully independent — it shares no references
+     * with the snapshot data. Stream listeners are NOT restored (they are
+     * transient per-connection state and must be re-registered).
+     *
+     * @param data - A `RelayMessageStoreSnapshot`, typically obtained via
+     *   `JSON.parse(serialized)` after a restart/deploy.
+     */
+    static fromSnapshot(data) {
+        const store = new RelayMessageStore();
+        // Restore messages (deep-copy each value)
+        for (const [key, msg] of data.messages) {
+            store.messages.set(key, { ...msg });
+        }
+        // Restore inbox index
+        for (const [userId, ids] of data.inboxIndex) {
+            store.inboxIndex.set(userId, new Set(ids));
+        }
+        // Restore sender index
+        for (const [userId, ids] of data.senderIndex) {
+            store.senderIndex.set(userId, new Set(ids));
+        }
+        // Restore participant tracking
+        for (const [convKey, userIds] of data.participants) {
+            store.participants.set(convKey, new Set(userIds));
+        }
+        // Restore dedupe index
+        for (const [compositeKey, msgId] of data.dedupeIndex) {
+            store.dedupeIndex.set(compositeKey, msgId);
+        }
+        // Restore event log (deep-copy each event)
+        store.eventLog = data.eventLog.map((e) => ({ ...e }));
+        // Restore event ID index
+        for (const [eventId, position] of data.eventIdIndex) {
+            store.eventIdIndex.set(eventId, position);
+        }
+        return store;
+    }
     /** Clear all stored data (for testing). */
     clear() {
         this.messages.clear();

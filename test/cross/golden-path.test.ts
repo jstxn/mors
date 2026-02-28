@@ -33,7 +33,10 @@ import {
   type RelayServer,
   type RelayServerOptions,
 } from '../../src/relay/server.js';
-import { RelayMessageStore } from '../../src/relay/message-store.js';
+import {
+  RelayMessageStore,
+  type RelayMessageStoreSnapshot,
+} from '../../src/relay/message-store.js';
 import type { RelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier, AuthPrincipal } from '../../src/relay/auth-middleware.js';
 
@@ -1280,8 +1283,23 @@ describe('cross-area golden-path hardening', () => {
     let server: RelayServer;
     let tokenControl: ReturnType<typeof controllableTokenVerifier>;
 
-    /** Create a fresh server using the shared message store (simulates restart). */
-    async function createServer(): Promise<RelayServer> {
+    /**
+     * Create a fresh server from a rehydrated message store.
+     *
+     * When a snapshot is provided, the server is created with a brand-new
+     * RelayMessageStore deserialized from the snapshot — crossing a real
+     * persistence boundary (no shared in-memory references with the
+     * previous store instance). This satisfies the AGENTS.md requirement:
+     * "Restart integrity tests must cross a real persistence boundary
+     * (persist + rehydrate), not reuse the same in-memory store instance."
+     *
+     * When no snapshot is provided (initial creation), a fresh empty
+     * store is used.
+     */
+    async function createServer(snapshot?: RelayMessageStoreSnapshot): Promise<RelayServer> {
+      // Rehydrate from snapshot or create fresh — never reuse an existing instance
+      messageStore = snapshot ? RelayMessageStore.fromSnapshot(snapshot) : new RelayMessageStore();
+
       tokenControl = controllableTokenVerifier();
       const opts: RelayServerOptions = {
         logger: () => {},
@@ -1298,9 +1316,30 @@ describe('cross-area golden-path hardening', () => {
       return s;
     }
 
+    /**
+     * Simulate a relay restart by:
+     * 1. Serializing current store state to a JSON-safe snapshot
+     * 2. Passing through JSON.stringify → JSON.parse to prove serialization fidelity
+     * 3. Closing the current server
+     * 4. Creating a new server from the deserialized snapshot
+     *
+     * This crosses a true persistence boundary — the new server gets a
+     * completely independent RelayMessageStore instance reconstructed
+     * from serialized state, with no shared object references.
+     */
+    async function simulateRestart(): Promise<void> {
+      // Persist: serialize current state through a JSON round-trip
+      const serialized = JSON.stringify(messageStore.snapshot());
+      const rehydrated = JSON.parse(serialized) as RelayMessageStoreSnapshot;
+
+      // Stop old server
+      await server.close();
+
+      // Start new server from rehydrated state
+      server = await createServer(rehydrated);
+    }
+
     beforeEach(async () => {
-      // Shared message store survives "restart" — simulates persistent storage
-      messageStore = new RelayMessageStore();
       server = await createServer();
     });
 
@@ -1325,9 +1364,8 @@ describe('cross-area golden-path hardening', () => {
       >;
       expect(preMessages[0]['state']).toBe('delivered');
 
-      // "Restart" the relay (close and recreate with same message store)
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // After restart, inbox still shows the message in delivered state
       const postInbox = await relayFetch(server.port, '/inbox', { token: 'token-bob' });
@@ -1386,9 +1424,8 @@ describe('cross-area golden-path hardening', () => {
         )[0]['state']
       ).toBe('acked');
 
-      // Restart
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // Acked state preserved
       const postInbox = await relayFetch(server.port, '/inbox', { token: 'token-bob' });
@@ -1445,9 +1482,8 @@ describe('cross-area golden-path hardening', () => {
         token: 'token-bob',
       });
 
-      // Restart
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // Verify per-message state integrity after restart
       const inbox = await relayFetch(server.port, '/inbox', { token: 'token-bob' });
@@ -1484,9 +1520,8 @@ describe('cross-area golden-path hardening', () => {
       });
       const msgId = (sendResp.body as Record<string, unknown>)['id'] as string;
 
-      // Restart
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // Bob opens SSE after restart
       const sseBob = openSSE(server.port, 'token-bob');
@@ -1530,9 +1565,8 @@ describe('cross-area golden-path hardening', () => {
         body: { recipient_id: BOB_PRINCIPAL.githubUserId, body: 'Pre-restart' },
       });
 
-      // Restart
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // Post-restart: send a new message
       const newSend = await relayFetch(server.port, '/messages', {
@@ -1586,9 +1620,8 @@ describe('cross-area golden-path hardening', () => {
       });
       const replyId = (replyResp.body as Record<string, unknown>)['id'] as string;
 
-      // Restart
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // Post-restart: thread linkage preserved
       const aliceInbox = await relayFetch(server.port, '/inbox', { token: 'token-alice' });
@@ -1631,9 +1664,8 @@ describe('cross-area golden-path hardening', () => {
       expect(send1.status).toBe(201);
       const originalId = (send1.body as Record<string, unknown>)['id'] as string;
 
-      // Restart
-      await server.close();
-      server = await createServer();
+      // Restart: persist → rehydrate across a real persistence boundary
+      await simulateRestart();
 
       // Retry with same dedupe key after restart — should get canonical message
       const send2 = await relayFetch(server.port, '/messages', {

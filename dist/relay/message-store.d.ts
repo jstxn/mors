@@ -110,6 +110,29 @@ export interface RelayStreamEvent {
 }
 /** Listener callback for relay stream events. */
 export type RelayStreamListener = (event: RelayStreamEvent) => void;
+/**
+ * JSON-serializable snapshot of the relay message store state.
+ *
+ * Used to persist store state across process restarts or deploys.
+ * All fields are plain values (no Map/Set) so the snapshot survives
+ * a JSON.stringify → JSON.parse round-trip.
+ */
+export interface RelayMessageStoreSnapshot {
+    /** All messages keyed by ID. */
+    messages: Array<[string, RelayMessage]>;
+    /** Inbox index: recipient userId → array of message IDs. */
+    inboxIndex: Array<[number, string[]]>;
+    /** Sender index: sender userId → array of message IDs. */
+    senderIndex: Array<[number, string[]]>;
+    /** Conversation participants: conversationKey → array of user IDs. */
+    participants: Array<[string, number[]]>;
+    /** Dedupe index: compositeKey → message ID. */
+    dedupeIndex: Array<[string, string]>;
+    /** Ordered event log for SSE cursor resume. */
+    eventLog: RelayStreamEvent[];
+    /** Event ID → position index for cursor lookup. */
+    eventIdIndex: Array<[string, number]>;
+}
 /** Thrown when a message is not found in the relay store. */
 export declare class RelayMessageNotFoundError extends Error {
     constructor(id: string);
@@ -280,6 +303,28 @@ export declare class RelayMessageStore {
     private emitStreamEvent;
     /** Generate a conversation key from a thread ID. */
     private conversationKey;
+    /**
+     * Create a JSON-serializable snapshot of the entire store state.
+     *
+     * The snapshot captures all messages, indexes, dedupe state, participant
+     * tracking, and the SSE event log with its cursor index. It contains
+     * only plain values (arrays/objects) so it survives a JSON round-trip.
+     *
+     * Use together with `RelayMessageStore.fromSnapshot()` to cross a real
+     * persistence boundary (persist → new process → rehydrate).
+     */
+    snapshot(): RelayMessageStoreSnapshot;
+    /**
+     * Create a new `RelayMessageStore` from a previously-saved snapshot.
+     *
+     * The returned store is fully independent — it shares no references
+     * with the snapshot data. Stream listeners are NOT restored (they are
+     * transient per-connection state and must be re-registered).
+     *
+     * @param data - A `RelayMessageStoreSnapshot`, typically obtained via
+     *   `JSON.parse(serialized)` after a restart/deploy.
+     */
+    static fromSnapshot(data: RelayMessageStoreSnapshot): RelayMessageStore;
     /** Clear all stored data (for testing). */
     clear(): void;
 }
