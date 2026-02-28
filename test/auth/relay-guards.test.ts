@@ -336,7 +336,7 @@ describe('relay auth guards', () => {
         headers: { Authorization: 'Bearer valid-token-bob' },
       });
       expect(capturedPrincipal).not.toBeNull();
-      const p = capturedPrincipal as { githubUserId: number; githubLogin: string };
+      const p = capturedPrincipal as unknown as { githubUserId: number; githubLogin: string };
       expect(p.githubUserId).toBe(200);
       expect(p.githubLogin).toBe('bob');
     });

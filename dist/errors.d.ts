@@ -22,6 +22,14 @@ export declare class NotInitializedError extends MorsError {
 export declare class SqlCipherUnavailableError extends MorsError {
     constructor(message: string);
 }
+/** Thrown when E2EE device key operations fail (generation, persistence, loading, validation). */
+export declare class DeviceKeyError extends MorsError {
+    constructor(message: string);
+}
+/** Thrown when a secure messaging operation is attempted before device key bootstrap is complete. */
+export declare class DeviceNotBootstrappedError extends MorsError {
+    constructor(message?: string);
+}
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export declare class DedupeConflictError extends MorsError {
     readonly dedupeKey: string;

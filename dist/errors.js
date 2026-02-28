@@ -37,6 +37,22 @@ export class SqlCipherUnavailableError extends MorsError {
         this.name = 'SqlCipherUnavailableError';
     }
 }
+/** Thrown when E2EE device key operations fail (generation, persistence, loading, validation). */
+export class DeviceKeyError extends MorsError {
+    constructor(message) {
+        super(message);
+        this.name = 'DeviceKeyError';
+    }
+}
+/** Thrown when a secure messaging operation is attempted before device key bootstrap is complete. */
+export class DeviceNotBootstrappedError extends MorsError {
+    constructor(message) {
+        super(message ??
+            'Device E2EE keys have not been bootstrapped. ' +
+                'Run "mors init" to generate device encryption keys before using secure messaging.');
+        this.name = 'DeviceNotBootstrappedError';
+    }
+}
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export class DedupeConflictError extends MorsError {
     dedupeKey;
