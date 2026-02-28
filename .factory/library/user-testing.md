@@ -43,6 +43,25 @@ cd /Users/justen/Development/mors
 MORS_CONFIG_DIR="$TESTDIR" node dist/index.js <command> [args]
 ```
 
+### Distribution-channel executable checks
+For install/distribution assertions, collect channel-specific runnable binary evidence:
+
+```bash
+# npm GitHub path
+npm install -g github:jstxn/mors
+mors --version
+
+# Homebrew formula path (tap-ready repository formula)
+brew install --build-from-source ./Formula/mors.rb
+mors --version
+```
+
+If PATH is missing npm global bin location, use explicit shell setup flow and capture prompt/confirm evidence:
+
+```bash
+mors setup-shell
+```
+
 For JSON output, append `--json`:
 ```bash
 MORS_CONFIG_DIR="$TESTDIR" node dist/index.js init --json

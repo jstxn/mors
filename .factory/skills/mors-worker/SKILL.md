@@ -9,7 +9,7 @@ NOTE: Startup/cleanup are handled by `worker-base`. This skill defines implement
 
 ## When to Use This Skill
 
-Use for `mors` CLI, schema, storage, security, and integration-test features in milestones `core-foundation` and `local-cli-flows`.
+Use for `mors` CLI, schema, storage, security, distribution/install UX, and integration-test features in milestones `core-foundation`, `local-cli-flows`, and `distribution-install-ux`.
 
 ## Work Procedure
 
