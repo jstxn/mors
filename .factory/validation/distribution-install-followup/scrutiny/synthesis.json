@@ -1,7 +1,7 @@
 {
   "milestone": "distribution-install-followup",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
@@ -9,25 +9,13 @@
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 0,
-    "failed": 1,
-    "failedFeatures": ["distribution-followup-github-shortcut-install-without-build-deps"]
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "distribution-followup-github-shortcut-install-without-build-deps",
-      "severity": "blocking",
-      "description": "prepare script `test -x node_modules/.bin/tsc && npm run build || true` swallows real build failures when tsc IS available (the `|| true` catches failed builds too). Should distinguish between 'tsc missing' (ok to skip) and 'build failed' (should propagate failure)."
-    }
-  ],
-  "appliedUpdates": [
-    {
-      "target": "library",
-      "description": "Added .factory/library/npm-git-install.md documenting npm GitHub shortcut install behavior, the prepare-script workaround for devDependencies/tsc availability, and the known || true limitation.",
-      "sourceFeature": "distribution-followup-github-shortcut-install-without-build-deps"
-    }
-  ],
+  "blockingIssues": [],
+  "appliedUpdates": [],
   "suggestedGuidanceUpdates": [],
   "rejectedObservations": [],
-  "previousRound": null
+  "previousRound": ".factory/validation/distribution-install-followup/scrutiny/synthesis.json (round 1)"
 }
