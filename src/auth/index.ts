@@ -1,13 +1,15 @@
 /**
  * Auth module barrel exports.
  *
- * Re-exports session and device-flow primitives for the mors auth lifecycle.
+ * Re-exports session, device-flow, and guard primitives for the mors auth lifecycle.
  */
 
 export {
   saveSession,
   loadSession,
   clearSession,
+  markAuthEnabled,
+  isAuthEnabled,
   type AuthSession,
 } from './session.js';
 
@@ -28,3 +30,12 @@ export {
   type PollOptions,
   type FetchUserOptions,
 } from './device-flow.js';
+
+export {
+  requireAuth,
+  verifyTokenLiveness,
+  NotAuthenticatedError,
+  TokenLivenessError,
+  type TokenLivenessOptions,
+  type TokenLivenessResult,
+} from './guards.js';

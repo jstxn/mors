@@ -21,7 +21,7 @@ import type { WatchEvent } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError } from './errors.js';
 import { ContractValidationError } from './contract/errors.js';
-import { saveSession, loadSession, clearSession } from './auth/session.js';
+import { saveSession, loadSession, clearSession, markAuthEnabled } from './auth/session.js';
 import {
   requestDeviceCode,
   pollForToken,
@@ -31,6 +31,12 @@ import {
   DeviceFlowError,
   TokenExpiredError,
 } from './auth/device-flow.js';
+import {
+  requireAuth,
+  verifyTokenLiveness,
+  NotAuthenticatedError,
+  TokenLivenessError,
+} from './auth/guards.js';
 import { getConfigDir } from './identity.js';
 import { randomUUID } from 'node:crypto';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
@@ -40,6 +46,13 @@ const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread
 
 /** Commands that are implemented. */
 const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack', 'reply', 'thread', 'watch']);
+
+/**
+ * Commands that require an authenticated session (in addition to init).
+ *
+ * After logout, these commands fail with login-required guidance (VAL-AUTH-005).
+ */
+const AUTH_GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 
 export function run(args: string[]): void {
   const command = args[0];
@@ -91,6 +104,34 @@ export function run(args: string[]): void {
         return;
       }
       throw err;
+    }
+
+    // ── Auth gating: require active session (VAL-AUTH-005) ────────
+    if (AUTH_GATED_COMMANDS.has(command)) {
+      const cmdArgs = args.slice(1);
+      const { flags: cmdFlags } = parseArgs(cmdArgs);
+      const isJson = 'json' in cmdFlags;
+
+      try {
+        requireAuth(configDir);
+      } catch (err: unknown) {
+        if (err instanceof NotAuthenticatedError) {
+          if (isJson) {
+            console.log(
+              JSON.stringify({
+                status: 'error',
+                error: 'not_authenticated',
+                message: err.message,
+              })
+            );
+          } else {
+            console.error(`Error: ${err.message}`);
+          }
+          process.exitCode = 1;
+          return;
+        }
+        throw err;
+      }
     }
 
     // Dispatch to implemented commands.
@@ -747,6 +788,9 @@ function runDeviceFlow(
       // Generate device ID for this installation (VAL-AUTH-009)
       const deviceId = `device-${randomUUID()}`;
 
+      // Mark auth as enabled so logout re-gates protected commands (VAL-AUTH-005)
+      markAuthEnabled(configDir);
+
       // Persist session (VAL-AUTH-002)
       saveSession(configDir, {
         accessToken: tokenResponse.access_token,
@@ -835,6 +879,7 @@ function runLogout(_args: string[]): void {
 function runStatus(_args: string[]): void {
   const { flags } = parseArgs(_args);
   const json = 'json' in flags;
+  const skipLiveness = 'offline' in flags;
 
   const configDir = getConfigDir();
   const session = loadSession(configDir);
@@ -853,6 +898,73 @@ function runStatus(_args: string[]): void {
     return;
   }
 
+  // If --offline, skip token liveness verification and report local session only
+  if (skipLiveness) {
+    reportAuthStatus(session, json);
+    return;
+  }
+
+  // Verify token liveness with GitHub API (VAL-AUTH-006)
+  const apiBaseUrl = process.env['MORS_GITHUB_API_URL'] || undefined;
+  verifyTokenLiveness(session.accessToken, { apiBaseUrl })
+    .then((principal) => {
+      // Token is valid — report authenticated status with live data
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'authenticated',
+            token_valid: true,
+            github_user_id: principal.githubUserId,
+            github_login: principal.githubLogin,
+            device_id: session.deviceId,
+            created_at: session.createdAt,
+          })
+        );
+      } else {
+        console.log(`Authenticated as ${principal.githubLogin} (ID: ${principal.githubUserId})`);
+        console.log(`Device: ${session.deviceId}`);
+        console.log(`Session created: ${session.createdAt}`);
+        console.log('Token: valid');
+      }
+    })
+    .catch((err: unknown) => {
+      process.exitCode = 1;
+      if (err instanceof TokenLivenessError) {
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'token_expired',
+              token_valid: false,
+              message: err.message,
+              github_user_id: session.githubUserId,
+              github_login: session.githubLogin,
+              device_id: session.deviceId,
+            })
+          );
+        } else {
+          console.error(`Error: ${err.message}`);
+        }
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (json) {
+          console.log(
+            JSON.stringify({
+              status: 'error',
+              error: 'unknown',
+              message: msg,
+            })
+          );
+        } else {
+          console.error(`Error: ${msg}`);
+        }
+      }
+    });
+}
+
+/**
+ * Report auth status from local session without liveness check.
+ */
+function reportAuthStatus(session: import('./auth/session.js').AuthSession, json: boolean): void {
   if (json) {
     console.log(
       JSON.stringify({
@@ -1041,8 +1153,9 @@ Logout:
   --json                 Output JSON
 
 Status:
-  mors status [--json]
+  mors status [--json] [--offline]
   --json                 Output JSON
+  --offline              Skip token liveness check (report local session only)
 
 Setup Shell:
   mors setup-shell [--json] [--confirm] [--decline]

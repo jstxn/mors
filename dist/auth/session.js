@@ -21,6 +21,12 @@ const DIR_MODE = 0o700;
 /** Session file name. */
 const SESSION_FILE = 'session.json';
 /**
+ * Marker file created on first login.
+ * Indicates that auth has been used in this config dir,
+ * enabling auth gating after logout.
+ */
+const AUTH_MARKER_FILE = '.auth-enabled';
+/**
  * Required fields for session validation.
  */
 const REQUIRED_SESSION_FIELDS = [
@@ -105,6 +111,8 @@ export function loadSession(configDir) {
  * Clear the persisted auth session.
  *
  * Idempotent — safe to call even when no session exists.
+ * Preserves the auth-enabled marker so auth gating remains active
+ * after logout (VAL-AUTH-005).
  *
  * @param configDir - The config directory containing the session.
  */
@@ -118,5 +126,34 @@ export function clearSession(configDir) {
             // Best-effort removal
         }
     }
+}
+/**
+ * Mark that auth has been enabled in this config directory.
+ *
+ * Called during login to record that the user has engaged with auth.
+ * This marker persists across logout so that auth gating can distinguish
+ * "never logged in" (local-only) from "logged in then logged out"
+ * (requires re-login).
+ *
+ * @param configDir - The config directory to mark.
+ */
+export function markAuthEnabled(configDir) {
+    mkdirSync(configDir, { recursive: true, mode: DIR_MODE });
+    const markerPath = join(configDir, AUTH_MARKER_FILE);
+    if (!existsSync(markerPath)) {
+        writeFileSync(markerPath, new Date().toISOString() + '\n', { mode: 0o644 });
+    }
+}
+/**
+ * Check whether auth has been enabled in this config directory.
+ *
+ * Returns true if the user has previously logged in (even if currently logged out),
+ * meaning protected commands should require re-authentication.
+ *
+ * @param configDir - The config directory to check.
+ * @returns true if the auth-enabled marker exists.
+ */
+export function isAuthEnabled(configDir) {
+    return existsSync(join(configDir, AUTH_MARKER_FILE));
 }
 //# sourceMappingURL=session.js.map

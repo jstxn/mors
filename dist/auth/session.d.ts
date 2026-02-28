@@ -57,8 +57,31 @@ export declare function loadSession(configDir: string): AuthSession | null;
  * Clear the persisted auth session.
  *
  * Idempotent — safe to call even when no session exists.
+ * Preserves the auth-enabled marker so auth gating remains active
+ * after logout (VAL-AUTH-005).
  *
  * @param configDir - The config directory containing the session.
  */
 export declare function clearSession(configDir: string): void;
+/**
+ * Mark that auth has been enabled in this config directory.
+ *
+ * Called during login to record that the user has engaged with auth.
+ * This marker persists across logout so that auth gating can distinguish
+ * "never logged in" (local-only) from "logged in then logged out"
+ * (requires re-login).
+ *
+ * @param configDir - The config directory to mark.
+ */
+export declare function markAuthEnabled(configDir: string): void;
+/**
+ * Check whether auth has been enabled in this config directory.
+ *
+ * Returns true if the user has previously logged in (even if currently logged out),
+ * meaning protected commands should require re-authentication.
+ *
+ * @param configDir - The config directory to check.
+ * @returns true if the auth-enabled marker exists.
+ */
+export declare function isAuthEnabled(configDir: string): boolean;
 //# sourceMappingURL=session.d.ts.map
