@@ -13,3 +13,7 @@ Environment variables, external dependencies, and setup notes.
 - Native build dependencies: `python3`, compiler toolchain (Xcode CLI tools on macOS)
 - Encryption dependency: `sqlcipher` CLI/library must be installed and linkable
 - Mission requires SQLCipher-first behavior (no plaintext fallback)
+
+## SQLCipher caveats
+
+- The `better-sqlite3-multiple-ciphers` package does not support SQLCipher keying on in-memory databases (`:memory:`). Preflight checks and tests that verify encryption must use temporary on-disk files instead of in-memory DBs.

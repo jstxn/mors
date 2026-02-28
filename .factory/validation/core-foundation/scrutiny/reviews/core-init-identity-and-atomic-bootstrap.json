@@ -1,0 +1,33 @@
+{
+  "featureId": "core-init-identity-and-atomic-bootstrap",
+  "reviewedAt": "2026-02-28T04:26:22Z",
+  "commitId": "fd64e8c",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature implements init identity/bootstrap behavior broadly as specified (fresh init, rerun handling, SQLCipher preflight, gating, and concurrency lock), but the atomic-failure guarantee has a blocking gap in real failure paths.",
+    "issues": [
+      {
+        "file": "src/init.ts",
+        "line": 103,
+        "severity": "blocking",
+        "description": "Artifacts are added to cleanup tracking only after each creation call returns (e.g., `persistIdentity` at line 103 with `createdArtifacts.push` at line 104; same pattern for `persistKey`/`openEncryptedDb` at lines 114-120). If a write/open fails mid-step, partial files can be left behind and will not be removed by `cleanupArtifacts`, which violates the feature's atomic failure handling intent."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "knowledge",
+      "observation": "Mission feature verification text still uses Jest-style `--testPathPattern`, but this repository runs Vitest; this causes avoidable verification detours.",
+      "evidence": "`features.json` verificationSteps for this feature includes `npm run test -- --testPathPattern init`; transcript skeleton shows that command failed and was replaced with `npx vitest run test/init.test.ts`; handoff.skillFeedback.suggestedChanges also calls this out."
+    },
+    {
+      "area": "skills",
+      "observation": "The worker transcript sequence does not match strict red-first TDD in `mors-worker` skill guidance.",
+      "evidence": "Transcript skeleton shows `src/identity.ts`, `src/init.ts`, and `src/cli.ts` were created before `test/init.test.ts`; `.factory/skills/mors-worker/SKILL.md` Work Procedure step 2 requires adding/extending failing tests first."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed mission artifacts, handoff, transcript skeleton, skill file, and commit diff for fd64e8c. Implementation is close to requirements, but atomic cleanup is incomplete for pre-registration failure paths, so this feature review is marked fail pending that fix."
+}

@@ -1,0 +1,26 @@
+{
+  "featureId": "core-sqlcipher-store-and-security-invariants",
+  "reviewedAt": "2026-02-28T04:26:51Z",
+  "commitId": "6dd425b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation covers the feature requirements: SQLCipher-backed persistence is in place, wrong/missing key scenarios fail closed via explicit error types, no plaintext fallback path is introduced, and key artifacts are written/validated with owner-only permissions. Test coverage in the commit includes focused security cases for VAL-SEC-001/003/004/005.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker skill does not document the package-specific caveat that SQLCipher keying is not supported on in-memory DBs for better-sqlite3-multiple-ciphers, which caused implementation churn during preflight work.",
+      "evidence": "Handoff skillFeedback.suggestedChanges explicitly calls this out (handoff file line 197). The resulting implementation comment in src/store.ts notes the same caveat (commit 6dd425b, src/store.ts lines 42-43)."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared library environment docs capture SQLCipher as a dependency but not the in-memory preflight limitation, so future workers may rediscover this behavior.",
+      "evidence": ".factory/library/environment.md documents SQLCipher requirement generically, while commit 6dd425b uses a temp-file preflight path specifically because in-memory keying is unsupported (src/store.ts lines 42-49)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed feature core-sqlcipher-store-and-security-invariants at commit 6dd425b; code and tests satisfy scoped security invariants with no blocking defects found. Noted a skill/library documentation gap around SQLCipher preflight behavior for better-sqlite3-multiple-ciphers."
+}

@@ -1,0 +1,39 @@
+{
+  "featureId": "core-envelope-and-state-contracts",
+  "reviewedAt": "2026-02-28T04:26:14Z",
+  "commitId": "ca118cf",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds a clean shared contract module and comprehensive tests, but envelope validation does not fully enforce the declared contract shape for nullable fields.",
+    "issues": [
+      {
+        "file": "src/contract/ids.ts",
+        "line": 63,
+        "severity": "blocking",
+        "description": "`isValidOptionalId` accepts `undefined`, and `validateEnvelope` relies on it for `in_reply_to`, `dedupe_key`, and `trace_id` (src/contract/envelope.ts:96,101,106). This allows missing fields to pass even though the contract/messages require these fields to be present as `null` or non-empty string, so invalid envelope shapes are not deterministically rejected."
+      },
+      {
+        "file": "src/contract/ids.ts",
+        "line": 53,
+        "severity": "non_blocking",
+        "description": "ID validation only checks non-empty strings, so `id`/`thread_id` validators do not enforce the documented typed prefixes (`msg_`, `thr_`, etc.) even though the module comments describe those as contract semantics."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The mors-worker skill still demonstrates Jest-style `--testPathPattern` usage, but this repo uses Vitest and that flag is invalid.",
+      "evidence": ".factory/skills/mors-worker/SKILL.md:42 shows `npm run test -- --testPathPattern init`; transcript shows worker tried `npm run test -- --testPathPattern contract` and then switched to `npx vitest run test/contract.test.ts`."
+    },
+    {
+      "area": "conventions",
+      "observation": "Feature verification instructions also use Jest-style test filtering, which caused avoidable command churn during implementation.",
+      "evidence": "Feature `core-envelope-and-state-contracts` verificationSteps include `npm run test -- --testPathPattern contract`; transcript skeleton records that command failing before the worker used a Vitest-compatible command."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit ca118cf and transcript/handoff evidence. Contract module structure and transition logic are strong, but envelope validation currently permits undefined nullable fields, so the feature does not fully satisfy strict contract-shape enforcement."
+}
