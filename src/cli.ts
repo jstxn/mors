@@ -103,7 +103,13 @@ export function run(args: string[]): void {
   }
 
   if (command === 'status') {
-    runStatus(args.slice(1));
+    // runStatus is async (token-liveness check); attach error handler
+    // so the process waits for completion and sets exitCode deterministically.
+    runStatus(args.slice(1)).catch((err: unknown) => {
+      process.exitCode = 1;
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Error: ${msg}`);
+    });
     return;
   }
 
@@ -1601,7 +1607,7 @@ function runLogout(_args: string[]): void {
 
 // ── Status command (VAL-AUTH-002, VAL-AUTH-006) ──────────────────────
 
-function runStatus(_args: string[]): void {
+async function runStatus(_args: string[]): Promise<void> {
   const { flags } = parseArgs(_args);
   const json = 'json' in flags;
   const skipLiveness = 'offline' in flags;
@@ -1630,60 +1636,60 @@ function runStatus(_args: string[]): void {
   }
 
   // Verify token liveness with GitHub API (VAL-AUTH-006)
+  // Using await ensures deterministic output and exit-code before process exit.
   const apiBaseUrl = process.env['MORS_GITHUB_API_URL'] || undefined;
-  verifyTokenLiveness(session.accessToken, { apiBaseUrl })
-    .then((principal) => {
-      // Token is valid — report authenticated status with live data
+  try {
+    const principal = await verifyTokenLiveness(session.accessToken, { apiBaseUrl });
+    // Token is valid — report authenticated status with live data
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: 'authenticated',
+          token_valid: true,
+          github_user_id: principal.githubUserId,
+          github_login: principal.githubLogin,
+          device_id: session.deviceId,
+          created_at: session.createdAt,
+        })
+      );
+    } else {
+      console.log(`Authenticated as ${principal.githubLogin} (ID: ${principal.githubUserId})`);
+      console.log(`Device: ${session.deviceId}`);
+      console.log(`Session created: ${session.createdAt}`);
+      console.log('Token: valid');
+    }
+  } catch (err: unknown) {
+    process.exitCode = 1;
+    if (err instanceof TokenLivenessError) {
       if (json) {
         console.log(
           JSON.stringify({
-            status: 'authenticated',
-            token_valid: true,
-            github_user_id: principal.githubUserId,
-            github_login: principal.githubLogin,
+            status: 'token_expired',
+            token_valid: false,
+            message: err.message,
+            github_user_id: session.githubUserId,
+            github_login: session.githubLogin,
             device_id: session.deviceId,
-            created_at: session.createdAt,
           })
         );
       } else {
-        console.log(`Authenticated as ${principal.githubLogin} (ID: ${principal.githubUserId})`);
-        console.log(`Device: ${session.deviceId}`);
-        console.log(`Session created: ${session.createdAt}`);
-        console.log('Token: valid');
+        console.error(`Error: ${err.message}`);
       }
-    })
-    .catch((err: unknown) => {
-      process.exitCode = 1;
-      if (err instanceof TokenLivenessError) {
-        if (json) {
-          console.log(
-            JSON.stringify({
-              status: 'token_expired',
-              token_valid: false,
-              message: err.message,
-              github_user_id: session.githubUserId,
-              github_login: session.githubLogin,
-              device_id: session.deviceId,
-            })
-          );
-        } else {
-          console.error(`Error: ${err.message}`);
-        }
+    } else {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (json) {
+        console.log(
+          JSON.stringify({
+            status: 'error',
+            error: 'unknown',
+            message: msg,
+          })
+        );
       } else {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (json) {
-          console.log(
-            JSON.stringify({
-              status: 'error',
-              error: 'unknown',
-              message: msg,
-            })
-          );
-        } else {
-          console.error(`Error: ${msg}`);
-        }
+        console.error(`Error: ${msg}`);
       }
-    });
+    }
+  }
 }
 
 /**

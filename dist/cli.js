@@ -58,7 +58,13 @@ export function run(args) {
         return;
     }
     if (command === 'status') {
-        runStatus(args.slice(1));
+        // runStatus is async (token-liveness check); attach error handler
+        // so the process waits for completion and sets exitCode deterministically.
+        runStatus(args.slice(1)).catch((err) => {
+            process.exitCode = 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${msg}`);
+        });
         return;
     }
     // ── Pre-init command gating (VAL-INIT-005) ──────────────────────
@@ -1397,7 +1403,7 @@ function runLogout(_args) {
     }
 }
 // ── Status command (VAL-AUTH-002, VAL-AUTH-006) ──────────────────────
-function runStatus(_args) {
+async function runStatus(_args) {
     const { flags } = parseArgs(_args);
     const json = 'json' in flags;
     const skipLiveness = 'offline' in flags;
@@ -1421,9 +1427,10 @@ function runStatus(_args) {
         return;
     }
     // Verify token liveness with GitHub API (VAL-AUTH-006)
+    // Using await ensures deterministic output and exit-code before process exit.
     const apiBaseUrl = process.env['MORS_GITHUB_API_URL'] || undefined;
-    verifyTokenLiveness(session.accessToken, { apiBaseUrl })
-        .then((principal) => {
+    try {
+        const principal = await verifyTokenLiveness(session.accessToken, { apiBaseUrl });
         // Token is valid — report authenticated status with live data
         if (json) {
             console.log(JSON.stringify({
@@ -1441,8 +1448,8 @@ function runStatus(_args) {
             console.log(`Session created: ${session.createdAt}`);
             console.log('Token: valid');
         }
-    })
-        .catch((err) => {
+    }
+    catch (err) {
         process.exitCode = 1;
         if (err instanceof TokenLivenessError) {
             if (json) {
@@ -1472,7 +1479,7 @@ function runStatus(_args) {
                 console.error(`Error: ${msg}`);
             }
         }
-    });
+    }
 }
 /**
  * Report auth status from local session without liveness check.

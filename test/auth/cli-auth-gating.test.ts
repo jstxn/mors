@@ -374,3 +374,78 @@ describe('CLI status token liveness (VAL-AUTH-006)', () => {
     }
   });
 });
+
+describe('CLI status determinism under concurrency', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = makeTempDir();
+    simulateInit(tempDir);
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('authenticated-path exit code and status are consistent across 7 concurrent runs', async () => {
+    const { server, port } = await startMockServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ id: 99999, login: 'concurrencyuser' }));
+    });
+
+    try {
+      saveSession(tempDir, makeSession({ githubUserId: 99999, githubLogin: 'concurrencyuser' }));
+
+      // Launch 7 concurrent status checks against the same mock server
+      const runs = Array.from({ length: 7 }, () =>
+        runCliAsync(['status', '--json'], {
+          configDir: tempDir,
+          env: { MORS_GITHUB_API_URL: `http://127.0.0.1:${port}` },
+        })
+      );
+
+      const results = await Promise.all(runs);
+
+      for (const [i, result] of results.entries()) {
+        expect(result.exitCode, `run ${i}: expected exit code 0`).toBe(0);
+        expect(result.stdout, `run ${i}: expected non-empty stdout`).not.toBe('');
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.status, `run ${i}: expected authenticated status`).toBe('authenticated');
+        expect(parsed.token_valid, `run ${i}: expected token_valid true`).toBe(true);
+        expect(parsed.github_user_id, `run ${i}: expected correct user id`).toBe(99999);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('expired-path exit code and status are consistent across 7 concurrent runs', async () => {
+    const { server, port } = await startMockServer((_req, res) => {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ message: 'Bad credentials' }));
+    });
+
+    try {
+      saveSession(tempDir, makeSession({ accessToken: 'gho_expired_concurrent_test' }));
+
+      const runs = Array.from({ length: 7 }, () =>
+        runCliAsync(['status', '--json'], {
+          configDir: tempDir,
+          env: { MORS_GITHUB_API_URL: `http://127.0.0.1:${port}` },
+        })
+      );
+
+      const results = await Promise.all(runs);
+
+      for (const [i, result] of results.entries()) {
+        expect(result.exitCode, `run ${i}: expected non-zero exit code`).not.toBe(0);
+        expect(result.stdout, `run ${i}: expected non-empty stdout`).not.toBe('');
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.status, `run ${i}: expected token_expired status`).toBe('token_expired');
+        expect(parsed.token_valid, `run ${i}: expected token_valid false`).toBe(false);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
