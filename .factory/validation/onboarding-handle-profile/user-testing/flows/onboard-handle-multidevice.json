@@ -1,0 +1,32 @@
+{
+  "flowId": "onboard-handle-multidevice",
+  "assertions": {
+    "VAL-AUTH-008": {
+      "status": "pass",
+      "evidence": "Vitest primary: npx vitest run test/onboard-handle-profile.test.ts --maxConcurrency=7 => 43/43 passed. Targeted verbose transcript: relay account registration > rejects duplicate handle with 409; relay account registration > rejects handle mutation attempt with 409; CLI mors onboard > rejects duplicate handle through relay during onboard. Programmatic relay transcript: POST /accounts/register acct-a handle=alice -> 201; POST /accounts/register acct-b handle=alice -> 409 {\"error\":\"duplicate_handle\"}; POST /accounts/register acct-a handle=alice-new -> 409 {\"error\":\"immutable_handle\"}."
+    },
+    "VAL-AUTH-009": {
+      "status": "pass",
+      "evidence": "Vitest primary: npx vitest run test/auth/multi-device-bootstrap.test.ts --maxConcurrency=7 => 16/16 passed. CLI two-device transcript with isolated dirs: Device A status {account_id:b48314ccf6fac46b34f80562550041f3, device_id:device-dd5e2695-c3df-41f6-9f8f-ba6dfa53e99b}; Device B status {account_id:b48314ccf6fac46b34f80562550041f3, device_id:device-9d5549f9-797f-4b44-9382-48cd4e2c8535}; comparison output {same_account_id:true, distinct_device_id:true}. Device/account listing coverage: targeted verbose vitest includes pass for relay multi-device registration > GET /accounts/me/devices lists distinct devices for the account."
+    },
+    "VAL-AUTH-012": {
+      "status": "pass",
+      "evidence": "Vitest primary: npx vitest run test/onboard-handle-profile.test.ts --maxConcurrency=7 => 43/43 passed (includes requires --handle/--display-name and local profile persistence assertions). CLI wizard transcript: node dist/index.js onboard --json -> {status:error,error:missing_required_fields,missing:[--handle,--display-name]} EXIT:1; node dist/index.js onboard --handle testhandle --display-name 'Test User' --json -> {status:onboarded,handle:testhandle,display_name:'Test User',account_id:0556abe706c7a98f9c6bbce8754f7461} EXIT:0; persisted /tmp/.../profile.json contains handle testhandle + displayName Test User + accountId; node dist/index.js --help | grep onboard shows onboarding command." 
+    }
+  },
+  "frictions": [
+    {
+      "description": "During an ad-hoc relay-backed CLI repro after init+login, onboarding with a pre-taken handle returned local onboard success instead of duplicate rejection; relied on targeted vitest relay-backed assertions for deterministic VAL-AUTH-008 duplicate-onboard evidence.",
+      "resolved": true,
+      "resolution": "Used targeted verbose vitest coverage (rejects duplicate handle through relay during onboard) plus direct relay API duplicate/immutable transcripts.",
+      "affectedAssertions": [
+        "VAL-AUTH-008"
+      ]
+    }
+  ],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest",
+    "node dist/index.js"
+  ]
+}

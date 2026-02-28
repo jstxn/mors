@@ -207,3 +207,43 @@ SSE streaming assertions are best validated through the existing integration tes
 3. `mors status --json --offline` → persisted session with same account_id
 4. `mors login --json` (no token) → exit code 1, missing_prerequisites with remediation
 5. `mors login --invite-token "invalid" --json` → exit code 1, invalid_invite_token
+
+---
+
+## Flow Validator Guidance: Onboarding Handle Profile
+
+**Testing tool:** Direct CLI invocation via `node dist/index.js` with `MORS_CONFIG_DIR` isolation, plus relay API via `curl`/`fetch`.
+
+**Assertions covered:** VAL-AUTH-008, VAL-AUTH-009, VAL-AUTH-012
+
+**Setup:**
+- Build first: `npm run build`
+- Start relay with signing key: `MORS_RELAY_SIGNING_KEY=<key> PORT=3100 npm run relay:dev`
+- Use `MORS_CONFIG_DIR` temp dirs for each test identity
+- Generate invite tokens with `generateInviteToken()` from `src/auth/native.ts`
+
+**Isolation rules:**
+- Each subagent MUST use unique `MORS_CONFIG_DIR` temp directories
+- Use separate relay server instances (ephemeral port 0) for relay API tests to avoid cross-subagent interference
+- For multi-device tests, use two separate `MORS_CONFIG_DIR` paths with the same invite token
+
+**VAL-AUTH-008 (handle uniqueness + immutability):**
+1. Start a relay server with AccountStore
+2. Register handle "alice" for account A → 201
+3. Attempt same handle "alice" for account B → 409 (duplicate_handle)
+4. Attempt "ALICE" / " alice " for account C → 409 (normalization catches duplicates)
+5. Attempt different handle for account A → 409 (immutable_handle)
+6. CLI `mors onboard --handle <handle> --display-name <name> --json` with relay → persists handle + profile
+
+**VAL-AUTH-009 (multi-device):**
+1. Generate one invite token
+2. `mors init --json` + `mors login --invite-token <token> --json` in two separate config dirs
+3. Both produce same account_id but different device_id
+4. `mors status --json` on each shows correct device identity
+5. Relay device listing shows both devices under one account
+
+**VAL-AUTH-012 (onboarding wizard):**
+1. CLI `mors onboard --handle <handle> --display-name <name> --json` requires both fields
+2. Missing fields → error with missing_required_fields
+3. Successful onboard → persists profile.json locally + registers with relay
+4. `onboard` appears in `--help` output
