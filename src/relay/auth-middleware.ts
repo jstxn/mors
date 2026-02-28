@@ -56,6 +56,43 @@ export type AuthResult =
   | { authenticated: true; principal: AuthPrincipal }
   | { authenticated: false; error: string; detail: string };
 
+// ── Token structure inspection ────────────────────────────────────────
+
+/**
+ * Check whether a token has the structure of a well-formed mors session token.
+ *
+ * Returns true if the token has the `mors-session.<base64url>.<hex>` format
+ * with a decodable JSON payload containing the required fields (accountId,
+ * deviceId, issuedAt, tokenId). This does NOT verify the signature — it only
+ * checks structural validity.
+ *
+ * Used to distinguish signing-key mismatch (well-formed token, wrong signature)
+ * from truly invalid/malformed tokens in error reporting.
+ */
+function isWellFormedMorsSessionToken(token: string): boolean {
+  if (!token || typeof token !== 'string') return false;
+
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== 'mors-session') return false;
+
+  const payloadStr = parts[1];
+  if (!payloadStr) return false;
+
+  try {
+    const decoded = Buffer.from(payloadStr, 'base64url').toString('utf-8');
+    const payload = JSON.parse(decoded) as Record<string, unknown>;
+
+    return (
+      typeof payload['accountId'] === 'string' &&
+      typeof payload['deviceId'] === 'string' &&
+      typeof payload['issuedAt'] === 'string' &&
+      typeof payload['tokenId'] === 'string'
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ── Public routes (no auth required) ─────────────────────────────────
 
 /** Routes that are publicly accessible without authentication. */
@@ -114,6 +151,19 @@ export async function extractAndVerify(
 
   const principal = await verifier(token);
   if (!principal) {
+    // Distinguish signing-key mismatch from generic invalid token on the relay side.
+    // A well-formed mors-session token (valid prefix + decodable payload) that fails
+    // verification likely means the CLI and relay are using different signing keys.
+    if (isWellFormedMorsSessionToken(token)) {
+      return {
+        authenticated: false,
+        error: 'unauthorized',
+        detail:
+          'Token signature mismatch — the session token appears valid but was signed with a different key. ' +
+          'Ensure MORS_RELAY_SIGNING_KEY is the same value used by both CLI and relay, ' +
+          'then run "mors login" to re-authenticate.',
+      };
+    }
     return {
       authenticated: false,
       error: 'unauthorized',

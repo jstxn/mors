@@ -16,6 +16,7 @@
 
 import { MorsError } from '../errors.js';
 import { loadSession, loadSigningKey, isAuthEnabled, type AuthSession } from './session.js';
+import { isSigningKeyMismatch } from './native.js';
 
 // ── Error types ──────────────────────────────────────────────────────
 
@@ -47,6 +48,30 @@ export class TokenLivenessError extends MorsError {
         (detail ? ` (${detail})` : '')
     );
     this.name = 'TokenLivenessError';
+  }
+}
+
+/**
+ * Thrown when a well-formed session token has a valid structure but its
+ * HMAC signature does not match the current signing key — indicating
+ * the CLI and relay are using different MORS_RELAY_SIGNING_KEY values.
+ *
+ * Extends TokenLivenessError for backward compatibility (callers catching
+ * TokenLivenessError will still catch this), but provides specific
+ * signing-key mismatch remediation instead of generic expired/revoked wording.
+ *
+ * Never includes token values or signing keys in the error message.
+ */
+export class SigningKeyMismatchError extends TokenLivenessError {
+  constructor() {
+    super();
+    // Override the message set by the parent constructor with mismatch-specific guidance
+    this.message =
+      'Session token signature does not match the current signing key. ' +
+      'This usually means the CLI and relay are using different MORS_RELAY_SIGNING_KEY values. ' +
+      'To fix: ensure MORS_RELAY_SIGNING_KEY is set to the same value in both CLI and relay environments, ' +
+      'then run "mors login" to issue a new session token with the correct key.';
+    this.name = 'SigningKeyMismatchError';
   }
 }
 
@@ -142,6 +167,12 @@ export async function verifyTokenLiveness(
 
   const payload = verifySessionToken(accessToken, signingKey);
   if (!payload) {
+    // Distinguish signing-key mismatch from generic invalid token.
+    // A well-formed mors-session token with valid payload but wrong signature
+    // indicates the CLI and relay are using different signing keys.
+    if (isSigningKeyMismatch(accessToken, signingKey)) {
+      throw new SigningKeyMismatchError();
+    }
     throw new TokenLivenessError(
       'Session token signature is invalid — token may be expired or revoked'
     );

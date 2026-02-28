@@ -33,6 +33,20 @@ export declare class TokenLivenessError extends MorsError {
     constructor(detail?: string);
 }
 /**
+ * Thrown when a well-formed session token has a valid structure but its
+ * HMAC signature does not match the current signing key — indicating
+ * the CLI and relay are using different MORS_RELAY_SIGNING_KEY values.
+ *
+ * Extends TokenLivenessError for backward compatibility (callers catching
+ * TokenLivenessError will still catch this), but provides specific
+ * signing-key mismatch remediation instead of generic expired/revoked wording.
+ *
+ * Never includes token values or signing keys in the error message.
+ */
+export declare class SigningKeyMismatchError extends TokenLivenessError {
+    constructor();
+}
+/**
  * Require an authenticated session to proceed.
  *
  * Only enforces auth if the user has previously logged in (auth-enabled marker

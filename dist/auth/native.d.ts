@@ -110,6 +110,20 @@ export declare function generateSessionToken(options: SessionTokenOptions): stri
  */
 export declare function verifySessionToken(token: string, signingKey: string): SessionTokenPayload | null;
 /**
+ * Check whether a token is a structurally valid mors session token
+ * (correct prefix, decodable payload with required fields) but has
+ * an invalid signature for the given key.
+ *
+ * Returns true when the token looks like a legitimate mors-session token
+ * that was signed with a different key — i.e., a signing-key mismatch.
+ * Returns false for malformed tokens, non-mors tokens, or tokens
+ * with corrupted/undecodable payloads.
+ *
+ * This enables distinguishing "wrong key" from "garbage token" in error
+ * reporting, so users get actionable remediation guidance.
+ */
+export declare function isSigningKeyMismatch(token: string, signingKey: string): boolean;
+/**
  * Generate or load a signing key for session tokens.
  *
  * The signing key is stored in the config directory. If one exists, it is loaded.

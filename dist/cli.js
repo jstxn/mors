@@ -17,7 +17,7 @@ import { loadKeyExchangeSession, listKeyExchangeSessions, } from './e2ee/key-exc
 import { ContractValidationError } from './contract/errors.js';
 import { saveSession, loadSession, clearSession, markAuthEnabled, saveSigningKey, loadSigningKey, } from './auth/session.js';
 import { validateInviteToken, generateSessionToken, generateSigningKey, NativeAuthPrerequisiteError, } from './auth/native.js';
-import { requireAuth, verifyTokenLiveness, NotAuthenticatedError, TokenLivenessError, } from './auth/guards.js';
+import { requireAuth, verifyTokenLiveness, NotAuthenticatedError, TokenLivenessError, SigningKeyMismatchError, } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -1570,7 +1570,22 @@ async function runStatus(_args) {
     }
     catch (err) {
         process.exitCode = 1;
-        if (err instanceof TokenLivenessError) {
+        // Check SigningKeyMismatchError first (subclass of TokenLivenessError)
+        if (err instanceof SigningKeyMismatchError) {
+            if (json) {
+                console.log(JSON.stringify({
+                    status: 'signing_key_mismatch',
+                    token_valid: false,
+                    message: err.message,
+                    account_id: session.accountId,
+                    device_id: session.deviceId,
+                }));
+            }
+            else {
+                console.error(`Error: ${err.message}`);
+            }
+        }
+        else if (err instanceof TokenLivenessError) {
             if (json) {
                 console.log(JSON.stringify({
                     status: 'token_expired',

@@ -282,8 +282,11 @@ describe('mismatched signing-key paths fail with explicit remediation', () => {
     // Token should fail verification since keys don't match
     expect(statusResult.exitCode).not.toBe(0);
     const parsed = JSON.parse(statusResult.stdout);
-    expect(parsed.status).toBe('token_expired');
+    // Must use signing_key_mismatch (not generic token_expired) for key mismatch
+    expect(parsed.status).toBe('signing_key_mismatch');
     expect(parsed.token_valid).toBe(false);
+    // Remediation must mention MORS_RELAY_SIGNING_KEY
+    expect(parsed.message).toContain('MORS_RELAY_SIGNING_KEY');
   });
 
   it('relay rejects login-issued token when keys differ and returns 401', async () => {

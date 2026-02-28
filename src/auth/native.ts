@@ -206,9 +206,7 @@ export function generateSessionToken(options: SessionTokenOptions): string {
   };
 
   const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = createHmac('sha256', options.signingKey)
-    .update(payloadStr)
-    .digest('hex');
+  const signature = createHmac('sha256', options.signingKey).update(payloadStr).digest('hex');
 
   return `mors-session.${payloadStr}.${signature}`;
 }
@@ -222,10 +220,7 @@ export function generateSessionToken(options: SessionTokenOptions): string {
  * @param signingKey - The key used for HMAC verification.
  * @returns The verified token payload, or null if invalid.
  */
-export function verifySessionToken(
-  token: string,
-  signingKey: string
-): SessionTokenPayload | null {
+export function verifySessionToken(token: string, signingKey: string): SessionTokenPayload | null {
   if (!token || typeof token !== 'string') return null;
 
   const parts = token.split('.');
@@ -235,9 +230,7 @@ export function verifySessionToken(
   if (!payloadStr || !signature) return null;
 
   // Verify HMAC signature
-  const expectedSignature = createHmac('sha256', signingKey)
-    .update(payloadStr)
-    .digest('hex');
+  const expectedSignature = createHmac('sha256', signingKey).update(payloadStr).digest('hex');
 
   // Constant-time comparison to prevent timing attacks
   if (signature.length !== expectedSignature.length) return null;
@@ -276,6 +269,66 @@ export function verifySessionToken(
   } catch {
     return null;
   }
+}
+
+/**
+ * Check whether a token is a structurally valid mors session token
+ * (correct prefix, decodable payload with required fields) but has
+ * an invalid signature for the given key.
+ *
+ * Returns true when the token looks like a legitimate mors-session token
+ * that was signed with a different key — i.e., a signing-key mismatch.
+ * Returns false for malformed tokens, non-mors tokens, or tokens
+ * with corrupted/undecodable payloads.
+ *
+ * This enables distinguishing "wrong key" from "garbage token" in error
+ * reporting, so users get actionable remediation guidance.
+ */
+export function isSigningKeyMismatch(token: string, signingKey: string): boolean {
+  if (!token || typeof token !== 'string') return false;
+
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== 'mors-session') return false;
+
+  const [, payloadStr, signature] = parts;
+  if (!payloadStr || !signature) return false;
+
+  // Check that the payload decodes to valid JSON with required fields
+  try {
+    const decoded = Buffer.from(payloadStr, 'base64url').toString('utf-8');
+    const payload = JSON.parse(decoded) as Record<string, unknown>;
+
+    if (
+      typeof payload['accountId'] !== 'string' ||
+      typeof payload['deviceId'] !== 'string' ||
+      typeof payload['issuedAt'] !== 'string' ||
+      typeof payload['tokenId'] !== 'string'
+    ) {
+      return false;
+    }
+  } catch {
+    // Payload is not decodable — not a key mismatch, just garbage
+    return false;
+  }
+
+  // Payload is structurally valid. Now check if the signature mismatches.
+  const expectedSignature = createHmac('sha256', signingKey).update(payloadStr).digest('hex');
+
+  // If signature matches, this is NOT a mismatch (token is actually valid)
+  if (signature.length === expectedSignature.length) {
+    const sigBuf = Buffer.from(signature, 'hex');
+    const expectedBuf = Buffer.from(expectedSignature, 'hex');
+    if (sigBuf.length === expectedBuf.length) {
+      let equal = true;
+      for (let i = 0; i < sigBuf.length; i++) {
+        if (sigBuf[i] !== expectedBuf[i]) equal = false;
+      }
+      if (equal) return false; // Token is actually valid — not a mismatch
+    }
+  }
+
+  // Structurally valid payload but wrong signature → signing-key mismatch
+  return true;
 }
 
 /**
