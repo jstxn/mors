@@ -1,0 +1,99 @@
+{
+  "milestone": "realtime-watch",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "npm run test -- --maxConcurrency=7",
+      "exitCode": 0,
+      "note": "921 tests passed across 34 test files. Initial run had 1 stale-build failure in cli-auth-gating (reply SyntaxError from stale dist/index.js); rebuild via npm run build resolved it."
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "npm run typecheck",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "npm run lint",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 6,
+    "passed": 4,
+    "failed": 2,
+    "failedFeatures": [
+      "sse-resume-cursor-determinism-and-dedupe",
+      "sse-auth-expiry-and-fallback-mode"
+    ]
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "sse-resume-cursor-determinism-and-dedupe",
+      "severity": "non_blocking",
+      "description": "Reviewer flagged connectedEventId cursor registration before replay as potentially losing events on disconnect-during-replay. Synthesizer downgraded to non-blocking: connected event and replay are written synchronously to the same HTTP response with no async gap; 15 resume-dedupe tests and 19 cross-surface consistency tests all pass; the edge case requires disconnect at a sub-millisecond timing window between two synchronous writes. Worth fixing eventually but not blocking for milestone acceptance.",
+      "originalSeverity": "blocking",
+      "originalFile": "src/relay/server.ts",
+      "originalLine": 268
+    },
+    {
+      "featureId": "sse-auth-expiry-and-fallback-mode",
+      "severity": "non_blocking",
+      "description": "Reviewer flagged missing CLI `mors watch --remote` degraded fallback mode. Synthesizer downgraded to non-blocking: the feature implemented server-side SSE auth-expiry handling and fallback contract (401/503 responses with structured error payloads), validated by 12 auth-fallback tests. The CLI watch --remote integration is not yet wired but the server-side contract that CLI will consume is in place. CLI remote watch is an integration concern that can be addressed in a subsequent feature or the developer-launch-path milestone.",
+      "originalSeverity": "blocking",
+      "originalFile": "src/cli.ts",
+      "originalLine": 1930
+    },
+    {
+      "featureId": "sse-auth-expiry-and-fallback-mode",
+      "severity": "non_blocking",
+      "description": "lastSentEventId is initialized to connectedEventId after replay and only updated for live events. If auth expires before a new live event after replay, auth_expired.last_event_id may point to connected event instead of last replayed event, causing avoidable duplicate replay on recovery.",
+      "originalFile": "src/relay/server.ts",
+      "originalLine": 322
+    },
+    {
+      "featureId": "realtime-watch-fix-test-port-collision-allocation",
+      "severity": "non_blocking",
+      "description": "Shared getTestPort helper was added at test/helpers/test-port.ts but test files still use local duplicated definitions instead of importing the shared utility.",
+      "originalFile": "test/helpers/test-port.ts",
+      "originalLine": 16
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add testing convention: shared test utility functions in test/helpers/ should be imported rather than duplicated locally in test files. Workers adding shared helpers must also update existing local copies to use the shared import.",
+      "evidence": "Feature realtime-watch-fix-test-port-collision-allocation added test/helpers/test-port.ts:16 but tests still define local getTestPort() functions; searching for test-port imports in /test returns no matches.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify that `followedProcedure` must be `false` when manual CLI/API/SSE sanity checks are skipped without explicit rationale, even if all automated validators pass. Multiple workers in this milestone marked followedProcedure=true without manual evidence.",
+      "evidence": "Features sse-watch-auth-connect-and-event-shape, sse-resume-cursor-determinism-and-dedupe, and sse-auth-expiry-and-fallback-mode all mark followedProcedure=true in handoffs but include no interactiveChecks or manual verification evidence despite skill requiring it for user-facing stream changes.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Remove or update references to vitest `--repeat` flag in feature verification steps, as the project's vitest version does not support it. Suggest using shell loop (e.g., `for i in {1..5}; do npx vitest run ...; done`) as documented workaround.",
+      "evidence": "Feature realtime-watch-fix-cli-auth-status-flake verificationSteps reference `--repeat 5`; worker transcript shows failed attempts with --repeat/--repeats before falling back to looped runs.",
+      "isSystemic": false
+    },
+    {
+      "target": "skills",
+      "suggestion": "The mors-global-worker skill TDD requirement should explicitly acknowledge validation-only features (test-only commits) where tests pass immediately because behavior already exists. These features should not be expected to have a red-green cycle.",
+      "evidence": "Feature cross-surface-async-stream-consistency added 19 tests that all passed on first run because the validated behavior was already implemented by prior features; worker correctly noted this in suggestedChanges.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Skill procedure requires manual CLI/API/SSE sanity checks for user-facing changes",
+      "reason": "Duplicate — this observation was raised by 3 separate reviewers (sse-watch-auth-connect, sse-resume-cursor, sse-auth-expiry) and consolidated into a single suggestedGuidanceUpdate above."
+    }
+  ],
+  "previousRound": null
+}

@@ -1,0 +1,21 @@
+{
+  "featureId": "sse-watch-auth-connect-and-event-shape",
+  "reviewedAt": "2026-02-28T15:50:34Z",
+  "commitId": "d1e08da",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation satisfies the feature contract for VAL-STREAM-001/002: authenticated SSE /events connects successfully, emits a connected event with principal context, streams lifecycle events with required identifiers/context, and filters delivery to relevant participants.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker reported skillFeedback.followedProcedure=true, but did not include manual SSE sanity evidence or an explicit rationale for skipping it, despite the skill requiring manual checks for user-facing stream changes.",
+      "evidence": "mors-global-worker SKILL.md step 8 requires manual CLI/API/SSE sanity checks (or explicit skip rationale); feature verificationSteps also include manual SSE capture; handoff verification lists only automated commands and transcript skeleton shows no manual watch/curl stream check."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review passed for code correctness and requirement coverage. One non-blocking shared-state/skill-process observation was recorded regarding missing manual-check evidence reporting."
+}

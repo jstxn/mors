@@ -1,0 +1,28 @@
+{
+  "featureId": "sse-resume-cursor-determinism-and-dedupe",
+  "reviewedAt": "2026-02-28T15:51:06Z",
+  "commitId": "98b4e8f",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature substantially implements cursor replay, deterministic startup, and stable event IDs, but it has a blocking resume gap: a reconnect cursor based on the emitted connected event can skip replay events that were not yet delivered if the client disconnects during catch-up.",
+    "issues": [
+      {
+        "file": "src/relay/server.ts",
+        "line": 268,
+        "severity": "blocking",
+        "description": "`connectedEventId` is registered as a cursor position before replay (`registerCursorPosition(connectedEventId)`), and that cursor points to the current end of the event log (`src/relay/message-store.ts:516`). Because replay is sent after `connected`, a client that disconnects after receiving `connected` but before receiving replayed missed events will reconnect with `Last-Event-ID=connectedEventId` and `getEventsSince` will return only events after the old log tail, dropping those missed logical transitions. This violates VAL-STREAM-003's no-missing-events reconnect guarantee under partial-replay disconnects."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill requires manual CLI/API/SSE sanity checks (or explicit rationale for skipping) for user-facing stream changes, but the handoff only lists automated commands while still marking `followedProcedure=true`.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31 requires manual CLI/API/SSE checks; handoff file /Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/handoffs/2026-02-28T15-22-32-916Z__sse-resume-cursor-determinism-and-dedupe__418dcf23-fb85-4539-ac7a-037c2b48f9fe.json includes `verification.commandsRun` only and no manual-check section, while `skillFeedback.followedProcedure` is true."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking SSE resume correctness issue: connected-event cursor registration occurs before replay and can cause missed events when reconnect happens during catch-up. Shared-state note: skill procedure/manual-check reporting appears inconsistent with the recorded handoff evidence."
+}

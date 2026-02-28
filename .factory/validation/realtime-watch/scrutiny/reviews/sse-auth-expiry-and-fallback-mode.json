@@ -1,0 +1,34 @@
+{
+  "featureId": "sse-auth-expiry-and-fallback-mode",
+  "reviewedAt": "2026-02-28T15:50:31Z",
+  "commitId": "ef76f1d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Mid-stream SSE auth-expiry handling is implemented on the relay and covered by tests, but the feature does not implement the required CLI degraded fallback mode with clear user indication when SSE is unavailable.",
+    "issues": [
+      {
+        "file": "src/cli.ts",
+        "line": 1930,
+        "severity": "blocking",
+        "description": "Feature requirement says fallback must be a CLI degraded mode with clear user indication (features.json:961), but `mors watch` exposes no `--remote` path/fallback behavior (`mors watch [--json] [--poll-interval <ms>]`), and this commit only changes relay server + tests. VAL-STREAM-007 expected behavior is therefore not implemented end-to-end in the CLI surface."
+      },
+      {
+        "file": "src/relay/server.ts",
+        "line": 322,
+        "severity": "non_blocking",
+        "description": "`lastSentEventId` is initialized to `connectedEventId` after replay and only updated for live stream callbacks. If replayed events are sent (`lastEventId` reconnect) and auth expires before a new live event, `auth_expired.last_event_id` can point to the connected event instead of the last replayed event, causing avoidable duplicate replay on recovery."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Skill procedure requires manual CLI/API/SSE sanity checks for user-facing changes (or explicit rationale if skipped), but the handoff reports only automated commands and still marks followedProcedure=true.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31-33 requires manual checks or followedProcedure=false; handoff file lines 14-24 contains only commandsRun and lines 97-99 set followedProcedure=true with no interactiveChecks/rationale."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to missing CLI degraded fallback implementation/indication for SSE unavailability despite explicit feature expectation. Server-side auth-expiry handling is present, but there is also a cursor precision edge case in auth_expired last_event_id after replay."
+}

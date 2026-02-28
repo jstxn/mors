@@ -1,0 +1,21 @@
+{
+  "featureId": "cross-surface-async-stream-consistency",
+  "reviewedAt": "2026-02-28T15:49:27Z",
+  "commitId": "2246f5a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Feature intent is satisfied via a comprehensive new cross-surface test suite. The commit adds 19 tests in test/cross/async-stream-consistency.test.ts that exercise auth consistency (missing/invalid/expired/valid, mid-stream expiry and restoration), retry/idempotency convergence (deduped send/reply/read/ack behavior with stream+inbox agreement), and interruption recovery convergence (cursor resume, replay, multi-disconnect, and post-catch-up live events). No implementation defects or requirement gaps were found in scope for this feature.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill enforces strict red/green TDD, but this validation-focused feature legitimately passed immediately without implementation changes. The skill could explicitly acknowledge validation-only features where adding high-value tests is the full deliverable.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 2 requires failing tests first; handoff.skillFeedback.suggestedChanges and transcript skeleton show tests were added and passed on first run because behavior was already implemented."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit 2246f5a for cross-surface consistency and found it complete for VAL-CROSS-002/003/004. The change is test-only, thorough, and aligned with expected behavior; review status is pass."
+}

@@ -1,0 +1,26 @@
+{
+  "featureId": "realtime-watch-fix-cli-auth-status-flake",
+  "reviewedAt": "2026-02-28T15:49:21Z",
+  "commitId": "ed37512b5c61e03f058111b91ed3ab6928cc07f5",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation matches the feature intent: status auth checks were made deterministic by converting runStatus to async/await and attaching a caller-side rejection handler, while preserving token-liveness semantics and JSON/non-JSON status behavior. Concurrency stress coverage was added for both authenticated and expired paths, and no blocking correctness issues were found in the reviewed diff.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Skill/mission guidance requires strict red-green TDD and truthful followedProcedure reporting, but the transcript shows implementation edits before any newly-added failing test and handoff still reports followedProcedure=true. Procedure expectations may need a documented exception path for flake-fix work (or stricter reporting guidance).",
+      "evidence": "AGENTS.md: 'If strict red/green was not followed ... set followedProcedure=false'; transcript skeleton shows src/cli.ts edits before test/auth/cli-auth-gating.test.ts additions; handoff.skillFeedback.followedProcedure=true"
+    },
+    {
+      "area": "knowledge",
+      "observation": "Feature verification steps still reference vitest --repeat, which is unsupported in this repository's vitest version; this causes avoidable trial-and-error and should be corrected in shared validation guidance.",
+      "evidence": "features.json lines 939-940 include '--repeat 5'; transcript shows attempts with '--repeat/--repeats' then fallback to looped runs; handoff.skillFeedback.suggestedChanges repeats this mismatch"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit ed37512 for realtime-watch-fix-cli-auth-status-flake. The code change and added tests adequately address the auth-status flake and keep behavior aligned with token-liveness requirements; review passes with no blocking code defects. Noted shared-state gaps around TDD procedure reporting and stale vitest repeat guidance."
+}

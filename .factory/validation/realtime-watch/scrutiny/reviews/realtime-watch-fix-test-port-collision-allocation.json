@@ -1,0 +1,28 @@
+{
+  "featureId": "realtime-watch-fix-test-port-collision-allocation",
+  "reviewedAt": "2026-02-28T15:51:22Z",
+  "commitId": "d7ccf228cd37f230593bb1e7ee7f556fbe5d19e3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation covers the feature goal: random relay test-port selection was replaced with OS-assigned ephemeral allocation (port 0), tests were updated to use the actual bound port from server.port after start, and restart/offline cases now discover then reuse a concrete port. loadRelayConfig was updated to permit port 0, and no random test-port formula remains in the test tree.",
+    "issues": [
+      {
+        "file": "test/helpers/test-port.ts",
+        "line": 16,
+        "severity": "non_blocking",
+        "description": "A shared getTestPort helper was added but the modified tests still keep local getTestPort definitions instead of importing this helper, leaving duplication and reducing the value of the shared utility."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Shared-state docs do not clarify whether test utility functions should be centralized vs. per-file, which likely contributed to adding an unused shared helper while retaining duplicated local helpers.",
+      "evidence": "test/helpers/test-port.ts:16 defines shared getTestPort(); test/relay/async-core.test.ts:36 and test/auth/relay-guards.test.ts:21 still define local getTestPort(); searching for \"test-port\" imports in /test returns no matches."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit d7ccf228cd37f230593bb1e7ee7f556fbe5d19e3 for realtime-watch-fix-test-port-collision-allocation. The fix removes random-port collision risk by using OS-assigned ports and post-start bound-port capture across affected integration tests, and I found no blocking defects."
+}
