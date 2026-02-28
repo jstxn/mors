@@ -85,6 +85,34 @@ export class CipherError extends MorsError {
         this.name = 'CipherError';
     }
 }
+/**
+ * Thrown when decryption fails due to a stale or mismatched shared secret.
+ * Extends CipherError for backward compatibility.
+ * Includes actionable rekey guidance directing the user to re-exchange keys.
+ */
+export class StaleKeyError extends CipherError {
+    constructor(message) {
+        super(message ??
+            'Decryption failed: the shared secret appears stale or mismatched. ' +
+                'This typically occurs after a device rotation or when keys are out of sync. ' +
+                'Run "mors key-exchange" to re-establish a fresh shared secret with the peer device.');
+        this.name = 'StaleKeyError';
+    }
+}
+/**
+ * Thrown when an operation involves a revoked device.
+ * Extends CipherError for error-handling consistency in decrypt paths.
+ */
+export class DeviceRevokedError extends CipherError {
+    revokedDeviceId;
+    constructor(deviceId, message) {
+        super(message ??
+            `Device "${deviceId}" has been revoked and can no longer decrypt new messages. ` +
+                'Run "mors key-exchange" from an active device to establish new encryption keys.');
+        this.name = 'DeviceRevokedError';
+        this.revokedDeviceId = deviceId;
+    }
+}
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export class DedupeConflictError extends MorsError {
     dedupeKey;

@@ -6,6 +6,6 @@
  */
 export { generateDeviceKeys, persistDeviceKeys, loadDeviceKeys, isDeviceBootstrapped, getDeviceKeysDir, computeDeviceFingerprint, type DeviceKeyBundle, type DeviceKeyMetadata, } from './device-keys.js';
 export { requireDeviceBootstrap, assertDeviceBootstrapped } from './bootstrap-guard.js';
-export { performKeyExchange, loadKeyExchangeSession, isKeyExchangeComplete, listKeyExchangeSessions, requireKeyExchange, validateConversationType, type KeyExchangeSession, type ConversationType, } from './key-exchange.js';
-export { encryptMessage, decryptMessage, type EncryptedPayload } from './cipher.js';
+export { performKeyExchange, loadKeyExchangeSession, isKeyExchangeComplete, listKeyExchangeSessions, requireKeyExchange, validateConversationType, revokeDevice, isDeviceRevoked, listRevokedDevices, rotateDeviceKeys, type KeyExchangeSession, type ConversationType, type RotationResult, } from './key-exchange.js';
+export { encryptMessage, decryptMessage, decryptMessageStrict, type EncryptedPayload, } from './cipher.js';
 //# sourceMappingURL=index.d.ts.map

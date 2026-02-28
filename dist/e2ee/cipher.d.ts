@@ -63,4 +63,23 @@ export declare function encryptMessage(sharedSecret: Buffer, plaintext: string):
  * @throws CipherError if the shared secret is wrong, payload is tampered, or decryption fails.
  */
 export declare function decryptMessage(sharedSecret: Buffer, payload: EncryptedPayload): string;
+/**
+ * Decrypt an encrypted message payload with strict stale-key error handling.
+ *
+ * Like decryptMessage, but throws a StaleKeyError (subclass of CipherError)
+ * when decryption fails due to an integrity/authentication check failure,
+ * providing explicit rekey guidance. This distinguishes key mismatch errors
+ * from payload validation errors.
+ *
+ * Use this variant when the caller wants to present specific rekey guidance
+ * to the user (e.g., CLI flows where the user needs to know to re-run
+ * key exchange after device rotation).
+ *
+ * @param sharedSecret - The shared secret from key exchange (32 bytes).
+ * @param payload - The encrypted payload to decrypt.
+ * @returns The decrypted plaintext string.
+ * @throws StaleKeyError if decryption fails due to wrong/stale shared secret.
+ * @throws CipherError if the shared secret size is invalid or payload is malformed.
+ */
+export declare function decryptMessageStrict(sharedSecret: Buffer, payload: EncryptedPayload): string;
 //# sourceMappingURL=cipher.d.ts.map

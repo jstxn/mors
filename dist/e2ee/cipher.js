@@ -24,7 +24,7 @@
  * - VAL-E2EE-009: Ciphertext tampering is detected and rejected
  */
 import { createCipheriv, createDecipheriv, randomBytes, hkdfSync } from 'node:crypto';
-import { CipherError } from '../errors.js';
+import { CipherError, StaleKeyError } from '../errors.js';
 // ── Constants ────────────────────────────────────────────────────────
 /** Expected shared secret length (32 bytes from X25519 ECDH). */
 const SHARED_SECRET_SIZE = 32;
@@ -148,6 +148,47 @@ export function decryptMessage(sharedSecret, payload) {
         throw new CipherError('Decryption failed: message integrity or authentication check failed. ' +
             'The ciphertext may have been tampered with, or the shared secret may not match. ' +
             'If this persists, try re-exchanging keys with "mors key-exchange".');
+    }
+}
+/**
+ * Decrypt an encrypted message payload with strict stale-key error handling.
+ *
+ * Like decryptMessage, but throws a StaleKeyError (subclass of CipherError)
+ * when decryption fails due to an integrity/authentication check failure,
+ * providing explicit rekey guidance. This distinguishes key mismatch errors
+ * from payload validation errors.
+ *
+ * Use this variant when the caller wants to present specific rekey guidance
+ * to the user (e.g., CLI flows where the user needs to know to re-run
+ * key exchange after device rotation).
+ *
+ * @param sharedSecret - The shared secret from key exchange (32 bytes).
+ * @param payload - The encrypted payload to decrypt.
+ * @returns The decrypted plaintext string.
+ * @throws StaleKeyError if decryption fails due to wrong/stale shared secret.
+ * @throws CipherError if the shared secret size is invalid or payload is malformed.
+ */
+export function decryptMessageStrict(sharedSecret, payload) {
+    validateSharedSecret(sharedSecret);
+    validatePayload(payload);
+    const derivedKey = deriveKey(sharedSecret);
+    try {
+        const ciphertext = Buffer.from(payload.ciphertext, 'base64');
+        const iv = Buffer.from(payload.iv, 'base64');
+        const authTag = Buffer.from(payload.authTag, 'base64');
+        const decipher = createDecipheriv(ALGORITHM, derivedKey, iv, {
+            authTagLength: AUTH_TAG_SIZE,
+        });
+        decipher.setAuthTag(authTag);
+        const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+        return decrypted.toString('utf8');
+    }
+    catch (err) {
+        if (err instanceof CipherError)
+            throw err;
+        throw new StaleKeyError('Decryption failed: the shared secret appears stale or mismatched. ' +
+            'This typically occurs after a device rotation or when keys are out of sync. ' +
+            'Run "mors key-exchange" to re-establish a fresh shared secret with the peer device.');
     }
 }
 //# sourceMappingURL=cipher.js.map

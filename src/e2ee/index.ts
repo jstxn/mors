@@ -25,8 +25,18 @@ export {
   listKeyExchangeSessions,
   requireKeyExchange,
   validateConversationType,
+  revokeDevice,
+  isDeviceRevoked,
+  listRevokedDevices,
+  rotateDeviceKeys,
   type KeyExchangeSession,
   type ConversationType,
+  type RotationResult,
 } from './key-exchange.js';
 
-export { encryptMessage, decryptMessage, type EncryptedPayload } from './cipher.js';
+export {
+  encryptMessage,
+  decryptMessage,
+  decryptMessageStrict,
+  type EncryptedPayload,
+} from './cipher.js';

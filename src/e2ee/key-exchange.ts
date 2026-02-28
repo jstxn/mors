@@ -36,7 +36,7 @@ import {
   KeyExchangeNotCompleteError,
   GroupE2EEUnsupportedError,
 } from '../errors.js';
-import type { DeviceKeyBundle } from './device-keys.js';
+import { generateDeviceKeys, persistDeviceKeys, type DeviceKeyBundle } from './device-keys.js';
 
 /** Owner-only file permissions for session files (containing shared secrets). */
 const SESSION_FILE_MODE = 0o600;
@@ -414,4 +414,140 @@ export function validateConversationType(type: ConversationType | string): void 
   if (type !== 'direct') {
     throw new GroupE2EEUnsupportedError(type);
   }
+}
+
+// ── Device revocation ───────────────────────────────────────────────
+
+/** Revoked devices registry file name. */
+const REVOKED_FILE = 'revoked-devices.json';
+
+/**
+ * Get the revoked devices file path.
+ */
+function getRevokedPath(keysDir: string): string {
+  return join(getSessionsDir(keysDir), REVOKED_FILE);
+}
+
+/**
+ * Load the set of revoked device IDs from disk.
+ */
+function loadRevokedSet(keysDir: string): Set<string> {
+  const filePath = getRevokedPath(keysDir);
+  if (!existsSync(filePath)) {
+    return new Set();
+  }
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const data = JSON.parse(raw) as { revokedDeviceIds: string[] };
+    return new Set(data.revokedDeviceIds ?? []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Persist the set of revoked device IDs to disk.
+ */
+function saveRevokedSet(keysDir: string, revoked: Set<string>): void {
+  const sessDir = getSessionsDir(keysDir);
+  mkdirSync(sessDir, { recursive: true, mode: DIR_MODE });
+
+  const data = { revokedDeviceIds: Array.from(revoked) };
+  const filePath = getRevokedPath(keysDir);
+  writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', {
+    mode: SESSION_FILE_MODE,
+  });
+}
+
+/**
+ * Revoke a peer device, preventing future trust with that device.
+ *
+ * After revocation, the device should not receive new key exchanges
+ * and any messages encrypted with new keys after rotation will be
+ * unreadable by the revoked device (since it won't have the new
+ * shared secret).
+ *
+ * Idempotent: revoking an already-revoked device is a no-op.
+ *
+ * @param keysDir - Local E2EE keys directory.
+ * @param deviceId - The peer device ID to revoke.
+ */
+export function revokeDevice(keysDir: string, deviceId: string): void {
+  const revoked = loadRevokedSet(keysDir);
+  revoked.add(deviceId);
+  saveRevokedSet(keysDir, revoked);
+}
+
+/**
+ * Check whether a device has been revoked.
+ *
+ * @param keysDir - Local E2EE keys directory.
+ * @param deviceId - The peer device ID to check.
+ * @returns true if the device has been revoked.
+ */
+export function isDeviceRevoked(keysDir: string, deviceId: string): boolean {
+  const revoked = loadRevokedSet(keysDir);
+  return revoked.has(deviceId);
+}
+
+/**
+ * List all revoked device IDs.
+ *
+ * @param keysDir - Local E2EE keys directory.
+ * @returns Array of revoked device ID strings.
+ */
+export function listRevokedDevices(keysDir: string): string[] {
+  const revoked = loadRevokedSet(keysDir);
+  return Array.from(revoked);
+}
+
+// ── Device key rotation ─────────────────────────────────────────────
+
+/** Result of a device key rotation. */
+export interface RotationResult {
+  /** The newly generated device key bundle. */
+  newBundle: DeviceKeyBundle;
+  /** The new key exchange session with the specified peer. */
+  newSession: KeyExchangeSession;
+}
+
+/**
+ * Rotate device keys: generate a new keypair and re-exchange with a peer.
+ *
+ * This creates a new device identity with fresh X25519/Ed25519 keypairs,
+ * performs a key exchange with the specified peer, and returns the new
+ * bundle and session.
+ *
+ * The old device's keys remain on disk (the caller should revoke the old
+ * device separately if needed). The new keys are persisted to the same
+ * keysDir, effectively replacing the old device identity.
+ *
+ * @param localKeysDir - Local E2EE keys directory (new keys will be persisted here).
+ * @param _oldBundle - The old device key bundle being rotated away (kept for audit reference).
+ * @param _peerKeysDir - Peer's E2EE keys directory (reserved for future mutual-rotation flows).
+ * @param peerBundle - The peer's device key bundle (for key exchange).
+ * @returns A RotationResult with the new bundle and key exchange session.
+ */
+export function rotateDeviceKeys(
+  localKeysDir: string,
+  _oldBundle: DeviceKeyBundle,
+  _peerKeysDir: string,
+  peerBundle: DeviceKeyBundle
+): RotationResult {
+  // Generate fresh device keypair
+  const newBundle = generateDeviceKeys();
+
+  // Persist new keys (replaces old device identity in this directory)
+  persistDeviceKeys(localKeysDir, newBundle);
+
+  // Perform key exchange with the peer using the new keys
+  const newSession = performKeyExchange(
+    localKeysDir,
+    newBundle,
+    peerBundle.x25519PublicKey,
+    peerBundle.deviceId,
+    peerBundle.fingerprint
+  );
+
+  return { newBundle, newSession };
 }

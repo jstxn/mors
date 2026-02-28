@@ -20,7 +20,7 @@
  * - VAL-E2EE-002: 1:1 key exchange completes before encrypted send
  * - VAL-E2EE-008: Group/channel E2EE attempts return explicit unsupported response
  */
-import type { DeviceKeyBundle } from './device-keys.js';
+import { type DeviceKeyBundle } from './device-keys.js';
 /** Conversation types for E2EE scope enforcement. */
 export type ConversationType = 'direct' | 'group' | 'channel';
 /**
@@ -104,4 +104,58 @@ export declare function requireKeyExchange(keysDir: string, peerDeviceId: string
  * @throws GroupE2EEUnsupportedError if the type is not 'direct'.
  */
 export declare function validateConversationType(type: ConversationType | string): void;
+/**
+ * Revoke a peer device, preventing future trust with that device.
+ *
+ * After revocation, the device should not receive new key exchanges
+ * and any messages encrypted with new keys after rotation will be
+ * unreadable by the revoked device (since it won't have the new
+ * shared secret).
+ *
+ * Idempotent: revoking an already-revoked device is a no-op.
+ *
+ * @param keysDir - Local E2EE keys directory.
+ * @param deviceId - The peer device ID to revoke.
+ */
+export declare function revokeDevice(keysDir: string, deviceId: string): void;
+/**
+ * Check whether a device has been revoked.
+ *
+ * @param keysDir - Local E2EE keys directory.
+ * @param deviceId - The peer device ID to check.
+ * @returns true if the device has been revoked.
+ */
+export declare function isDeviceRevoked(keysDir: string, deviceId: string): boolean;
+/**
+ * List all revoked device IDs.
+ *
+ * @param keysDir - Local E2EE keys directory.
+ * @returns Array of revoked device ID strings.
+ */
+export declare function listRevokedDevices(keysDir: string): string[];
+/** Result of a device key rotation. */
+export interface RotationResult {
+    /** The newly generated device key bundle. */
+    newBundle: DeviceKeyBundle;
+    /** The new key exchange session with the specified peer. */
+    newSession: KeyExchangeSession;
+}
+/**
+ * Rotate device keys: generate a new keypair and re-exchange with a peer.
+ *
+ * This creates a new device identity with fresh X25519/Ed25519 keypairs,
+ * performs a key exchange with the specified peer, and returns the new
+ * bundle and session.
+ *
+ * The old device's keys remain on disk (the caller should revoke the old
+ * device separately if needed). The new keys are persisted to the same
+ * keysDir, effectively replacing the old device identity.
+ *
+ * @param localKeysDir - Local E2EE keys directory (new keys will be persisted here).
+ * @param _oldBundle - The old device key bundle being rotated away (kept for audit reference).
+ * @param _peerKeysDir - Peer's E2EE keys directory (reserved for future mutual-rotation flows).
+ * @param peerBundle - The peer's device key bundle (for key exchange).
+ * @returns A RotationResult with the new bundle and key exchange session.
+ */
+export declare function rotateDeviceKeys(localKeysDir: string, _oldBundle: DeviceKeyBundle, _peerKeysDir: string, peerBundle: DeviceKeyBundle): RotationResult;
 //# sourceMappingURL=key-exchange.d.ts.map

@@ -46,6 +46,22 @@ export declare class GroupE2EEUnsupportedError extends MorsError {
 export declare class CipherError extends MorsError {
     constructor(message: string);
 }
+/**
+ * Thrown when decryption fails due to a stale or mismatched shared secret.
+ * Extends CipherError for backward compatibility.
+ * Includes actionable rekey guidance directing the user to re-exchange keys.
+ */
+export declare class StaleKeyError extends CipherError {
+    constructor(message?: string);
+}
+/**
+ * Thrown when an operation involves a revoked device.
+ * Extends CipherError for error-handling consistency in decrypt paths.
+ */
+export declare class DeviceRevokedError extends CipherError {
+    readonly revokedDeviceId: string;
+    constructor(deviceId: string, message?: string);
+}
 /** Thrown when a dedupe key collides with an existing record whose causal context (thread_id / in_reply_to) does not match. */
 export declare class DedupeConflictError extends MorsError {
     readonly dedupeKey: string;
