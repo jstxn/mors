@@ -1,0 +1,39 @@
+{
+  "featureId": "auth-relay-guards-and-object-authorization",
+  "reviewedAt": "2026-02-28T11:34:12Z",
+  "commitId": "d11cc163e33f90734d51c60fe61e3095467e5341",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The commit adds solid auth/authz primitives and focused tests, but the feature is not fully enforced in runtime: relay startup does not wire auth verification or participant authorization, and server logic is fail-open when those dependencies are absent. This violates the expected behavior that API/SSE auth guards and participant-only conversation access are enforced.",
+    "issues": [
+      {
+        "file": "src/relay/index.ts",
+        "line": 15,
+        "severity": "blocking",
+        "description": "Relay production entrypoint starts the server with `createRelayServer(config)` and does not provide `tokenVerifier` or `participantStore`. As implemented, protected routes are therefore not actually guarded in default runtime, so missing/invalid credentials do not consistently return 401 and object-level authorization is not enforced." 
+      },
+      {
+        "file": "src/relay/server.ts",
+        "line": 124,
+        "severity": "blocking",
+        "description": "Auth and participant checks are conditional (`if (tokenVerifier)` and `if (participantStore && principal)`), creating fail-open behavior. When either dependency is missing, `/events` and `/conversations/:id/*` can return 200 instead of enforcing 401/403, which conflicts with the feature requirement that only participants can access conversation state and unauthenticated access is rejected." 
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Shared-state docs do not clearly specify whether relay auth/authz should fail closed when verifier/participant dependencies are unset. This ambiguity allowed a backward-compatibility, fail-open implementation that conflicts with the feature’s stated behavior.",
+      "evidence": "AGENTS.md and .factory/library/architecture.md state auth invariants but not unset-dependency semantics; transcript skeleton shows worker explicitly debating strict 401 vs legacy mode and then implementing legacy/no-auth mode."
+    },
+    {
+      "area": "skills",
+      "observation": "`mors-global-worker` procedure requires manual CLI/API/SSE sanity checks (step 8), but this handoff reports only automated commands while `skillFeedback.followedProcedure` is true. Either the procedure should be clarified as conditional or adherence signaling is too permissive.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 8 vs handoff `verification.commandsRun` for worker session b607c05c-9e25-445d-a775-f56b274830c7 (no interactive/manual checks listed)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to two blocking enforcement gaps: relay runtime does not wire auth/authz dependencies, and server request handling is fail-open when those dependencies are absent. The commit’s primitives/tests are good, but the delivered runtime behavior does not fully satisfy VAL-AUTH-003/004 in default operation."
+}

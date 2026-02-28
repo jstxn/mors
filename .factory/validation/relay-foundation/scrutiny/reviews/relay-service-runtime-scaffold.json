@@ -1,0 +1,45 @@
+{
+  "featureId": "relay-service-runtime-scaffold",
+  "reviewedAt": "2026-02-28T11:34:53Z",
+  "commitId": "e18169d",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The scaffold covers health/SSE/config basics and test harness behavior, but it misses key hosted-runtime requirements and is not fully production-stable for remote use.",
+    "issues": [
+      {
+        "file": "src/relay/server.ts",
+        "line": 128,
+        "severity": "blocking",
+        "description": "Server startup hard-binds to 127.0.0.1 (`httpServer.listen(config.port, '127.0.0.1', ...)`). For a hosted relay runtime, this prevents external/container ingress and breaks remote feature accessibility."
+      },
+      {
+        "file": "src/relay/index.ts",
+        "line": 14,
+        "severity": "blocking",
+        "description": "Feature description requires persistence bootstrap, but the entrypoint only loads config and starts the HTTP server (`loadRelayConfig` + `createRelayServer`) with no persistence initialization path."
+      },
+      {
+        "file": "package.json",
+        "line": 18,
+        "severity": "non_blocking",
+        "description": "`relay:dev` runs via `npx tsx`, but `tsx` is not declared in devDependencies. This makes startup depend on implicit global cache/network availability and reduces determinism."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Mission guidance describes a hosted relay API/SSE scope but does not explicitly document interface-binding expectations (e.g., 0.0.0.0 vs 127.0.0.1) for deployable relay services.",
+      "evidence": "/Users/justen/.factory/missions/54bd84c5-2680-4f00-890c-9c832860b3d4/AGENTS.md:6 states 'hosted relay API/SSE'; reviewed commit binds listener at src/relay/server.ts:128 to 127.0.0.1."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared environment docs/services do not call out the runtime dependency implied by `relay:dev` using `npx tsx`, which can require network/global cache on fresh environments.",
+      "evidence": "package.json:18 sets relay:dev to `npx tsx src/relay/index.ts`; package.json:24+ has no `tsx` dependency; .factory/library/environment.md runtime baseline (lines 10-13) does not mention tsx requirement."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, transcript skeleton, and commit e18169d. Health endpoint/SSE/config diagnostics and tests were implemented, but the feature fails review due to loopback-only binding and missing persistence bootstrap relative to feature scope."
+}

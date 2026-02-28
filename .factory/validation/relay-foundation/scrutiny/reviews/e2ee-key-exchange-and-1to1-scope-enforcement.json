@@ -1,0 +1,28 @@
+{
+  "featureId": "e2ee-key-exchange-and-1to1-scope-enforcement",
+  "reviewedAt": "2026-02-28T11:35:08Z",
+  "commitId": "857c88ad0a5283125913805455af02a963f1d1d9",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The feature delivers a robust X25519-based 1:1 key exchange module with persisted session metadata, explicit group/channel E2EE rejection, and comprehensive targeted tests covering happy paths and failure modes. Core requirements are met for this foundation stage.",
+    "issues": [
+      {
+        "file": "src/errors.ts",
+        "line": 80,
+        "severity": "non_blocking",
+        "description": "KeyExchangeNotCompleteError tells users to run `mors key-exchange`, but the CLI usage and command dispatch do not currently expose a `key-exchange` command, so the remediation guidance is currently not executable."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The `mors-global-worker` skill requires manual CLI/API/SSE sanity checks, but this feature handoff only reports automated `commandsRun` while still marking `skillFeedback.followedProcedure=true`. The skill/procedure contract should clarify when manual checks are optional for pure library-level features.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md:31 requires manual checks; mission handoff file 2026-02-28T11-31-13-074Z__e2ee-key-exchange-and-1to1-scope-enforcement__6c9ca849-fa56-4eb9-8ea4-32339113eee6.json contains `verification.commandsRun` but no manual/interactive check section."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed commit 857c88ad in depth (diff, tests, handoff, transcript skeleton, and skill context). Implementation satisfies feature intent for 1:1 key exchange and unsupported group/channel enforcement, with one non-blocking UX guidance mismatch in error messaging."
+}

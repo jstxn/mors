@@ -1,0 +1,34 @@
+{
+  "featureId": "auth-device-flow-cli-and-session-management",
+  "reviewedAt": "2026-02-28T11:36:10Z",
+  "commitId": "f8899ec",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature adds solid device-flow/session primitives and CLI auth commands, but it does not fully satisfy the declared behavior for post-logout re-gating and expired/revoked-token recovery UX.",
+    "issues": [
+      {
+        "file": "src/cli.ts",
+        "line": 83,
+        "severity": "blocking",
+        "description": "VAL-AUTH-005 requires protected operations to re-gate on login after logout, but command gating only checks initialization (`requireInit`) and then dispatches send/inbox/read/reply/ack/thread/watch directly. There is no auth-session check in the gated dispatch path (see lines 39, 83-99), so `logout` (line 815) does not actually re-gate protected command execution."
+      },
+      {
+        "file": "src/cli.ts",
+        "line": 835,
+        "severity": "blocking",
+        "description": "`runStatus` is labeled for VAL-AUTH-006 but only inspects local session file state (`loadSession`) and reports `authenticated` when present (lines 840, 859-864). It never validates token liveness. Token-expiry handling exists only during login account fetch (`fetchGitHubUser` at line 745 and catch at line 777), so expired/revoked persisted tokens are not surfaced with actionable re-auth guidance in status/protected usage paths."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The worker marked `skillFeedback.followedProcedure=true`, but transcript evidence does not show strict red/green confirmation before implementation as required by the skill.",
+      "evidence": "Skill requires strict red/green (`.factory/skills/mors-global-worker/SKILL.md` lines 17-20: add failing tests first, run targeted tests and confirm failure). Transcript skeleton (`worker-transcripts.jsonl` line 44 for this session) shows tests were created, then source modules created, then tests run with note 'they should since we implemented the modules'."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed feature entry, handoff, transcript skeleton, skill, and commit f8899ec diff. Core login/logout/status plus session/device-flow primitives are present, but review fails because logout does not re-gate protected command execution and expired/revoked persisted-token recovery UX is not enforced in status/protected paths."
+}
