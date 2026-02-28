@@ -14,6 +14,8 @@ import {
   generateDedupeKey,
   isValidId,
   isValidOptionalId,
+  isValidPrefixedId,
+  ID_PREFIXES,
 } from '../src/contract/ids.js';
 import {
   DELIVERY_STATES,
@@ -29,10 +31,7 @@ import {
   validateMessageId,
   type MessageEnvelope,
 } from '../src/contract/envelope.js';
-import {
-  ContractValidationError,
-  InvalidStateTransitionError,
-} from '../src/contract/errors.js';
+import { ContractValidationError, InvalidStateTransitionError } from '../src/contract/errors.js';
 
 // ---------------------------------------------------------------------------
 // ID generation
@@ -142,12 +141,18 @@ describe('contract ID generation', () => {
       expect(isValidOptionalId(null)).toBe(true);
     });
 
-    it('returns true for undefined', () => {
-      expect(isValidOptionalId(undefined)).toBe(true);
+    it('returns false for undefined (only null is accepted, not undefined)', () => {
+      expect(isValidOptionalId(undefined)).toBe(false);
     });
 
     it('returns false for empty string', () => {
       expect(isValidOptionalId('')).toBe(false);
+    });
+
+    it('returns false for non-string types', () => {
+      expect(isValidOptionalId(123)).toBe(false);
+      expect(isValidOptionalId({})).toBe(false);
+      expect(isValidOptionalId(true)).toBe(false);
     });
   });
 });
@@ -214,21 +219,15 @@ describe('delivery states', () => {
     });
 
     it('rejects queued -> acked (skipping delivered)', () => {
-      expect(() => validateStateTransition('queued', 'acked')).toThrow(
-        InvalidStateTransitionError
-      );
+      expect(() => validateStateTransition('queued', 'acked')).toThrow(InvalidStateTransitionError);
     });
 
     it('rejects acked -> anything (terminal state)', () => {
       expect(() => validateStateTransition('acked', 'delivered')).toThrow(
         InvalidStateTransitionError
       );
-      expect(() => validateStateTransition('acked', 'queued')).toThrow(
-        InvalidStateTransitionError
-      );
-      expect(() => validateStateTransition('acked', 'failed')).toThrow(
-        InvalidStateTransitionError
-      );
+      expect(() => validateStateTransition('acked', 'queued')).toThrow(InvalidStateTransitionError);
+      expect(() => validateStateTransition('acked', 'failed')).toThrow(InvalidStateTransitionError);
     });
 
     it('rejects failed -> anything (terminal state)', () => {
@@ -268,15 +267,15 @@ describe('delivery states', () => {
     });
 
     it('rejects invalid from-state', () => {
-      expect(() =>
-        validateStateTransition('bogus' as DeliveryState, 'delivered')
-      ).toThrow(InvalidStateTransitionError);
+      expect(() => validateStateTransition('bogus' as DeliveryState, 'delivered')).toThrow(
+        InvalidStateTransitionError
+      );
     });
 
     it('rejects invalid to-state', () => {
-      expect(() =>
-        validateStateTransition('queued', 'bogus' as DeliveryState)
-      ).toThrow(InvalidStateTransitionError);
+      expect(() => validateStateTransition('queued', 'bogus' as DeliveryState)).toThrow(
+        InvalidStateTransitionError
+      );
     });
   });
 });
@@ -321,9 +320,7 @@ describe('envelope validation', () => {
     });
 
     it('rejects envelope with missing id', () => {
-      expect(() => validateEnvelope(validEnvelope({ id: '' }))).toThrow(
-        ContractValidationError
-      );
+      expect(() => validateEnvelope(validEnvelope({ id: '' }))).toThrow(ContractValidationError);
     });
 
     it('rejects envelope with missing thread_id', () => {
@@ -345,15 +342,13 @@ describe('envelope validation', () => {
     });
 
     it('rejects envelope with missing body', () => {
-      expect(() => validateEnvelope(validEnvelope({ body: '' }))).toThrow(
-        ContractValidationError
-      );
+      expect(() => validateEnvelope(validEnvelope({ body: '' }))).toThrow(ContractValidationError);
     });
 
     it('rejects envelope with invalid state', () => {
-      expect(() =>
-        validateEnvelope(validEnvelope({ state: 'bogus' as DeliveryState }))
-      ).toThrow(ContractValidationError);
+      expect(() => validateEnvelope(validEnvelope({ state: 'bogus' as DeliveryState }))).toThrow(
+        ContractValidationError
+      );
     });
 
     it('rejects envelope with missing created_at', () => {
@@ -416,9 +411,9 @@ describe('envelope validation', () => {
     });
 
     it('rejects non-queued initial state', () => {
-      expect(() =>
-        validateEnvelopeForSend(validEnvelope({ state: 'delivered' }))
-      ).toThrow(ContractValidationError);
+      expect(() => validateEnvelopeForSend(validEnvelope({ state: 'delivered' }))).toThrow(
+        ContractValidationError
+      );
     });
 
     it('rejects send envelope with read_at set', () => {
@@ -453,9 +448,9 @@ describe('envelope validation', () => {
     });
 
     it('rejects reply without in_reply_to', () => {
-      expect(() =>
-        validateEnvelopeForReply(validEnvelope({ in_reply_to: null }))
-      ).toThrow(ContractValidationError);
+      expect(() => validateEnvelopeForReply(validEnvelope({ in_reply_to: null }))).toThrow(
+        ContractValidationError
+      );
     });
   });
 
@@ -469,9 +464,7 @@ describe('envelope validation', () => {
     });
 
     it('rejects null', () => {
-      expect(() => validateMessageId(null as unknown as string)).toThrow(
-        ContractValidationError
-      );
+      expect(() => validateMessageId(null as unknown as string)).toThrow(ContractValidationError);
     });
 
     it('rejects whitespace-only string', () => {
@@ -697,5 +690,280 @@ describe('trace_id semantics', () => {
       updated_at: new Date().toISOString(),
     };
     expect(() => validateEnvelope(env)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ID prefix validation
+// ---------------------------------------------------------------------------
+
+describe('typed ID prefix validation', () => {
+  describe('ID_PREFIXES', () => {
+    it('maps message to msg_ prefix', () => {
+      expect(ID_PREFIXES.message).toBe('msg_');
+    });
+
+    it('maps thread to thr_ prefix', () => {
+      expect(ID_PREFIXES.thread).toBe('thr_');
+    });
+
+    it('maps trace to trc_ prefix', () => {
+      expect(ID_PREFIXES.trace).toBe('trc_');
+    });
+
+    it('maps dedupe to dup_ prefix', () => {
+      expect(ID_PREFIXES.dedupe).toBe('dup_');
+    });
+  });
+
+  describe('isValidPrefixedId', () => {
+    it('returns true for correctly prefixed message ID', () => {
+      expect(isValidPrefixedId('msg_abc123', 'message')).toBe(true);
+    });
+
+    it('returns true for correctly prefixed thread ID', () => {
+      expect(isValidPrefixedId('thr_abc123', 'thread')).toBe(true);
+    });
+
+    it('returns true for correctly prefixed trace ID', () => {
+      expect(isValidPrefixedId('trc_abc123', 'trace')).toBe(true);
+    });
+
+    it('returns true for correctly prefixed dedupe key', () => {
+      expect(isValidPrefixedId('dup_abc123', 'dedupe')).toBe(true);
+    });
+
+    it('rejects message ID with wrong prefix', () => {
+      expect(isValidPrefixedId('thr_abc123', 'message')).toBe(false);
+    });
+
+    it('rejects thread ID with wrong prefix', () => {
+      expect(isValidPrefixedId('msg_abc123', 'thread')).toBe(false);
+    });
+
+    it('rejects trace ID with wrong prefix', () => {
+      expect(isValidPrefixedId('msg_abc123', 'trace')).toBe(false);
+    });
+
+    it('rejects dedupe key with wrong prefix', () => {
+      expect(isValidPrefixedId('msg_abc123', 'dedupe')).toBe(false);
+    });
+
+    it('rejects ID with prefix only (no content after prefix)', () => {
+      expect(isValidPrefixedId('msg_', 'message')).toBe(false);
+    });
+
+    it('rejects empty string', () => {
+      expect(isValidPrefixedId('', 'message')).toBe(false);
+    });
+
+    it('rejects null', () => {
+      expect(isValidPrefixedId(null as unknown as string, 'message')).toBe(false);
+    });
+
+    it('rejects undefined', () => {
+      expect(isValidPrefixedId(undefined as unknown as string, 'message')).toBe(false);
+    });
+
+    it('rejects non-string values', () => {
+      expect(isValidPrefixedId(123 as unknown as string, 'message')).toBe(false);
+    });
+
+    it('rejects unprefixed but otherwise valid string', () => {
+      expect(isValidPrefixedId('some_random_id', 'message')).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Envelope undefined nullable field rejection
+// ---------------------------------------------------------------------------
+
+describe('envelope undefined nullable field rejection', () => {
+  function validEnvelope(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope {
+    return {
+      id: 'msg_undef_test',
+      thread_id: 'thr_undef_test',
+      in_reply_to: null,
+      sender: 'alice',
+      recipient: 'bob',
+      subject: null,
+      body: 'Test undefined rejection',
+      dedupe_key: null,
+      trace_id: 'trc_undef_test',
+      state: 'queued',
+      read_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  // Helper to simulate external input where a field is missing (undefined).
+  // Uses destructuring to omit the target field then spreads back into a fresh
+  // object, leaving the named key absent (i.e. property access yields undefined).
+  function withUndefinedField(field: keyof MessageEnvelope): MessageEnvelope {
+    const env = validEnvelope();
+    const { [field]: _omitted, ...rest } = env;
+    return rest as MessageEnvelope;
+  }
+
+  it('rejects envelope with undefined in_reply_to', () => {
+    expect(() => validateEnvelope(withUndefinedField('in_reply_to'))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects envelope with undefined dedupe_key', () => {
+    expect(() => validateEnvelope(withUndefinedField('dedupe_key'))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects envelope with undefined trace_id', () => {
+    expect(() => validateEnvelope(withUndefinedField('trace_id'))).toThrow(ContractValidationError);
+  });
+
+  it('rejects envelope with undefined subject', () => {
+    expect(() => validateEnvelope(withUndefinedField('subject'))).toThrow(ContractValidationError);
+  });
+
+  it('rejects envelope with undefined read_at', () => {
+    expect(() => validateEnvelope(withUndefinedField('read_at'))).toThrow(ContractValidationError);
+  });
+
+  it('accepts envelope with null in_reply_to', () => {
+    expect(() => validateEnvelope(validEnvelope({ in_reply_to: null }))).not.toThrow();
+  });
+
+  it('accepts envelope with null dedupe_key', () => {
+    expect(() => validateEnvelope(validEnvelope({ dedupe_key: null }))).not.toThrow();
+  });
+
+  it('accepts envelope with null trace_id', () => {
+    expect(() => validateEnvelope(validEnvelope({ trace_id: null }))).not.toThrow();
+  });
+
+  it('accepts envelope with null subject', () => {
+    expect(() => validateEnvelope(validEnvelope({ subject: null }))).not.toThrow();
+  });
+
+  it('accepts envelope with null read_at', () => {
+    expect(() => validateEnvelope(validEnvelope({ read_at: null }))).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Envelope typed ID prefix enforcement
+// ---------------------------------------------------------------------------
+
+describe('envelope typed ID prefix enforcement', () => {
+  function validEnvelope(overrides: Partial<MessageEnvelope> = {}): MessageEnvelope {
+    return {
+      id: 'msg_prefix_test',
+      thread_id: 'thr_prefix_test',
+      in_reply_to: null,
+      sender: 'alice',
+      recipient: 'bob',
+      subject: null,
+      body: 'Test prefix enforcement',
+      dedupe_key: null,
+      trace_id: 'trc_prefix_test',
+      state: 'queued',
+      read_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  it('rejects envelope with id missing msg_ prefix', () => {
+    expect(() => validateEnvelope(validEnvelope({ id: 'no_prefix_id' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects envelope with thread_id missing thr_ prefix', () => {
+    expect(() => validateEnvelope(validEnvelope({ thread_id: 'no_prefix_thread' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects envelope with in_reply_to missing msg_ prefix', () => {
+    expect(() => validateEnvelope(validEnvelope({ in_reply_to: 'no_prefix_reply' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects envelope with dedupe_key missing dup_ prefix', () => {
+    expect(() => validateEnvelope(validEnvelope({ dedupe_key: 'no_prefix_dedupe' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects envelope with trace_id missing trc_ prefix', () => {
+    expect(() => validateEnvelope(validEnvelope({ trace_id: 'no_prefix_trace' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('accepts envelope with correctly prefixed IDs', () => {
+    expect(() =>
+      validateEnvelope(
+        validEnvelope({
+          id: 'msg_correct',
+          thread_id: 'thr_correct',
+          in_reply_to: 'msg_parent',
+          dedupe_key: 'dup_correct',
+          trace_id: 'trc_correct',
+        })
+      )
+    ).not.toThrow();
+  });
+
+  it('rejects id with thr_ prefix (wrong type)', () => {
+    expect(() => validateEnvelope(validEnvelope({ id: 'thr_wrong' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('rejects thread_id with msg_ prefix (wrong type)', () => {
+    expect(() => validateEnvelope(validEnvelope({ thread_id: 'msg_wrong' }))).toThrow(
+      ContractValidationError
+    );
+  });
+
+  it('allows null optional ID fields without prefix check', () => {
+    expect(() =>
+      validateEnvelope(
+        validEnvelope({
+          in_reply_to: null,
+          dedupe_key: null,
+          trace_id: null,
+        })
+      )
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateMessageId prefix enforcement
+// ---------------------------------------------------------------------------
+
+describe('validateMessageId prefix enforcement', () => {
+  it('accepts msg_ prefixed ID', () => {
+    expect(() => validateMessageId('msg_test123')).not.toThrow();
+  });
+
+  it('rejects ID without msg_ prefix', () => {
+    expect(() => validateMessageId('thr_wrong')).toThrow(ContractValidationError);
+  });
+
+  it('rejects unprefixed string', () => {
+    expect(() => validateMessageId('random_id')).toThrow(ContractValidationError);
+  });
+
+  it('rejects msg_ prefix with no content after', () => {
+    expect(() => validateMessageId('msg_')).toThrow(ContractValidationError);
   });
 });

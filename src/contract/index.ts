@@ -30,7 +30,10 @@ export {
   generateDedupeKey,
   isValidId,
   isValidOptionalId,
+  isValidPrefixedId,
+  ID_PREFIXES,
 } from './ids.js';
+export type { IdType } from './ids.js';
 
 // ── Delivery states ────────────────────────────────────────────────────
 export {
@@ -41,7 +44,4 @@ export {
 } from './states.js';
 
 // ── Contract errors ────────────────────────────────────────────────────
-export {
-  ContractValidationError,
-  InvalidStateTransitionError,
-} from './errors.js';
+export { ContractValidationError, InvalidStateTransitionError } from './errors.js';

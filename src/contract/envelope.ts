@@ -21,7 +21,7 @@
  * - updated_at   — ISO-8601 timestamp of last update
  */
 
-import { isValidId, isValidOptionalId } from './ids.js';
+import { isValidId, isValidOptionalId, isValidPrefixedId } from './ids.js';
 import { isValidDeliveryState, type DeliveryState } from './states.js';
 import { ContractValidationError } from './errors.js';
 
@@ -69,12 +69,16 @@ export function validateEnvelope(envelope: MessageEnvelope): void {
     throw new ContractValidationError('Envelope must be a non-null object.');
   }
 
-  // Required non-empty string fields.
-  if (!isValidId(envelope.id)) {
-    throw new ContractValidationError('Envelope field "id" must be a non-empty string.');
+  // Required non-empty string fields with typed prefix enforcement.
+  if (!isValidPrefixedId(envelope.id, 'message')) {
+    throw new ContractValidationError(
+      'Envelope field "id" must be a non-empty string with "msg_" prefix.'
+    );
   }
-  if (!isValidId(envelope.thread_id)) {
-    throw new ContractValidationError('Envelope field "thread_id" must be a non-empty string.');
+  if (!isValidPrefixedId(envelope.thread_id, 'thread')) {
+    throw new ContractValidationError(
+      'Envelope field "thread_id" must be a non-empty string with "thr_" prefix.'
+    );
   }
   if (!isValidId(envelope.sender)) {
     throw new ContractValidationError('Envelope field "sender" must be a non-empty string.');
@@ -92,10 +96,16 @@ export function validateEnvelope(envelope: MessageEnvelope): void {
     throw new ContractValidationError('Envelope field "updated_at" must be a non-empty string.');
   }
 
-  // Optional fields: must be null or valid non-empty string.
+  // Optional nullable ID fields: must be null or valid non-empty string (undefined rejected).
+  // When present (non-null), enforce typed prefix validation.
   if (!isValidOptionalId(envelope.in_reply_to)) {
     throw new ContractValidationError(
       'Envelope field "in_reply_to" must be null or a non-empty string.'
+    );
+  }
+  if (envelope.in_reply_to !== null && !isValidPrefixedId(envelope.in_reply_to, 'message')) {
+    throw new ContractValidationError(
+      'Envelope field "in_reply_to" must have "msg_" prefix when set.'
     );
   }
   if (!isValidOptionalId(envelope.dedupe_key)) {
@@ -103,9 +113,19 @@ export function validateEnvelope(envelope: MessageEnvelope): void {
       'Envelope field "dedupe_key" must be null or a non-empty string.'
     );
   }
+  if (envelope.dedupe_key !== null && !isValidPrefixedId(envelope.dedupe_key, 'dedupe')) {
+    throw new ContractValidationError(
+      'Envelope field "dedupe_key" must have "dup_" prefix when set.'
+    );
+  }
   if (!isValidOptionalId(envelope.trace_id)) {
     throw new ContractValidationError(
       'Envelope field "trace_id" must be null or a non-empty string.'
+    );
+  }
+  if (envelope.trace_id !== null && !isValidPrefixedId(envelope.trace_id, 'trace')) {
+    throw new ContractValidationError(
+      'Envelope field "trace_id" must have "trc_" prefix when set.'
     );
   }
 
@@ -116,13 +136,14 @@ export function validateEnvelope(envelope: MessageEnvelope): void {
     );
   }
 
-  // subject and read_at are optional (null allowed), but if present must be non-empty strings.
-  if (envelope.subject !== null && !isValidId(envelope.subject)) {
+  // subject and read_at are nullable (null allowed, undefined rejected).
+  // When present must be non-empty strings.
+  if (!isValidOptionalId(envelope.subject)) {
     throw new ContractValidationError(
       'Envelope field "subject" must be null or a non-empty string.'
     );
   }
-  if (envelope.read_at !== null && !isValidId(envelope.read_at)) {
+  if (!isValidOptionalId(envelope.read_at)) {
     throw new ContractValidationError(
       'Envelope field "read_at" must be null or a non-empty string.'
     );
@@ -174,15 +195,15 @@ export function validateEnvelopeForReply(envelope: MessageEnvelope): void {
 
 /**
  * Validate a message ID string (used for read, ack, reply target lookups).
- * Ensures the value is a non-empty, non-whitespace string.
+ * Ensures the value is a non-empty, non-whitespace string with `msg_` prefix.
  *
  * @param id - The message ID to validate.
- * @throws ContractValidationError if the ID is invalid.
+ * @throws ContractValidationError if the ID is invalid or missing the `msg_` prefix.
  */
 export function validateMessageId(id: unknown): asserts id is string {
-  if (!isValidId(id)) {
+  if (!isValidPrefixedId(id, 'message')) {
     throw new ContractValidationError(
-      `Invalid message ID: expected a non-empty string, got ${id === null ? 'null' : typeof id === 'string' ? `"${id}"` : typeof id}.`
+      `Invalid message ID: expected a non-empty "msg_"-prefixed string, got ${id === null ? 'null' : typeof id === 'string' ? `"${id}"` : typeof id}.`
     );
   }
 }
