@@ -1,0 +1,17 @@
+{
+  "milestone": "misc-hardening-1",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "notes": "No implementation features in misc-hardening-1 have fulfills mappings. All 36 validation contract assertions were already passed in prior milestones (core-foundation, local-cli-flows). The misc-hardening-1 features are internal test/hardening improvements (config dir permissions, dedupe concurrency race handling, branch coverage, overlap contention tests, umask determinism) with no new user-facing assertions. Sanity verified: all 383 unit tests pass, CLI build succeeds, basic init/send/inbox workflow confirmed functional, config dir permissions correctly hardened to 700.",
+  "appliedUpdates": [],
+  "previousRound": null
+}
