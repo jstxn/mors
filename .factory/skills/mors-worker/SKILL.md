@@ -19,6 +19,7 @@ Use for `mors` CLI, schema, storage, security, and integration-test features in 
    - Run targeted tests and confirm failure.
    - Implement minimal code to pass (green).
    - Refactor safely.
+   - Exception for scaffold/bootstrap features: if the test harness does not exist yet, first establish the minimal runnable harness, then immediately return to red/green cycles for all subsequent behavior.
 3. Preserve mandatory product invariants:
    - SQLCipher required; no plaintext fallback.
    - `read` and `ack` remain separate.
@@ -39,7 +40,7 @@ Use for `mors` CLI, schema, storage, security, and integration-test features in 
   "verification": {
     "commandsRun": [
       {
-        "command": "npm run test -- --testPathPattern init",
+        "command": "npx vitest run test/init.test.ts --maxConcurrency=7",
         "exitCode": 0,
         "observation": "Init suite passed including atomic failure and rerun/idempotency checks."
       },
