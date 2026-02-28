@@ -1449,11 +1449,24 @@ function runLogin(_args) {
     }
     // Generate device ID for this installation (VAL-AUTH-009)
     const deviceId = `device-${randomUUID()}`;
-    // Generate or load signing key for session tokens
-    let signingKey = loadSigningKey(configDir);
-    if (!signingKey) {
-        signingKey = generateSigningKey();
+    // Resolve signing key for session tokens.
+    // Prefer MORS_RELAY_SIGNING_KEY env var for deterministic key coordination
+    // between CLI token issuance and relay token verification. This ensures
+    // login-issued tokens are accepted by the relay under configured signing-key policy.
+    // Falls back to a locally generated key when env var is not set (offline/local-only use).
+    const envSigningKey = (process.env['MORS_RELAY_SIGNING_KEY'] ?? '').trim();
+    let signingKey;
+    if (envSigningKey) {
+        signingKey = envSigningKey;
+        // Persist the env-sourced key locally so offline status checks work
         saveSigningKey(configDir, signingKey);
+    }
+    else {
+        signingKey = loadSigningKey(configDir) ?? '';
+        if (!signingKey) {
+            signingKey = generateSigningKey();
+            saveSigningKey(configDir, signingKey);
+        }
     }
     // Generate session token (HMAC-signed, VAL-AUTH-002)
     const sessionToken = generateSessionToken({

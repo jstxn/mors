@@ -86,10 +86,19 @@ export function requireAuth(configDir) {
  */
 export async function verifyTokenLiveness(accessToken, options) {
     const { verifySessionToken } = await import('./native.js');
-    // Resolve signing key
+    // Resolve signing key.
+    // Priority: explicit option > MORS_RELAY_SIGNING_KEY env var > local signing key file.
+    // This ensures token liveness checks use the same key the relay uses for verification,
+    // enabling deterministic key coordination between CLI and relay.
     let signingKey = options?.signingKey;
-    if (!signingKey && options?.configDir) {
-        signingKey = loadSigningKey(options.configDir) ?? undefined;
+    if (!signingKey) {
+        const envKey = (process.env['MORS_RELAY_SIGNING_KEY'] ?? '').trim();
+        if (envKey) {
+            signingKey = envKey;
+        }
+        else if (options?.configDir) {
+            signingKey = loadSigningKey(options.configDir) ?? undefined;
+        }
     }
     if (!signingKey) {
         throw new TokenLivenessError('Unable to verify token — signing key not available');
