@@ -1,0 +1,22 @@
+{
+  "group": "e2ee-key-lifecycle",
+  "assertions": {
+    "VAL-E2EE-005": {
+      "status": "pass",
+      "evidence": "Vitest command `npx vitest run test/e2ee/rekey-rotation.test.ts --maxConcurrency=7 --reporter=verbose` exited 0 with 28/28 passing. Relevant passing tests include: `decryption with wrong shared secret throws StaleKeyError with rekey guidance`, `StaleKeyError message includes rekey guidance mentioning key-exchange` (includes `mors key-exchange`), `StaleKeyError includes guidance about stale/mismatched keys`, `StaleKeyError is a subclass of CipherError for backward compatibility`, and `existing decryptMessage still throws CipherError for backward compat` (strict path throws `StaleKeyError`, legacy path remains `CipherError`)."
+    },
+    "VAL-E2EE-006": {
+      "status": "pass",
+      "evidence": "Same vitest run exited 0 with all tests passing. Relevant passing tests include: `revoked device cannot decrypt new messages encrypted after revocation`, `active device continues to work after rekey`, `revokeDevice is idempotent`, plus revocation-at-exchange tests `performKeyExchange rejects revoked device peers deterministically`, `revoked device cannot re-establish decrypt capability through fresh exchange`, and `rotateDeviceKeys inherits revocation enforcement` (throws `KeyExchangeError` for revoked peers while non-revoked paths continue)."
+    },
+    "VAL-E2EE-007": {
+      "status": "pass",
+      "evidence": "Same vitest run exited 0 with all tests passing. Relevant passing tests include: `relay message store body field contains ciphertext, not plaintext`, `relay inbox listing does not expose plaintext in any field`, `relay store get() does not expose plaintext`, `relay store operations do not expose plaintext in returned structures`, `relay read/ack results do not expose plaintext body`, `canary scan: plaintext absent from all relay store state`, and `relay HTTP wire response does not contain plaintext when E2EE body is used` (ciphertext JSON only in persistence/wire artifacts)."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "group": "relay-durability-recovery",
+  "assertions": {
+    "VAL-RELAY-006": {
+      "status": "fail",
+      "evidence": "Ran `npx vitest run test/relay/offline-retry.test.ts --maxConcurrency=7` (exit 0), then reran with `--reporter=verbose` to capture per-test names. All VAL-RELAY-006 tests in this file passed: messages queued during offline period are delivered after reconnect; offline queue uses dedupe keys to prevent duplication on retry; multiple offline messages with replies maintain causal linkage after sync; queue is empty after successful flush; queue entries are ordered (FIFO) and flushed in order; online send bypasses queue. However, this suite does not include an explicit process-restart/disk-persistence durability case (no restart/durable/persist-to-disk scenario), so the assigned durability check for restart survival is not demonstrated by the specified test file."
+    },
+    "VAL-RELAY-007": {
+      "status": "pass",
+      "evidence": "Verbose vitest output shows all VAL-RELAY-007 tests passed (exit 0): retries on transient network error; retries on 5xx and converges to one delivery; retries with dedupe key avoid duplicate delivery after ghost write; queues offline after exhausting retries; does not retry on 4xx non-transient errors; timeout triggers retry and success; retry attempts use exponential backoff delays; flush retries failed queue entries with backoff; read/ack retry on transient failure; concurrent sends with retry produce no duplicates; retry log entries deterministic with attempt number. This satisfies transient-failure recovery with single logical delivery semantics."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest"
+  ]
+}

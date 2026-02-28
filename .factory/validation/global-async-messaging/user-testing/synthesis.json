@@ -1,0 +1,39 @@
+{
+  "milestone": "global-async-messaging",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 16,
+    "passed": 16,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-RELAY-001",
+    "VAL-RELAY-002",
+    "VAL-RELAY-003",
+    "VAL-RELAY-004",
+    "VAL-RELAY-005",
+    "VAL-RELAY-006",
+    "VAL-RELAY-007",
+    "VAL-RELAY-008",
+    "VAL-RELAY-009",
+    "VAL-RELAY-010",
+    "VAL-E2EE-003",
+    "VAL-E2EE-004",
+    "VAL-E2EE-005",
+    "VAL-E2EE-006",
+    "VAL-E2EE-007",
+    "VAL-E2EE-009"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added 'Flow Validator Guidance: Relay Async Messaging (global-async-messaging)' section with test file mappings, isolation rules, and testing approach for relay/E2EE assertions",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}

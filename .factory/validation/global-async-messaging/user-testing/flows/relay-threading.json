@@ -1,0 +1,26 @@
+{
+  "group": "relay-threading-idempotency",
+  "assertions": {
+    "VAL-RELAY-004": {
+      "status": "pass",
+      "evidence": "Vitest verbose run passed all VAL-RELAY-004 cases: 'reply to a root message inherits thread_id from parent', 'nested reply preserves root thread_id', 'root messages without in_reply_to get their own unique thread_id', and 'reply to nonexistent parent returns error'. These confirm replies retain root thread_id and immediate in_reply_to linkage across reply chains/sync boundaries."
+    },
+    "VAL-RELAY-005": {
+      "status": "pass",
+      "evidence": "Vitest verbose run passed all VAL-RELAY-005 cases, including canonical dedupe behavior for send/reply: same dedupe_key returns the same message id (first call 201, retry 200), inbox count remains one for deduped sends, and repeated retries converge to one logical outcome."
+    },
+    "VAL-RELAY-009": {
+      "status": "pass",
+      "evidence": "Vitest verbose run passed all VAL-RELAY-009 cases: same dedupe_key across different accounts produced distinct message ids (no cross-account collision), incompatible context reuse (different recipient or in_reply_to, root/reply mismatch) returned 409 dedupe_conflict with mismatch detail, and compatible retries converged to canonical identity."
+    },
+    "VAL-RELAY-010": {
+      "status": "pass",
+      "evidence": "Vitest verbose run passed all VAL-RELAY-010 cases: after restart with same store, read retry returned first_read=false with stable read_at, ack retry returned first_ack=false with stable acked_at, combined re-read/re-ack stayed stable, concurrent retries produced exactly one first transition, and dedupe key behavior remained idempotent across restart."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest"
+  ]
+}

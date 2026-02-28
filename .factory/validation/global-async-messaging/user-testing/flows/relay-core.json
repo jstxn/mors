@@ -1,0 +1,27 @@
+{
+  "group": "relay-core-messaging",
+  "assertions": {
+    "VAL-RELAY-001": {
+      "status": "pass",
+      "evidence": "`npx vitest run test/relay/async-core.test.ts --reporter=verbose --maxConcurrency=7` passed. Covered send/inbox delivery and ID/metadata matching via tests including: 'alice can send a message to bob via relay', 'bob sees alice message in inbox', and 'message IDs match between send response and inbox'."
+    },
+    "VAL-RELAY-002": {
+      "status": "pass",
+      "evidence": "Same async-core suite passed. Read-vs-ack separation verified by passing tests: 'reading a message does not change its state from delivered', 'reading does not imply ack', 'ack can happen independently of read', and 'read then ack produces correct final state'."
+    },
+    "VAL-RELAY-003": {
+      "status": "pass",
+      "evidence": "Same async-core suite passed. Ack convergence verified by tests: 'sender view reflects acked state after recipient acks', 'recipient view and sender view converge on same acked state', and 'device-level view reflects same state as account-level view'."
+    },
+    "VAL-RELAY-008": {
+      "status": "pass",
+      "evidence": "`npx vitest run test/relay/spoof-prevention.test.ts --reporter=verbose --maxConcurrency=7` passed (16/16). Spoof prevention validated by tests rejecting spoofed sender fields with 403 (e.g. sender_id/sender_login mismatch) and ensuring legitimate sends use authenticated principal identity."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest",
+    "curl"
+  ]
+}

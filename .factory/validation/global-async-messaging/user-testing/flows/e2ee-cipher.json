@@ -1,0 +1,22 @@
+{
+  "group": "e2ee-cipher-integrity",
+  "assertions": {
+    "VAL-E2EE-003": {
+      "status": "pass",
+      "evidence": "Vitest file test/e2ee/cipher-runtime.test.ts passed with verbose test-level output (28/28). Coverage includes: encrypted payload does not contain plaintext message body; payload has ciphertext/iv/authTag fields; canary plaintext absent from payload fields; sendEncrypted sends ciphertext body through relay with no plaintext on wire; relay-stored body parses as EncryptedPayload JSON structure."
+    },
+    "VAL-E2EE-004": {
+      "status": "pass",
+      "evidence": "Verbose vitest output shows recipient decrypt success paths passing: recipient decrypts ciphertext with matching shared secret; round-trip preserves exact content (including unicode/special chars); both parties decrypt each other using DH-shared secret; relay readDecrypted decrypts relay message with matching shared secret and preserves message content."
+    },
+    "VAL-E2EE-009": {
+      "status": "pass",
+      "evidence": "Tamper/integrity checks all passed in verbose output: tampered ciphertext fails integrity check with CipherError; tampered authTag fails authentication check with CipherError; tampered IV fails decryption with CipherError; truncated/replaced ciphertext fails with CipherError; relay-backed tampered ciphertext/authTag is rejected on readDecrypted. Related wrong-key coverage also passed (decryption with wrong shared secret fails with CipherError), and error-message assertion matches decrypt|integrity|authentication guidance."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": [
+    "vitest"
+  ]
+}

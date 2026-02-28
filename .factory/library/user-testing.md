@@ -81,3 +81,34 @@ Manual validation guidance for global CLI + relay + SSE + E2EE mission.
 - Include full curl command with `-v` flag for header inspection.
 - Capture HTTP status code and JSON response body.
 - Verify error field matches expected value (`unauthorized` or `forbidden`).
+
+---
+
+## Flow Validator Guidance: Relay Async Messaging (global-async-messaging)
+
+**Testing tool:** Programmatic Node.js scripts using the relay server library + RelayClient, or vitest tests with stub auth. The existing test suite provides comprehensive coverage for all relay messaging assertions.
+
+**Testing approach for this milestone:**
+Since the relay uses in-memory storage and GitHub OAuth is placeholder-first (no real tokens), the most reliable validation method is:
+1. Run the existing vitest test suite which exercises all assertions through real HTTP servers with stub auth
+2. Verify via curl against the running relay (port 3100) for auth guard behavior (401 for all protected routes since production token verifier calls GitHub API)
+3. Use programmatic scripts importing library code directly for E2EE operations
+
+**Test files covering assertions:**
+- `test/relay/async-core.test.ts` → VAL-RELAY-001, VAL-RELAY-002, VAL-RELAY-003
+- `test/relay/thread-dedupe.test.ts` → VAL-RELAY-004, VAL-RELAY-005, VAL-RELAY-009, VAL-RELAY-010
+- `test/relay/offline-retry.test.ts` → VAL-RELAY-006, VAL-RELAY-007
+- `test/relay/spoof-prevention.test.ts` → VAL-RELAY-008
+- `test/e2ee/cipher-runtime.test.ts` → VAL-E2EE-003, VAL-E2EE-004, VAL-E2EE-009
+- `test/e2ee/rekey-rotation.test.ts` → VAL-E2EE-005, VAL-E2EE-006, VAL-E2EE-007
+
+**Isolation rules:**
+- Each subagent MUST use a unique random port range for relay servers (30000-39999)
+- Each subagent MUST use unique temp directories for E2EE key material
+- Relay tests use stub token verifiers with well-known test tokens (token-alice, token-bob, token-eve)
+- Test identities: alice (userId=1001), bob (userId=1002), eve (userId=1003)
+
+**Evidence requirements:**
+- vitest output showing test names and pass/fail status
+- curl transcripts for relay API auth guard checks
+- For E2EE: canary plaintext absence verification in relay store/log artifacts
