@@ -1,0 +1,25 @@
+{
+  "featureId": "agent-friendly-install-self-serve-path",
+  "milestone": "agent-friendly-install-ux",
+  "reviewer": "scrutiny-validator-inline",
+  "verdict": "pass",
+  "summary": "Implements agent-friendly self-serve install path without requiring shell RC mutations. README updated with For Agents section. Test coverage is comprehensive with 543 lines of tests covering VAL-LAUNCH-006.",
+  "codeQuality": {
+    "strengths": [
+      "Tests thoroughly cover one-shot node dist/index.js invocation path",
+      "MORS_CONFIG_DIR isolation tested with multiple agent environments",
+      "JSON output structure validation ensures deterministic automation parsing",
+      "Error paths provide actionable remediation (init, login, etc.)",
+      "No shell RC mutation required - confirmed by explicit test"
+    ],
+    "issues": []
+  },
+  "testCoverage": {
+    "adequate": true,
+    "notes": "543 lines of tests across 23 test cases covering: self-serve invocation, full lifecycle, JSON output structure, error guidance, config isolation, documentation references"
+  },
+  "securityConcerns": [],
+  "blockingIssues": [],
+  "nonBlockingIssues": [],
+  "sharedStateObservations": []
+}

@@ -1,0 +1,26 @@
+{
+  "featureId": "doctor-command-actionable-remediation",
+  "milestone": "agent-friendly-install-ux",
+  "reviewer": "scrutiny-validator-inline",
+  "verdict": "pass",
+  "summary": "Implements mors doctor with 6 diagnostic checks (node_version, sqlcipher, init, device_keys, auth_session, relay_config), each producing pass/fail/warn with copy/paste remediation commands. Covers VAL-LAUNCH-008.",
+  "codeQuality": {
+    "strengths": [
+      "Each check has clear name, status, message, and remediation fields",
+      "Two-tier severity: fail (hard gate, exit 1) vs warn (informational, exit 0)",
+      "Remediation commands are specific and copy/paste ready (e.g., 'brew install sqlcipher && npm rebuild')",
+      "SQLCipher failure simulation via --simulate-sqlcipher-failure flag",
+      "JSON output is well-structured with status, checks array, and configDir",
+      "Human-readable mode uses ✓/✗/⚠ indicators with inline remediation"
+    ],
+    "issues": []
+  },
+  "testCoverage": {
+    "adequate": true,
+    "notes": "506 lines across 26+ test cases covering: healthy environment, per-check validation, failure detection with remediation, simulated sqlcipher failure, auth/relay warn states, multiple failures, human-readable output, help integration, determinism and automation"
+  },
+  "securityConcerns": [],
+  "blockingIssues": [],
+  "nonBlockingIssues": [],
+  "sharedStateObservations": []
+}

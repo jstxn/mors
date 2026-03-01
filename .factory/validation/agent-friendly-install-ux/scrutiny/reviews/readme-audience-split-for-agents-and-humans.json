@@ -1,0 +1,26 @@
+{
+  "featureId": "readme-audience-split-for-agents-and-humans",
+  "milestone": "agent-friendly-install-ux",
+  "reviewer": "scrutiny-validator-inline",
+  "verdict": "pass",
+  "summary": "Updates README with clearly separated 'For Agents' and 'For Humans' sections, each with tailored install/use paths. Adds 391 lines of tests validating section structure, content accuracy, and representative command path execution. Covers VAL-LAUNCH-009.",
+  "codeQuality": {
+    "strengths": [
+      "For Agents section covers npx, global install, direct invocation, lifecycle commands, JSON output, error table",
+      "For Humans section covers npm install, setup-shell, Homebrew, guided lifecycle with onboard/watch",
+      "Both sections reference quickstart and doctor for validation",
+      "Tests validate that documented commands actually work when executed",
+      "README cross-references ONBOARDING.md for extended guidance",
+      "Error handling table in agent section maps error types to remediation commands"
+    ],
+    "issues": []
+  },
+  "testCoverage": {
+    "adequate": true,
+    "notes": "391 lines across 32 test cases covering: section structure validation, content requirements per audience, representative command path execution (full lifecycle for both agent and human paths), command accuracy checks, cross-reference validation"
+  },
+  "securityConcerns": [],
+  "blockingIssues": [],
+  "nonBlockingIssues": [],
+  "sharedStateObservations": []
+}
