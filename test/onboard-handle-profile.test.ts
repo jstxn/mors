@@ -822,14 +822,14 @@ describe('CLI mors onboard', () => {
   });
 
   it('persists profile locally after successful onboard', () => {
-    // This test exercises the local persistence path.
-    // Without a running relay, we test the CLI output for profile persistence.
-    // The onboard command should persist a profile.json file locally.
+    // Without a relay URL, the onboard command persists locally without
+    // attempting relay registration.  The profile.json file MUST be created
+    // and its content MUST match the supplied handle/display-name.
     const profilePath = join(configDir, 'profile.json');
 
-    // onboard --handle --display-name in offline/local mode
-    try {
-      execSync(`node ${CLI} onboard --handle testuser123 --display-name "Test User" --json 2>&1`, {
+    const stdout = execSync(
+      `node ${CLI} onboard --handle testuser123 --display-name "Test User" --json 2>&1`,
+      {
         env: {
           ...process.env,
           MORS_CONFIG_DIR: configDir,
@@ -838,18 +838,19 @@ describe('CLI mors onboard', () => {
         },
         encoding: 'utf-8',
         timeout: 10000,
-      });
-    } catch {
-      // May fail due to no relay, but profile should still be attempted locally
-    }
+      }
+    );
 
-    // Check that profile.json was created locally
-    if (existsSync(profilePath)) {
-      const profile = JSON.parse(readFileSync(profilePath, 'utf-8'));
-      expect(profile.handle).toBe('testuser123');
-      expect(profile.displayName).toBe('Test User');
-    }
-    // If no profile file, the test will be updated once implementation is complete
+    // CLI must report success
+    const parsed = JSON.parse(stdout.trim());
+    expect(parsed.status).toBe('onboarded');
+    expect(parsed.handle).toBe('testuser123');
+
+    // profile.json MUST exist (no silent conditional pass)
+    expect(existsSync(profilePath)).toBe(true);
+    const profile = JSON.parse(readFileSync(profilePath, 'utf-8'));
+    expect(profile.handle).toBe('testuser123');
+    expect(profile.displayName).toBe('Test User');
   });
 
   it('shows onboard in help output', () => {
@@ -1037,5 +1038,81 @@ describe('CLI mors onboard', () => {
 
     expect(exitCode).not.toBe(0);
     rmSync(noAuthDir, { recursive: true, force: true });
+  });
+
+  it('two sessions racing the same handle: exactly one succeeds, loser has no local profile', async () => {
+    // Simulates two CLI sessions onboarding with the same handle against
+    // the same relay. The relay must deterministically grant one and reject
+    // the other. The rejected session must NOT persist a local profile.
+    const { createRelayServer } = await import('../src/relay/server.js');
+    const { loadRelayConfig } = await import('../src/relay/config.js');
+    const { createNativeTokenVerifier } = await import('../src/relay/auth-middleware.js');
+    const { RelayMessageStore } = await import('../src/relay/message-store.js');
+
+    const relayStore = new AccountStore();
+    const config = loadRelayConfig({ PORT: '0', MORS_RELAY_HOST: '127.0.0.1' });
+    const server = createRelayServer(config, {
+      logger: () => {},
+      tokenVerifier: createNativeTokenVerifier(signingKey),
+      messageStore: new RelayMessageStore(),
+      accountStore: relayStore,
+    });
+    await server.start();
+    const relayPort = server.port;
+
+    // Create two separate config dirs (two "sessions")
+    const configDir2 = makeTempDir();
+    simulateAuthenticatedInit(configDir2, signingKey);
+
+    try {
+      const env1 = {
+        ...process.env,
+        MORS_CONFIG_DIR: configDir,
+        MORS_RELAY_SIGNING_KEY: signingKey,
+        MORS_RELAY_BASE_URL: `http://127.0.0.1:${relayPort}`,
+        PATH: process.env['PATH'],
+      };
+      const env2 = {
+        ...process.env,
+        MORS_CONFIG_DIR: configDir2,
+        MORS_RELAY_SIGNING_KEY: signingKey,
+        MORS_RELAY_BASE_URL: `http://127.0.0.1:${relayPort}`,
+        PATH: process.env['PATH'],
+      };
+
+      // Fire both onboard calls concurrently with the same handle
+      const [result1, result2] = await Promise.all([
+        runCliAsync(
+          ['onboard', '--handle', 'racehandle', '--display-name', 'Session1', '--json'],
+          env1
+        ),
+        runCliAsync(
+          ['onboard', '--handle', 'racehandle', '--display-name', 'Session2', '--json'],
+          env2
+        ),
+      ]);
+
+      const parsed1 = JSON.parse(result1.stdout);
+      const parsed2 = JSON.parse(result2.stdout);
+
+      // Exactly one must succeed, the other must fail
+      const statuses = [parsed1.status, parsed2.status].sort();
+      expect(statuses).toEqual(['error', 'onboarded']);
+
+      // Identify winner and loser
+      const winnerDir = parsed1.status === 'onboarded' ? configDir : configDir2;
+      const loserDir = parsed1.status === 'onboarded' ? configDir2 : configDir;
+      const loserParsed = parsed1.status === 'onboarded' ? parsed2 : parsed1;
+
+      // Winner has local profile
+      expect(existsSync(join(winnerDir, 'profile.json'))).toBe(true);
+
+      // Loser gets duplicate_handle error and does NOT have local profile
+      expect(loserParsed.error).toBe('duplicate_handle');
+      expect(existsSync(join(loserDir, 'profile.json'))).toBe(false);
+    } finally {
+      await server.close();
+      rmSync(configDir2, { recursive: true, force: true });
+    }
   });
 });

@@ -2499,7 +2499,7 @@ Prerequisites:
 // ── Usage ────────────────────────────────────────────────────────────
 
 function printUsage(): void {
-  console.log(`mors — markdown-first encrypted local CLI messaging
+  console.log(`mors — agent-first encrypted CLI messaging
 
 Usage:
   mors <command> [options]
@@ -2530,7 +2530,7 @@ Remote mode:
   --no-encrypt           Bypass E2EE encryption (send/read plaintext via relay)
 
 Send options:
-  --to <recipient>       Recipient identity (required; numeric GitHub user ID for --remote)
+  --to <recipient>       Recipient identity (required; account ID for --remote)
   --body <message>       Message body (required)
   --from <sender>        Sender identity (default: "local")
   --subject <subject>    Message subject
@@ -2551,7 +2551,7 @@ Read/Ack:
 
 Reply:
   mors reply <parent-message-id> --body <message> [options]
-  --to <recipient>       Recipient identity (default: "local"; numeric GitHub user ID for --remote)
+  --to <recipient>       Recipient identity (default: "local"; account ID for --remote)
   --from <sender>        Sender identity (default: "local")
   --subject <subject>    Reply subject
   --dedupe-key <key>     Dedupe key for idempotent replies (must start with "dup_")

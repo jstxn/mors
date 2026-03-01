@@ -1,11 +1,11 @@
 # mors
 
-`mors` is a CLI-first, agent-first messaging system with a hosted relay, GitHub device-flow auth, SSE realtime watch, and 1:1 E2EE.
+`mors` is a CLI-first, agent-first messaging system with a hosted relay, mors-native auth, SSE realtime watch, and 1:1 E2EE.
 
 ## Core Capabilities
 
 - Local + relay-backed messaging (`send`, `inbox`, `read`, `ack`, `reply`, `thread`, `watch`)
-- GitHub OAuth device-flow session lifecycle (`login`, `status`, `logout`)
+- Mors-native auth session lifecycle (`login`, `status`, `logout`)
 - Realtime remote watch with reconnect/cursor resume and fallback signaling
 - 1:1 encryption model with per-device keys, key exchange, rotation, and revocation enforcement
 - Install and launch UX: GitHub npm install, Homebrew formula, `setup-shell` prompt-first behavior

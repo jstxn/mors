@@ -76,8 +76,8 @@ function testConfig(): RelayConfig {
 }
 
 /** Standard test principals. */
-const ALICE_PRINCIPAL: AuthPrincipal = { accountId: "acct_1001", deviceId: 'device-alice' };
-const BOB_PRINCIPAL: AuthPrincipal = { accountId: "acct_1002", deviceId: 'device-bob' };
+const ALICE_PRINCIPAL: AuthPrincipal = { accountId: 'acct_1001', deviceId: 'device-alice' };
+const BOB_PRINCIPAL: AuthPrincipal = { accountId: 'acct_1002', deviceId: 'device-bob' };
 
 /** Controllable token verifier for test auth. */
 function controllableTokenVerifier(): {
@@ -1051,6 +1051,96 @@ describe('cross-area golden-path hardening', () => {
         expect(m1?.['read_at']).not.toBeNull();
         expect(m2?.['read_at']).not.toBeNull();
       }
+    });
+
+    it('secure-delivery continuity: adding device 2 does not break device 1 decrypt', async () => {
+      // Setup Alice's device
+      const { keysDir: aliceKeysDir, bundle: aliceBundle } = setupDevice(tempDir, 'alice-cont');
+
+      // Setup Bob device 1 first
+      const { keysDir: bobD1KeysDir, bundle: bobD1Bundle } = setupDevice(tempDir, 'bob-cont-d1');
+
+      // Alice ↔ Bob D1 key exchange
+      const aliceSessionD1 = performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        bobD1Bundle.x25519PublicKey,
+        bobD1Bundle.deviceId,
+        bobD1Bundle.fingerprint
+      );
+      performKeyExchange(
+        bobD1KeysDir,
+        bobD1Bundle,
+        aliceBundle.x25519PublicKey,
+        aliceBundle.deviceId,
+        aliceBundle.fingerprint
+      );
+
+      // Send encrypted message for D1
+      const canary1 = 'CONTINUITY_CHECK_D1_MESSAGE';
+      const enc1 = encryptMessage(aliceSessionD1.sharedSecret, canary1);
+      const send1 = await relayFetch(server.port, '/messages', {
+        method: 'POST',
+        token: 'token-alice',
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: JSON.stringify(enc1) },
+      });
+      expect(send1.status).toBe(201);
+
+      // Now add Bob device 2
+      const { keysDir: bobD2KeysDir, bundle: bobD2Bundle } = setupDevice(tempDir, 'bob-cont-d2');
+      const aliceSessionD2 = performKeyExchange(
+        aliceKeysDir,
+        aliceBundle,
+        bobD2Bundle.x25519PublicKey,
+        bobD2Bundle.deviceId,
+        bobD2Bundle.fingerprint
+      );
+      performKeyExchange(
+        bobD2KeysDir,
+        bobD2Bundle,
+        aliceBundle.x25519PublicKey,
+        aliceBundle.deviceId,
+        aliceBundle.fingerprint
+      );
+
+      // Send encrypted message for D2
+      const canary2 = 'CONTINUITY_CHECK_D2_MESSAGE';
+      const enc2 = encryptMessage(aliceSessionD2.sharedSecret, canary2);
+      const send2 = await relayFetch(server.port, '/messages', {
+        method: 'POST',
+        token: 'token-alice',
+        body: { recipient_id: BOB_PRINCIPAL.accountId, body: JSON.stringify(enc2) },
+      });
+      expect(send2.status).toBe(201);
+
+      // D1 can still decrypt its original message (continuity preserved)
+      const d1Inbox = await relayFetch(server.port, '/inbox', { token: BOB_D1_TOKEN });
+      const d1Msgs = (d1Inbox.body as Record<string, unknown>)['messages'] as Array<
+        Record<string, unknown>
+      >;
+      expect(d1Msgs.length).toBe(2);
+      const d1OwnMsg = d1Msgs.find(
+        (m) => m['id'] === (send1.body as Record<string, unknown>)['id']
+      ) as Record<string, unknown> | undefined;
+      expect(d1OwnMsg).toBeDefined();
+      const d1Payload = JSON.parse(
+        (d1OwnMsg as Record<string, unknown>)['body'] as string
+      ) as EncryptedPayload;
+      expect(decryptMessage(aliceSessionD1.sharedSecret, d1Payload)).toBe(canary1);
+
+      // D2 can decrypt its own message (new device works)
+      const d2OwnMsg = d1Msgs.find(
+        (m) => m['id'] === (send2.body as Record<string, unknown>)['id']
+      ) as Record<string, unknown> | undefined;
+      expect(d2OwnMsg).toBeDefined();
+      const d2Payload = JSON.parse(
+        (d2OwnMsg as Record<string, unknown>)['body'] as string
+      ) as EncryptedPayload;
+      expect(decryptMessage(aliceSessionD2.sharedSecret, d2Payload)).toBe(canary2);
+
+      // Cross-device decrypt fails (different shared secrets)
+      expect(() => decryptMessage(aliceSessionD1.sharedSecret, d2Payload)).toThrow(CipherError);
+      expect(() => decryptMessage(aliceSessionD2.sharedSecret, d1Payload)).toThrow(CipherError);
     });
   });
 

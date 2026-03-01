@@ -173,7 +173,7 @@ describe('VAL-DEPLOY-002: Missing flyctl or deploy auth fails safely with remedi
     expect(result.stdout).toContain('deploy');
   });
 
-  it('missing flyctl produces explicit remediation output', () => {
+  it('missing flyctl produces explicit remediation output with install instructions', () => {
     const result = runCli('deploy --json', {
       env: {
         // Ensure flyctl is genuinely not found by using isolated PATH
@@ -189,13 +189,15 @@ describe('VAL-DEPLOY-002: Missing flyctl or deploy auth fails safely with remedi
     expect(result.exitCode).not.toBe(0);
 
     const output = result.stdout + result.stderr;
-    // Must mention flyctl somewhere in the output
+    // Must explicitly mention flyctl is not installed
     expect(output.toLowerCase()).toContain('flyctl');
-    // Must provide installation guidance or flyctl-related error context
-    expect(output.toLowerCase()).toMatch(/install|brew|curl|https:\/\/fly\.io|flyctl/);
+    // Must provide concrete installation remediation (brew or curl install URL)
+    expect(output).toMatch(/brew install flyctl|https:\/\/fly\.io/);
+    // Must indicate this is an install issue, not a generic error
+    expect(output.toLowerCase()).toContain('install');
   });
 
-  it('missing flyctl JSON output has error structure', () => {
+  it('missing flyctl JSON output has error structure with flyctl category', () => {
     const result = runCli('deploy --json', {
       env: {
         PATH: pathWithoutFlyctl(),
@@ -206,17 +208,24 @@ describe('VAL-DEPLOY-002: Missing flyctl or deploy auth fails safely with remedi
       expectFailure: true,
     });
 
-    // stdout may contain multiple newline-delimited JSON objects when
-    // flyctl is installed but fails; parse the last JSON object.
+    // stdout must contain a JSON error object for missing flyctl
     const jsonOutput = result.stdout.trim();
-    if (jsonOutput.includes('{')) {
-      const parsed = parseLastJson(jsonOutput) as Record<string, unknown>;
-      // The final status must be 'error' (preflight or deploy failure)
-      expect(parsed.status).toBe('error');
-    } else {
-      // stderr must contain the remediation
-      expect(result.stderr.toLowerCase()).toContain('flyctl');
-    }
+    expect(jsonOutput).toContain('{');
+    const parsed = parseLastJson(jsonOutput) as Record<string, unknown>;
+    expect(parsed.status).toBe('error');
+
+    // The error must reference the flyctl category
+    const errorField = String(parsed.error ?? '');
+    expect(errorField).toContain('flyctl');
+
+    // Issues array must contain a flyctl-category issue with remediation
+    const issues = parsed.issues as Array<Record<string, unknown>>;
+    expect(issues).toBeDefined();
+    expect(issues.length).toBeGreaterThanOrEqual(1);
+    const flyctlIssue = issues.find((i) => i.category === 'flyctl') as Record<string, unknown>;
+    expect(flyctlIssue).toBeDefined();
+    expect(String(flyctlIssue.remediation)).toMatch(/install/i);
+    expect(String(flyctlIssue.remediation)).toMatch(/brew install flyctl|https:\/\/fly\.io/);
   });
 
   it('missing deploy auth (FLY_ACCESS_TOKEN) produces explicit remediation', () => {

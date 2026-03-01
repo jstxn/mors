@@ -399,6 +399,13 @@ describe('CLI default encrypted remote messaging paths', () => {
 
 describe('CLI secure-setup guidance when prerequisites missing', () => {
   let tempDir: string;
+  /**
+   * Use a high random port that is almost certainly unbound so these tests
+   * (which do NOT start a server) never accidentally collide with other
+   * relay servers spun up by concurrently-running tests on port 3100.
+   */
+  const noServerPort = 39_999 + Math.floor(Math.random() * 10_000);
+  const fakeRelayUrl = `http://127.0.0.1:${noServerPort}`;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'mors-cli-noenc-'));
@@ -428,7 +435,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
       ],
       {
         configDir: tempDir,
-        env: { MORS_RELAY_BASE_URL: 'http://127.0.0.1:3100' },
+        env: { MORS_RELAY_BASE_URL: fakeRelayUrl },
       }
     );
 
@@ -459,7 +466,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
       ],
       {
         configDir: tempDir,
-        env: { MORS_RELAY_BASE_URL: 'http://127.0.0.1:3100' },
+        env: { MORS_RELAY_BASE_URL: fakeRelayUrl },
       }
     );
 
@@ -479,7 +486,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
       ['read', 'msg_some-id', '--remote', '--json', '--peer-device', 'nonexistent-device'],
       {
         configDir: tempDir,
-        env: { MORS_RELAY_BASE_URL: 'http://127.0.0.1:3100' },
+        env: { MORS_RELAY_BASE_URL: fakeRelayUrl },
       }
     );
 
@@ -510,7 +517,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
       ],
       {
         configDir: tempDir,
-        env: { MORS_RELAY_BASE_URL: 'http://127.0.0.1:3100' },
+        env: { MORS_RELAY_BASE_URL: fakeRelayUrl },
       }
     );
 
@@ -541,7 +548,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
       ],
       {
         configDir: tempDir,
-        env: { MORS_RELAY_BASE_URL: 'http://127.0.0.1:3100' },
+        env: { MORS_RELAY_BASE_URL: fakeRelayUrl },
       }
     );
 
