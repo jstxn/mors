@@ -81,17 +81,21 @@ If all five happen, onboarding succeeded.
 
 ---
 
-## Optional: 2-minute remote/auth extension
+## Optional: 2-minute auth + remote extension
 
 Only after local success.
 
 ```bash
-# Requires auth env vars configured for your relay setup
-mors login --json
+# Login requires an invite token (flag or MORS_INVITE_TOKEN env var)
+mors login --invite-token <your-invite-token> --json
+
+# Complete profile onboarding once per config dir
+mors onboard --handle agent_alice --display-name "Alice Agent" --json
+
 mors status --json
 
 # Requires MORS_RELAY_BASE_URL and valid session
-mors watch --remote --json
+MORS_RELAY_BASE_URL=https://relay.example.com mors watch --remote --json
 ```
 
 Success:
@@ -104,9 +108,11 @@ Success:
 
 ### `Not authenticated. Run "mors login"...`
 - You previously enabled auth in this config dir.
-- Fix: either run `mors login`, or use a fresh local-only config dir:
+- Fix: either run login with an invite token, or use a fresh local-only config dir:
 
 ```bash
+mors login --invite-token <your-invite-token>
+# or
 export MORS_CONFIG_DIR=/tmp/mors-quickstart-2
 mors init --json
 ```
