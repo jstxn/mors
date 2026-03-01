@@ -1,0 +1,39 @@
+{
+  "featureId": "autonomy-first-contact-pending-policy",
+  "reviewedAt": "2026-03-01T00:11:51Z",
+  "commitId": "f60952a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature logic is implemented in src/relay/server.ts and covered by new tests, but a blocking integration gap remains: the new ContactStore dependency is not wired into production relay options, so the first-contact policy routes/annotations are inactive in real relay startup.",
+    "issues": [
+      {
+        "file": "src/relay/index.ts",
+        "line": 63,
+        "severity": "blocking",
+        "description": "createProductionServerOptions() returns tokenVerifier/participantStore/messageStore/accountStore but does not provide contactStore. Because server contact routes and message annotations are guarded by `&& contactStore` (src/relay/server.ts:582,609,636,717,755), production relay instances started via src/relay/index.ts do not activate VAL-RELAY-012/013 behavior (contact approval APIs and autonomy gating annotations)."
+      },
+      {
+        "file": "test/relay/first-contact-policy.test.ts",
+        "line": 174,
+        "severity": "non_blocking",
+        "description": "Coverage only exercises createRelayServer with manually injected contactStore (also at lines 304 and 475). There is no production-wiring assertion using createProductionServerOptions, which allowed the missing index.ts wiring regression to pass tests."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Skill procedure requires manual CLI/API/SSE sanity checks for user-facing changes (or explicit rationale for skipping), but this handoff marks followedProcedure=true without interactiveChecks or skip rationale.",
+      "evidence": "Skill step 8 in .factory/skills/mors-global-worker/SKILL.md requires manual checks/rationale; handoff file 2026-03-01T00-07-27-624Z__autonomy-first-contact-pending-policy__c82500ef-3012-4d94-9255-e7a7bd1e59e4.json includes verification.commandsRun only and no interactiveChecks section."
+    },
+    {
+      "area": "conventions",
+      "observation": "The mission convention about wiring new relay dependencies into src/relay/index.ts exists, but there is no durable test convention documented in shared library docs to enforce it for every new dependency.",
+      "evidence": "Mission AGENTS.md line 39 documents the wiring rule; entrypoint wiring tests currently assert messageStore/tokenVerifier but not new dependencies like contactStore (test/relay/entrypoint-wiring.test.ts:100-118)."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking production integration miss: contact policy code is present but not wired into createProductionServerOptions, leaving first-contact routes/annotations inactive in real relay startup. Unit/integration tests added in this feature are otherwise thorough but do not include production wiring coverage for the new dependency."
+}
