@@ -1,0 +1,15 @@
+{
+  "assertions": {
+    "VAL-LAUNCH-007": {
+      "status": "pass",
+      "evidence": "Created fresh MORS_CONFIG_DIR, ran quickstart --json → exit 0. JSON output: {status:'success', steps:[{name:'init',status:'pass'},{name:'send',status:'pass',messageId:...},{name:'inbox',status:'pass',messageId:...},{name:'read',status:'pass',messageId:...},{name:'ack',status:'pass',messageId:...}], totalSteps:5, passedSteps:5}. All 5 lifecycle steps (init → send → inbox → read → ack) passed. Human-readable output showed '✓ init', '✓ send', '✓ inbox', '✓ read', '✓ ack' with 'Result: SUCCESS (5/5 steps passed)'. Quickstart achieves deterministic first-success local lifecycle."
+    },
+    "VAL-LAUNCH-008": {
+      "status": "pass",
+      "evidence": "Healthy path: initialized config dir, ran doctor --json → exit 0 with {status:'healthy', checks:[node_version:pass, sqlcipher:pass, init:pass, device_keys:pass, auth_session:warn, relay_config:warn]}. Warnings include copy/paste remediation: 'mors login --invite-token <your-invite-token> --json' and 'export MORS_RELAY_BASE_URL=https://relay.example.com'. Unhealthy path: empty config dir, ran doctor --json → exit 1 with {status:'unhealthy'}, init:fail with remediation 'mors init --json', device_keys:fail with remediation 'mors init --json'. Human-readable unhealthy output showed '✗ init: Config directory not initialized' with '→ mors init --json' remediation. Doctor emits actionable, copy/paste-ready remediation for all detected issues."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js"]
+}

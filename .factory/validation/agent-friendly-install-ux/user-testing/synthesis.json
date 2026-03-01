@@ -1,0 +1,28 @@
+{
+  "milestone": "agent-friendly-install-ux",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-LAUNCH-006",
+    "VAL-LAUNCH-007",
+    "VAL-LAUNCH-008",
+    "VAL-LAUNCH-009"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance: Agent-Friendly Install UX section with testing steps for VAL-LAUNCH-006/007/008/009",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "notes": "Flow validator subagents failed with environment permission errors (known infrastructure issue per AGENTS.md). All 4 assertions tested inline successfully. All CLI commands produced correct exit codes, deterministic JSON output, and human-readable output with appropriate pass/fail indicators and remediation guidance."
+}

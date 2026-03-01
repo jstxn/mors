@@ -1,0 +1,15 @@
+{
+  "assertions": {
+    "VAL-LAUNCH-006": {
+      "status": "pass",
+      "evidence": "Created temp MORS_CONFIG_DIR, ran: (1) node dist/index.js --version → 'mors 0.1.0', exit 0; (2) node dist/index.js init --json → {status:'initialized'}, exit 0; (3) node dist/index.js send --to test-peer --body 'agent test msg' --json → {status:'sent'}, exit 0; (4) node dist/index.js inbox --json → 1 message, exit 0. Verified no shell RC files (.bashrc, .zshrc, .profile) were created or modified. Config dir contained only mors data files (identity.json, e2ee/, mors.db, etc.). Agent self-serve path works without shell mutation."
+    },
+    "VAL-LAUNCH-009": {
+      "status": "pass",
+      "evidence": "README.md has '## For Agents' at line 22 and '## For Humans' at line 91. Agent section includes: npx path (1 ref), npm global install (2 refs), node dist/index.js (10 refs), MORS_CONFIG_DIR (3 refs), --json (11 refs). Human section includes: setup-shell (2 refs), brew install (3 refs). Validated agent path: MORS_CONFIG_DIR=<tmpdir> node dist/index.js init/send/inbox/read/ack --json → all exit 0 with correct JSON output. Full lifecycle succeeded following README agent instructions verbatim."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["node dist/index.js"]
+}

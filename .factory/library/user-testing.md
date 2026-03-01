@@ -289,3 +289,48 @@ function generateSessionToken(opts: { accountId: string; deviceId: string; signi
 **Test files covering assertions:**
 - `test/relay/first-contact-policy.test.ts` → VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013 (26 tests)
 - `test/relay/entrypoint-wiring.test.ts` → confirms contactStore wiring in production entrypoint
+
+---
+
+## Flow Validator Guidance: Agent-Friendly Install UX (agent-friendly-install-ux)
+
+**Testing tool:** Direct CLI invocation via `node dist/index.js` with `MORS_CONFIG_DIR` isolation. No relay needed.
+
+**Build requirement:** Run `npm run build` before testing to ensure `dist/index.js` is fresh.
+
+**Assertions covered:** VAL-LAUNCH-006, VAL-LAUNCH-007, VAL-LAUNCH-008, VAL-LAUNCH-009
+
+**Isolation rules:**
+- Each subagent MUST use a unique `MORS_CONFIG_DIR` temp directory (e.g., `/tmp/mors-agent-ux-<group>`)
+- No relay service is needed for these assertions
+- Do NOT share config dirs across subagents
+
+**VAL-LAUNCH-006 (Agent self-install/run without shell mutation):**
+1. Create a temp config dir, run `node dist/index.js --version` with `MORS_CONFIG_DIR` set → exit 0 + version output
+2. Run `node dist/index.js init --json` with `MORS_CONFIG_DIR` set → exit 0, valid JSON with initialized status
+3. Confirm no shell RC files were created or modified
+4. The key validation: an agent can invoke mors, do init, and run lifecycle commands without setup-shell
+
+**VAL-LAUNCH-007 (Quickstart first-success lifecycle):**
+1. Create fresh temp config dir
+2. Run `node dist/index.js quickstart --json` with `MORS_CONFIG_DIR` → exit 0
+3. Validate JSON output has `steps` array with init/send/inbox/read/ack entries, all passed
+4. Validate `summary.total` and `summary.passed` counts match
+5. Run without --json → check human-readable output with success marker
+6. Test failure path: corrupt the config dir to simulate failure and verify remediation guidance
+
+**VAL-LAUNCH-008 (Doctor actionable remediation):**
+1. Create initialized config dir with `node dist/index.js init --json`
+2. Run `node dist/index.js doctor --json` → exit 0, JSON with checks array
+3. Each check has name, status (pass/warn/fail), and message
+4. Verify node_version and sqlcipher checks pass
+5. Test unhealthy path: use empty config dir (no init) → doctor reports init check fail with remediation
+6. Verify remediation commands are present and copy/paste-ready (e.g., "mors init")
+7. Run without --json → human-readable output with pass/fail indicators
+
+**VAL-LAUNCH-009 (README audience-split):**
+1. Read README.md, verify "## For Agents" and "## For Humans" sections exist
+2. Agent section includes: npx path, npm global install, direct node invocation, MORS_CONFIG_DIR usage, --json flags
+3. Human section includes: npm global install + setup-shell, Homebrew path, interactive usage
+4. Validate one command from agent section: `node dist/index.js --version` → exit 0
+5. Validate one command from agent lifecycle: init → send → inbox → read → ack with --json
