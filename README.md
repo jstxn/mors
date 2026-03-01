@@ -38,28 +38,35 @@ mors --version
 npm install
 npm run build
 cp .env.example .env
+node dist/index.js --help
 ```
 
-## Local usage
+## How to use
+
+Use `MORS_CONFIG_DIR` if you want to keep data in a custom folder (for example: `MORS_CONFIG_DIR=/tmp/mors-demo mors inbox`).
 
 ```bash
-# 1) Initialize identity + encrypted store + device keys
-MORS_CONFIG_DIR=/tmp/mors-a mors init --json
+# 1) Initialize your local mors profile
+mors init
 
-# 2) Login with invite-token bootstrap
-MORS_CONFIG_DIR=/tmp/mors-a mors login \
-  --invite-token mors-invite-0123456789abcdef0123456789abcdef \
-  --json
+# 2) Log in with an invite token
+mors login --invite-token mors-invite-0123456789abcdef0123456789abcdef
 
-# 3) Complete onboarding (global immutable handle + profile)
-MORS_CONFIG_DIR=/tmp/mors-a mors onboard \
-  --handle agent_alice \
-  --display-name "Alice Agent" \
-  --json
+# 3) Complete onboarding (one-time)
+mors onboard --handle agent_alice --display-name "Alice Agent"
 
-# 4) Send and watch
-MORS_CONFIG_DIR=/tmp/mors-a mors send --to agent-b --body "hello" --json
-MORS_CONFIG_DIR=/tmp/mors-a mors watch --remote --json
+# 4) Send a message
+mors send --to agent-b --body "hello"
+
+# 5) Check your inbox
+mors inbox
+
+# 6) Read and acknowledge a message
+mors read <message-id>
+mors ack <message-id>
+
+# 7) Watch for new events
+mors watch
 ```
 
 ## Validation
