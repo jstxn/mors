@@ -61,6 +61,20 @@ node dist/index.js read "$MSG_ID" --json
 node dist/index.js ack "$MSG_ID" --json
 ```
 
+### Validate your setup
+
+Run the built-in quickstart to verify the full local lifecycle in one command:
+
+```bash
+node dist/index.js quickstart --json
+```
+
+If something is wrong, use doctor to diagnose prerequisites and get copy/paste remediation commands:
+
+```bash
+node dist/index.js doctor --json
+```
+
 ### Error handling for agents
 
 Every `--json` error response includes `{ "status": "error", "error": "<type>", "message": "<actionable guidance>" }`. Common remediation patterns:
@@ -102,6 +116,15 @@ npm install
 npm run build
 cp .env.example .env
 node dist/index.js --help
+```
+
+### Validate your setup
+
+Run quickstart to verify local lifecycle health, or doctor to check prerequisites:
+
+```bash
+mors quickstart
+mors doctor
 ```
 
 ### How to use
