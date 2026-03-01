@@ -16,6 +16,7 @@ import { createRelayServer, type RelayServerOptions } from './server.js';
 import { createNativeTokenVerifier } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
 import { AccountStore } from './account-store.js';
+import { ContactStore } from './contact-store.js';
 
 /**
  * Create the production server options including all wired dependencies.
@@ -51,6 +52,13 @@ export function createProductionServerOptions(): RelayServerOptions {
   // Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
   const accountStore = new AccountStore();
 
+  // Wire the in-memory contact store for first-contact autonomy policy.
+  // Ensures /contacts/* routes are active and messages are annotated with
+  // first_contact / autonomy_allowed fields in the production relay.
+  // Delivery always succeeds; autonomous actions are gated until approval.
+  // Covers VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013.
+  const contactStore = new ContactStore();
+
   // Participant store backed by the message store's conversation tracking.
   // When a message is sent, both sender and recipient are registered as
   // participants in the thread, enabling object-level authorization checks.
@@ -65,6 +73,7 @@ export function createProductionServerOptions(): RelayServerOptions {
     participantStore,
     messageStore,
     accountStore,
+    contactStore,
   };
 }
 
