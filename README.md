@@ -2,6 +2,8 @@
 
 `mors` is a CLI-first messaging system with local encrypted storage, relay-backed delivery, mors-native auth, and realtime watch.
 
+Start here for the fastest first success: **[ONBOARDING.md](./ONBOARDING.md)**
+
 ## Current behavior
 
 - **Native auth only**: `mors login` uses invite-token bootstrap (no OAuth flow).
