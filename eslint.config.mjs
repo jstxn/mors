@@ -19,6 +19,6 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/**", "node_modules/**", "*.mjs", "vitest.config.ts"],
+    ignores: ["dist/**", "node_modules/**", "*.mjs", "vitest.config.ts", ".factory/validation/**"],
   },
 );

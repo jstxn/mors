@@ -1,0 +1,26 @@
+{
+  "featureId": "misc-hardening-3-native-auth-polish",
+  "reviewedAt": "2026-03-01T00:45:06Z",
+  "commitId": "6ecf8f3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Reviewed handoff, transcript skeleton, and commit diff. The implementation covers the expected behavior: CLI/help wording is aligned to mors-native auth semantics, deploy tests now assert explicit flyctl remediation/category details, cli-encrypted-remote no-server paths avoid hardcoded-port collisions, onboard persistence now fails loudly when profile persistence regresses, multi-device secure-delivery continuity has explicit assertions, and duplicate-handle relay onboarding is covered with concurrent race verification including loser no-profile persistence.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "Skill scope text appears stale relative to mission feature assignment: this feature uses mors-global-worker but SKILL.md's 'When to Use' milestone list does not include misc-hardening milestones.",
+      "evidence": "features.json:1747-1749 assigns misc-hardening-3-native-auth-polish to skillName=mors-global-worker; .factory/skills/mors-global-worker/SKILL.md:12 lists only relay-foundation/global-async-messaging/realtime-watch/developer-launch-path."
+    },
+    {
+      "area": "conventions",
+      "observation": "Port-range guidance may be ambiguous for no-server negative-path tests: AGENTS constrains ports to 3100-3109 for new services, while this stabilization uses randomized high fake relay ports to avoid collisions. Clarifying that non-bound fake URLs are exempt would reduce reviewer/worker ambiguity.",
+      "evidence": "mission AGENTS.md:7 says use local ports 3100-3109 for new services; test/relay/cli-encrypted-remote.test.ts:405-408 uses noServerPort=39_999+random and fakeRelayUrl for no-server prerequisite tests."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Pass. The reviewed changes and added assertions align with the feature’s hardening goals, and no blocking defects were found in the implemented scope."
+}

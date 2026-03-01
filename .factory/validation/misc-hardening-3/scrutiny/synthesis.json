@@ -1,0 +1,40 @@
+{
+  "milestone": "misc-hardening-3",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
+    "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
+    "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "eslint.config.mjs",
+      "description": "Added .factory/validation/** to ESLint ignores to resolve known pre-existing parse error for generated validation files outside tsconfig scope (documented in AGENTS.md as infrastructure noise)",
+      "sourceFeature": "scrutiny-validator-misc-hardening-3"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Update mors-global-worker SKILL.md 'When to Use' milestone list to include misc-hardening and any future ad-hoc milestone names, or switch to an open-ended pattern (e.g., 'any implementation feature assigned to this skill') to avoid stale enumeration.",
+      "evidence": "features.json assigns misc-hardening-3-native-auth-polish to skillName=mors-global-worker, but .factory/skills/mors-global-worker/SKILL.md:12 lists only relay-foundation/global-async-messaging/realtime-watch/developer-launch-path.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Clarify that the 3100-3109 port-range constraint applies to services that bind/listen, not to fake/non-bound relay URLs used in negative-path tests (e.g., randomized high ports for no-server prerequisite tests).",
+      "evidence": "AGENTS.md:7 says 'Use only local ports in the 3100-3109 range for new services.' test/relay/cli-encrypted-remote.test.ts uses noServerPort=39_999+random for non-bound fake relay URLs. The distinction between bound service ports and non-bound test URLs is not explicit.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}
