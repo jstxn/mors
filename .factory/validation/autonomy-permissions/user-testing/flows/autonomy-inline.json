@@ -1,0 +1,87 @@
+{
+  "flowId": "autonomy-permissions-inline",
+  "assertions": [
+    "VAL-RELAY-011",
+    "VAL-RELAY-012",
+    "VAL-RELAY-013"
+  ],
+  "results": [
+    {
+      "assertion": "VAL-RELAY-011",
+      "testName": "First-contact message from unknown sender lands in inbox",
+      "status": "pass",
+      "evidence": "Send returned 201 with first_contact=true. Message \"msg_c009881e-7240-4a93-8422-7638ac4c5e79\" found in Bob's inbox with state=delivered."
+    },
+    {
+      "assertion": "VAL-RELAY-011",
+      "testName": "Multiple unknown senders all deliver to same recipient inbox",
+      "status": "pass",
+      "evidence": "Both Alice and Charlie (unknown senders) successfully delivered to Bob's inbox. Total inbox count: 2."
+    },
+    {
+      "assertion": "VAL-RELAY-011",
+      "testName": "Read and ack work on first-contact messages",
+      "status": "pass",
+      "evidence": "Read returned 200, ack returned 200 with state=acked for first-contact message msg_e9373515-b6cd-428d-b3e0-11fbb935821b."
+    },
+    {
+      "assertion": "VAL-RELAY-012",
+      "testName": "Unknown sender contact status shows pending with autonomy_allowed=false",
+      "status": "pass",
+      "evidence": "Contact status API returned status=pending, autonomy_allowed=false for unknown sender."
+    },
+    {
+      "assertion": "VAL-RELAY-012",
+      "testName": "Approving contact enables autonomy_allowed=true (remembered)",
+      "status": "pass",
+      "evidence": "Approve API returned 200. Status changed from pending→approved with autonomy_allowed=true. Second check confirms approval is remembered."
+    },
+    {
+      "assertion": "VAL-RELAY-012",
+      "testName": "Message from approved contact has first_contact=false, autonomy_allowed=true",
+      "status": "pass",
+      "evidence": "Message from approved Alice: first_contact=false, autonomy_allowed=true. Delivery succeeded (201)."
+    },
+    {
+      "assertion": "VAL-RELAY-012",
+      "testName": "Unapproved contact: delivery succeeds but autonomy_allowed=false",
+      "status": "pass",
+      "evidence": "Message from unapproved Charlie: first_contact=true, autonomy_allowed=false. Delivery still succeeded (201). Policy gates autonomy only, not delivery."
+    },
+    {
+      "assertion": "VAL-RELAY-013",
+      "testName": "First-contact sender creates pending contact record on delivery",
+      "status": "pass",
+      "evidence": "Pending contacts: [\"acct_charlie_val\"]. Charlie (unapproved) is pending, Alice (approved) is not."
+    },
+    {
+      "assertion": "VAL-RELAY-013",
+      "testName": "No autonomous actions on messages from pending contacts (state=delivered)",
+      "status": "pass",
+      "evidence": "Message msg_80ddf158-ccdb-41b3-84a5-19b8559872f9 from unknown sender: state=delivered, read_at=null, acked_at=null. No autonomous actions occurred."
+    },
+    {
+      "assertion": "VAL-RELAY-013",
+      "testName": "Read/ack does not auto-approve pending contact",
+      "status": "pass",
+      "evidence": "After Bob read+acked Charlie's message, Charlie's contact status remains pending with autonomy_allowed=false. No auto-approve on read/ack."
+    },
+    {
+      "assertion": "VAL-RELAY-013",
+      "testName": "Approving pending contact enables future autonomy",
+      "status": "pass",
+      "evidence": "Charlie approved: subsequent message has first_contact=false, autonomy_allowed=true. Charlie removed from pending contacts list."
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0
+  },
+  "toolsUsed": [
+    "relay-api-http",
+    "native-token-generation"
+  ],
+  "frictions": [],
+  "blockers": []
+}

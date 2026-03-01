@@ -247,3 +247,45 @@ SSE streaming assertions are best validated through the existing integration tes
 2. Missing fields → error with missing_required_fields
 3. Successful onboard → persists profile.json locally + registers with relay
 4. `onboard` appears in `--help` output
+
+---
+
+## Flow Validator Guidance: Autonomy Permissions
+
+**Testing tool:** Relay HTTP API via programmatic fetch or curl. Also vitest tests in `test/relay/first-contact-policy.test.ts`.
+
+**Assertions covered:** VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013
+
+**Setup:**
+- Build first: `npm run build`
+- Start relay with signing key: `MORS_RELAY_SIGNING_KEY=<key> PORT=3100 MORS_RELAY_HOST=127.0.0.1 npm run relay:dev`
+- Generate native session tokens using `generateSessionToken()` from `src/auth/native.ts` with matching signing key
+- Token format: `mors-session.<base64url-payload>.<hmac-hex-signature>`
+
+**Token generation (inline):**
+Tokens can be generated inline using crypto primitives:
+```typescript
+import { createHmac, randomUUID } from 'node:crypto';
+function generateSessionToken(opts: { accountId: string; deviceId: string; signingKey: string }): string {
+  const payload = { accountId: opts.accountId, deviceId: opts.deviceId, issuedAt: new Date().toISOString(), tokenId: randomUUID() };
+  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = createHmac('sha256', opts.signingKey).update(payloadStr).digest('hex');
+  return `mors-session.${payloadStr}.${signature}`;
+}
+```
+
+**Isolation rules:**
+- Each subagent MUST use unique account IDs (e.g., `acct_<group>_<n>`)
+- Contact state is per-account scoped; different account IDs won't collide
+- The relay uses in-memory storage; restart clears all state
+
+**API endpoints for autonomy-permissions:**
+- `POST /messages` — send message (includes `first_contact` and `autonomy_allowed` annotations in response)
+- `GET /inbox` — list inbox (each message annotated with `first_contact` and `autonomy_allowed`)
+- `POST /contacts/status` — check contact status (`{ contact_account_id: "..." }` → `{ status, autonomy_allowed }`)
+- `POST /contacts/approve` — approve a contact (`{ contact_account_id: "..." }` → enables autonomy)
+- `GET /contacts/pending` — list pending (unapproved) contacts
+
+**Test files covering assertions:**
+- `test/relay/first-contact-policy.test.ts` → VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013 (26 tests)
+- `test/relay/entrypoint-wiring.test.ts` → confirms contactStore wiring in production entrypoint
