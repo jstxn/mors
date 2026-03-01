@@ -1,23 +1,38 @@
 # mors
 
-`mors` is a CLI-first, agent-first messaging system with a hosted relay, mors-native auth, SSE realtime watch, and 1:1 E2EE.
+`mors` is a CLI-first messaging system with local encrypted storage, relay-backed delivery, mors-native auth, and realtime watch.
 
-## Core Capabilities
+## Current behavior
 
-- Local + relay-backed messaging (`send`, `inbox`, `read`, `ack`, `reply`, `thread`, `watch`)
-- Mors-native auth session lifecycle (`login`, `status`, `logout`)
-- Realtime remote watch with reconnect/cursor resume and fallback signaling
-- 1:1 encryption model with per-device keys, key exchange, rotation, and revocation enforcement
-- Install and launch UX: GitHub npm install, Homebrew formula, `setup-shell` prompt-first behavior
-- Deploy preflight + Fly deploy command path with placeholder-safe validation and redaction
+- **Native auth only**: `mors login` uses invite-token bootstrap (no OAuth flow).
+- **Bootstrap prerequisites**: `mors init` sets up local identity + device keys; `mors login` requires an invite token (`--invite-token` or `MORS_INVITE_TOKEN`).
+- **Onboarding**: `mors onboard --handle --display-name` registers a globally unique handle and profile. Handles are immutable once set.
+- **First-contact autonomy model**: message delivery is always allowed (email-like inbox delivery), while autonomous actions remain gated until contact approval.
 
 ## Requirements
 
-- Node.js + npm
+- Node.js >= 20 + npm
 - Python 3 (native module build support)
 - SQLCipher (`brew install sqlcipher` on macOS)
 
-## Setup
+## Install
+
+### npm global (GitHub)
+
+```bash
+npm install -g github:jstxn/mors
+mors --version
+mors setup-shell
+```
+
+### Homebrew formula path (tap-ready formula)
+
+```bash
+brew install --formula ./Formula/mors.rb
+mors --version
+```
+
+## Local setup (from source)
 
 ```bash
 npm install
@@ -25,30 +40,26 @@ npm run build
 cp .env.example .env
 ```
 
-Fill placeholder variables in `.env` for relay/auth/deploy workflows as needed.
-
-## Local Usage
+## Local usage
 
 ```bash
-# initialize local identity + encrypted store + device keys
+# 1) Initialize identity + encrypted store + device keys
 MORS_CONFIG_DIR=/tmp/mors-a mors init --json
 
-# auth lifecycle (placeholder-safe failures until OAuth vars are configured)
-MORS_CONFIG_DIR=/tmp/mors-a mors login --json
-MORS_CONFIG_DIR=/tmp/mors-a mors status --json
+# 2) Login with invite-token bootstrap
+MORS_CONFIG_DIR=/tmp/mors-a mors login \
+  --invite-token mors-invite-0123456789abcdef0123456789abcdef \
+  --json
 
-# local or remote messaging
+# 3) Complete onboarding (global immutable handle + profile)
+MORS_CONFIG_DIR=/tmp/mors-a mors onboard \
+  --handle agent_alice \
+  --display-name "Alice Agent" \
+  --json
+
+# 4) Send and watch
 MORS_CONFIG_DIR=/tmp/mors-a mors send --to agent-b --body "hello" --json
 MORS_CONFIG_DIR=/tmp/mors-a mors watch --remote --json
-
-# direct node entrypoint (scripted/testing usage)
-MORS_CONFIG_DIR=/tmp/mors-a node dist/index.js inbox --json
-```
-
-## Deploy
-
-```bash
-mors deploy --dry-run --json
 ```
 
 ## Validation
