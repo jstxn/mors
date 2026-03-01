@@ -7,7 +7,7 @@
 
 import { initCommand, requireInit, getDbPath, getDbKeyPath } from './init.js';
 import { loadKey } from './key-management.js';
-import { openEncryptedDb } from './store.js';
+import { openEncryptedDb, verifySqlCipherAvailable } from './store.js';
 import {
   sendMessage,
   listInbox,
@@ -60,6 +60,7 @@ import {
 } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync as execFileSyncImport } from 'node:child_process';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
@@ -106,6 +107,11 @@ export function run(args: string[]): void {
 
   if (command === 'quickstart') {
     runQuickstart(args.slice(1));
+    return;
+  }
+
+  if (command === 'doctor') {
+    runDoctor(args.slice(1));
     return;
   }
 
@@ -2517,6 +2523,233 @@ function emitQuickstartResult(
   }
 }
 
+// ── Doctor command ───────────────────────────────────────────────────
+
+/**
+ * Individual check result from a doctor diagnostic.
+ */
+interface DoctorCheck {
+  name: string;
+  status: 'pass' | 'fail' | 'warn';
+  message?: string;
+  remediation?: string[];
+}
+
+/**
+ * Run the doctor diagnostic checks.
+ *
+ * Checks prerequisite and configuration health, returning copy/paste
+ * remediation commands tailored to detected failures.
+ *
+ * Checks performed:
+ *   - node_version:  Node.js >= 20
+ *   - sqlcipher:     SQLCipher encryption available
+ *   - init:          Config directory initialized
+ *   - device_keys:   E2EE device keys bootstrapped
+ *   - auth_session:  Auth session present (warn if missing)
+ *   - relay_config:  MORS_RELAY_BASE_URL set (warn if missing)
+ *
+ * Flags:
+ *   --json                          Output machine-readable JSON
+ *   --help                          Show doctor usage
+ *   --simulate-sqlcipher-failure    (testing) Force sqlcipher check to fail
+ */
+function runDoctor(_args: string[]): void {
+  const json = _args.includes('--json');
+  const simulateSqlCipherFailure = _args.includes('--simulate-sqlcipher-failure');
+
+  if (_args.includes('--help') || _args.includes('-h')) {
+    console.log(`mors doctor — check prerequisites and configuration health
+
+Runs diagnostic checks and reports actionable remediation commands
+for any detected failures.
+
+Checks:
+  node_version   Node.js >= 20
+  sqlcipher       SQLCipher encryption support
+  init            Config directory initialized
+  device_keys     E2EE device keys bootstrapped
+  auth_session    Auth session present (warn if missing)
+  relay_config    Relay URL configured (warn if missing)
+
+Usage:
+  mors doctor [--json]
+
+Options:
+  --json    Output machine-readable JSON with per-check health results
+  --help    Show this help`);
+    return;
+  }
+
+  const configDir = getConfigDir();
+  const checks: DoctorCheck[] = [];
+
+  // ── Check 1: Node.js version ──────────────────────────────────────
+  {
+    const major = parseInt(process.versions.node.split('.')[0], 10);
+    if (major >= 20) {
+      checks.push({
+        name: 'node_version',
+        status: 'pass',
+        message: `Node.js v${process.versions.node}`,
+      });
+    } else {
+      checks.push({
+        name: 'node_version',
+        status: 'fail',
+        message: `Node.js v${process.versions.node} (requires >= 20)`,
+        remediation: ['Install Node.js >= 20: https://nodejs.org/', 'nvm install 20 && nvm use 20'],
+      });
+    }
+  }
+
+  // ── Check 2: SQLCipher availability ───────────────────────────────
+  {
+    try {
+      verifySqlCipherAvailable(simulateSqlCipherFailure);
+      checks.push({
+        name: 'sqlcipher',
+        status: 'pass',
+        message: 'SQLCipher encryption available',
+      });
+    } catch {
+      checks.push({
+        name: 'sqlcipher',
+        status: 'fail',
+        message: 'SQLCipher is not available',
+        remediation: ['brew install sqlcipher && npm rebuild'],
+      });
+    }
+  }
+
+  // ── Check 3: Init status ──────────────────────────────────────────
+  {
+    const sentinelPath = join(configDir, '.initialized');
+    const initialized = existsSync(sentinelPath);
+    if (initialized) {
+      checks.push({
+        name: 'init',
+        status: 'pass',
+        message: `Config directory initialized: ${configDir}`,
+      });
+    } else {
+      checks.push({
+        name: 'init',
+        status: 'fail',
+        message: `Config directory not initialized: ${configDir}`,
+        remediation: ['mors init --json'],
+      });
+    }
+  }
+
+  // ── Check 4: Device keys ──────────────────────────────────────────
+  {
+    const keysDir = getDeviceKeysDir(configDir);
+    const bootstrapped = isDeviceBootstrapped(keysDir);
+    if (bootstrapped) {
+      checks.push({
+        name: 'device_keys',
+        status: 'pass',
+        message: 'E2EE device keys bootstrapped',
+      });
+    } else {
+      checks.push({
+        name: 'device_keys',
+        status: 'fail',
+        message: 'E2EE device keys not found',
+        remediation: ['mors init --json'],
+      });
+    }
+  }
+
+  // ── Check 5: Auth session ─────────────────────────────────────────
+  {
+    const session = loadSession(configDir);
+    if (session) {
+      checks.push({
+        name: 'auth_session',
+        status: 'pass',
+        message: `Authenticated as ${session.accountId}`,
+      });
+    } else {
+      checks.push({
+        name: 'auth_session',
+        status: 'warn',
+        message: 'No auth session (remote features unavailable)',
+        remediation: ['mors login --invite-token <your-invite-token> --json'],
+      });
+    }
+  }
+
+  // ── Check 6: Relay configuration ──────────────────────────────────
+  {
+    const relayUrl = process.env['MORS_RELAY_BASE_URL'];
+    if (relayUrl) {
+      checks.push({
+        name: 'relay_config',
+        status: 'pass',
+        message: `Relay URL: ${relayUrl}`,
+      });
+    } else {
+      checks.push({
+        name: 'relay_config',
+        status: 'warn',
+        message: 'MORS_RELAY_BASE_URL not set (remote features unavailable)',
+        remediation: ['export MORS_RELAY_BASE_URL=https://relay.example.com'],
+      });
+    }
+  }
+
+  // ── Determine overall status ──────────────────────────────────────
+  const hasFail = checks.some((c) => c.status === 'fail');
+  const overallStatus = hasFail ? 'unhealthy' : 'healthy';
+
+  if (hasFail) {
+    process.exitCode = 1;
+  }
+
+  // ── Emit results ──────────────────────────────────────────────────
+  if (json) {
+    const result: Record<string, unknown> = {
+      status: overallStatus,
+      checks,
+      configDir,
+    };
+    console.log(JSON.stringify(result));
+  } else {
+    console.log('mors doctor — prerequisite and configuration health\n');
+
+    for (const check of checks) {
+      const icon = check.status === 'pass' ? '✓' : check.status === 'fail' ? '✗' : '⚠';
+      const label = `${icon} ${check.name}`;
+      if (check.message) {
+        console.log(`  ${label}: ${check.message}`);
+      } else {
+        console.log(`  ${label}`);
+      }
+      if (check.remediation && check.remediation.length > 0) {
+        for (const r of check.remediation) {
+          console.log(`    → ${r}`);
+        }
+      }
+    }
+
+    console.log('');
+    if (hasFail) {
+      console.log(
+        `Result: UNHEALTHY (${checks.filter((c) => c.status === 'fail').length} failing check(s))`
+      );
+    } else {
+      const warns = checks.filter((c) => c.status === 'warn').length;
+      if (warns > 0) {
+        console.log(`Result: HEALTHY (${warns} warning(s))`);
+      } else {
+        console.log('Result: HEALTHY');
+      }
+    }
+  }
+}
+
 // ── Init command ─────────────────────────────────────────────────────
 
 function runInit(_args: string[]): void {
@@ -2813,6 +3046,7 @@ Usage:
 
 Commands:
   quickstart   Run local lifecycle check (init → send → inbox → read → ack)
+  doctor       Check prerequisites and configuration health
   init         Initialize identity and encrypted store
   login        Authenticate with mors-native auth
   logout       Clear local auth session
@@ -2899,6 +3133,10 @@ Onboard:
 Quickstart:
   mors quickstart [--json]
   --json                 Output machine-readable JSON with per-step lifecycle results
+
+Doctor:
+  mors doctor [--json]
+  --json                 Output machine-readable JSON with per-check health results
 
 Deploy:
   mors deploy [--json] [--dry-run]
