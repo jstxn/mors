@@ -19,6 +19,7 @@ import { createServer } from 'node:http';
 import { isPublicRoute, extractAndVerify, extractBearerToken, send401, send403, parseConversationRoute, } from './auth-middleware.js';
 import { RelayMessageStore, RelayMessageNotFoundError, RelayUnauthorizedError, } from './message-store.js';
 import { AccountStore, DuplicateHandleError, ImmutableHandleError, InvalidHandleError, } from './account-store.js';
+import { ContactStore } from './contact-store.js';
 import { DedupeConflictError } from '../errors.js';
 import { generateEventId } from '../contract/ids.js';
 /**
@@ -117,6 +118,7 @@ export function createRelayServer(config, options) {
     const onConversationAccess = options?.onConversationAccess;
     const messageStore = options?.messageStore;
     const accountStore = options?.accountStore;
+    const contactStore = options?.contactStore;
     const sseAuthRevalidateMs = options?.sseAuthRevalidateMs ?? 60000;
     const startTime = Date.now();
     // Track active SSE connections for clean shutdown
@@ -428,6 +430,71 @@ export function createRelayServer(config, options) {
             });
             return;
         }
+        // ── Contact / first-contact policy routes (require contactStore) ──
+        // These routes manage the first-contact autonomy policy:
+        // - POST /contacts/status — get contact approval status
+        // - POST /contacts/approve — approve a contact (enable autonomy)
+        // - GET /contacts/pending — list pending (unapproved) contacts
+        //
+        // Covers: VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013
+        // Route: POST /contacts/status (check contact approval status)
+        if (url === '/contacts/status' && method === 'POST' && contactStore) {
+            const body = await readJsonBody(req);
+            if (!body) {
+                sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+                return;
+            }
+            const contactAccountId = body['contact_account_id'];
+            if (typeof contactAccountId !== 'string' || contactAccountId.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'contact_account_id is required and must be a non-empty string.',
+                });
+                return;
+            }
+            const policy = contactStore.evaluatePolicy(principal.accountId, contactAccountId);
+            sendJson(res, 200, {
+                owner_account_id: principal.accountId,
+                contact_account_id: contactAccountId,
+                status: contactStore.getContactStatus(principal.accountId, contactAccountId),
+                autonomy_allowed: policy.autonomyAllowed,
+            });
+            return;
+        }
+        // Route: POST /contacts/approve (approve a contact for autonomous actions)
+        if (url === '/contacts/approve' && method === 'POST' && contactStore) {
+            const body = await readJsonBody(req);
+            if (!body) {
+                sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+                return;
+            }
+            const contactAccountId = body['contact_account_id'];
+            if (typeof contactAccountId !== 'string' || contactAccountId.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'contact_account_id is required and must be a non-empty string.',
+                });
+                return;
+            }
+            contactStore.approveContact(principal.accountId, contactAccountId);
+            sendJson(res, 200, {
+                owner_account_id: principal.accountId,
+                contact_account_id: contactAccountId,
+                status: 'approved',
+                autonomy_allowed: true,
+            });
+            return;
+        }
+        // Route: GET /contacts/pending (list pending contacts)
+        if (url === '/contacts/pending' && method === 'GET' && contactStore) {
+            const pending = contactStore.listPendingContacts(principal.accountId);
+            sendJson(res, 200, {
+                owner_account_id: principal.accountId,
+                pending,
+                count: pending.length,
+            });
+            return;
+        }
         // ── Messaging routes (require messageStore) ─────────────────────
         // Route: POST /messages (send a message)
         if (url === '/messages' && method === 'POST' && messageStore) {
@@ -485,8 +552,36 @@ export function createRelayServer(config, options) {
                 }
                 throw err;
             }
+            // ── First-contact policy annotation (VAL-RELAY-011/012/013) ──
+            // Record the sender as a contact for the recipient and annotate
+            // the response with first-contact / autonomy policy state.
+            // Delivery is ALWAYS allowed — the annotation only informs clients
+            // whether autonomous actions should be gated.
+            let firstContactAnnotation;
+            if (contactStore && result.created) {
+                const policy = contactStore.evaluatePolicy(recipientId, principal.accountId);
+                // Record the contact as pending if this is a first-contact
+                if (policy.firstContact) {
+                    contactStore.recordContact(recipientId, principal.accountId);
+                }
+                firstContactAnnotation = {
+                    first_contact: policy.firstContact,
+                    autonomy_allowed: policy.autonomyAllowed,
+                };
+            }
+            else if (contactStore && !result.created) {
+                // Deduped send — still annotate with current policy state
+                const policy = contactStore.evaluatePolicy(result.message.recipient_id, result.message.sender_id);
+                firstContactAnnotation = {
+                    first_contact: policy.firstContact,
+                    autonomy_allowed: policy.autonomyAllowed,
+                };
+            }
             // 201 for newly created, 200 for idempotent dedupe hit
-            sendJson(res, result.created ? 201 : 200, result.message);
+            const sendResponse = firstContactAnnotation
+                ? { ...result.message, ...firstContactAnnotation }
+                : result.message;
+            sendJson(res, result.created ? 201 : 200, sendResponse);
             return;
         }
         // Route: GET /inbox (list inbox for authenticated user)
@@ -494,7 +589,18 @@ export function createRelayServer(config, options) {
             const urlObj = new URL(url, `http://localhost`);
             const unreadOnly = urlObj.searchParams.get('unread') === 'true';
             const messages = messageStore.inbox(principal.accountId, { unreadOnly });
-            sendJson(res, 200, { count: messages.length, messages });
+            // Annotate each message with first-contact / autonomy policy state
+            const annotatedMessages = contactStore
+                ? messages.map((msg) => {
+                    const policy = contactStore.evaluatePolicy(principal.accountId, msg.sender_id);
+                    return {
+                        ...msg,
+                        first_contact: policy.firstContact,
+                        autonomy_allowed: policy.autonomyAllowed,
+                    };
+                })
+                : messages;
+            sendJson(res, 200, { count: annotatedMessages.length, messages: annotatedMessages });
             return;
         }
         // Routes: /messages/:id, /messages/:id/read, /messages/:id/ack

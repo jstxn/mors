@@ -19,6 +19,7 @@ import type { RelayConfig } from './config.js';
 import { type TokenVerifier, type ParticipantStore, type AuthPrincipal } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
 import { AccountStore } from './account-store.js';
+import { ContactStore } from './contact-store.js';
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
 /** Options for creating the relay server. */
@@ -57,6 +58,17 @@ export interface RelayServerOptions {
      * Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
      */
     accountStore?: AccountStore;
+    /**
+     * Contact store for first-contact autonomy policy.
+     * When provided, enables /contacts/* routes and annotates messages
+     * with first_contact and autonomy_allowed fields.
+     *
+     * Delivery to inbox is always allowed regardless of contact state.
+     * Autonomous actions are gated until first-contact approval.
+     *
+     * Covers VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013.
+     */
+    contactStore?: ContactStore;
 }
 /** Relay server handle with lifecycle methods. */
 export interface RelayServer {
