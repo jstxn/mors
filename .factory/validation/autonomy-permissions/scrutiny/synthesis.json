@@ -1,7 +1,7 @@
 {
   "milestone": "autonomy-permissions",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0 },
     "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
@@ -9,31 +9,18 @@
   },
   "reviewsSummary": {
     "total": 1,
-    "passed": 0,
-    "failed": 1,
-    "failedFeatures": ["autonomy-first-contact-pending-policy"]
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "autonomy-first-contact-pending-policy",
-      "severity": "blocking",
-      "description": "contactStore is not wired into createProductionServerOptions() in src/relay/index.ts. The contact-policy routes (/contacts/status, /contacts/approve, /contacts/pending) and message send/inbox autonomy annotations are guarded by `&& contactStore`, so they are inactive in production relay startup. This means VAL-RELAY-012 and VAL-RELAY-013 behavior (first-contact autonomy gating and pending state for unknown senders) is not operational in real deployments, only in test-injected scenarios."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [],
-  "suggestedGuidanceUpdates": [
-    {
-      "target": "AGENTS.md",
-      "suggestion": "Add convention: When a feature adds a new dependency to RelayServerOptions in src/relay/server.ts, the entrypoint-wiring test (test/relay/entrypoint-wiring.test.ts) must be extended to assert that createProductionServerOptions() includes the new dependency. This prevents silent production integration regressions where test-only injection masks missing production wiring.",
-      "evidence": "autonomy-first-contact-pending-policy added contactStore to RelayServerOptions and guarded routes with `&& contactStore`, but did not wire it in src/relay/index.ts or extend entrypoint-wiring tests. The existing entrypoint-wiring tests only assert messageStore/tokenVerifier/participantStore/accountStore, so the gap was not caught.",
-      "isSystemic": true
-    }
-  ],
+  "suggestedGuidanceUpdates": [],
   "rejectedObservations": [
     {
-      "observation": "Skill procedure requires manual CLI/API/SSE sanity checks for user-facing changes, but handoff marks followedProcedure=true without interactiveChecks or skip rationale.",
-      "reason": "This is a process compliance note for the worker, not a shared-state update. The skill procedure is already documented; enforcement is an orchestrator concern, not a library/services/AGENTS.md change."
+      "observation": "The skill requires manual CLI/API/SSE sanity checks for user-facing changes (or explicit skip rationale for internal-only changes), but the fix handoff reports followedProcedure=true without interactiveChecks or an explicit skip rationale.",
+      "reason": "Process compliance note for the worker, not a shared-state update. The skill procedure is already documented and the AGENTS.md guidance about entrypoint-wiring was already applied by the orchestrator in round 1. Enforcement is an orchestrator concern, not a library/services/AGENTS.md change."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/autonomy-permissions/scrutiny/synthesis-round1.json"
 }

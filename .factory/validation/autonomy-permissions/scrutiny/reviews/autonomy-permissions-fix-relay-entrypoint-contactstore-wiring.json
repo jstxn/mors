@@ -1,0 +1,21 @@
+{
+  "featureId": "autonomy-permissions-fix-relay-entrypoint-contactstore-wiring",
+  "reviewedAt": "2026-03-01T00:23:44Z",
+  "commitId": "b19db15",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix fully addresses the prior blocking integration gap: createProductionServerOptions now wires contactStore into production relay options, and entrypoint-wiring tests now assert contact-store presence plus production-route/annotation activation. Reviewing both f60952a and b19db15 confirms the originally gated first-contact behavior is now active in real production startup paths.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The skill requires manual CLI/API/SSE sanity checks for user-facing changes (or explicit skip rationale for internal-only changes), but this fix handoff reports followedProcedure=true without interactiveChecks or an explicit skip rationale.",
+      "evidence": ".factory/skills/mors-global-worker/SKILL.md step 8 and step 10; handoff 2026-03-01T00-20-14-915Z__autonomy-permissions-fix-relay-entrypoint-contactstore-wiring__de89b73e-173e-4a2d-ba00-f838911e31eb.json includes verification.commandsRun only and no interactiveChecks/rationale."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/autonomy-permissions/scrutiny/reviews/autonomy-first-contact-pending-policy.json",
+  "summary": "Pass. The fix commit b19db15 wires ContactStore into src/relay/index.ts production options and adds entrypoint-level assertions in test/relay/entrypoint-wiring.test.ts that validate /contacts/status, /contacts/approve, /contacts/pending, and first_contact/autonomy_allowed annotations through production wiring. This directly resolves the original blocking finding from the prior failed review."
+}
