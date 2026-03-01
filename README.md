@@ -17,9 +17,70 @@ Start here for the fastest first success: **[ONBOARDING.md](./ONBOARDING.md)**
 - Python 3 (native module build support)
 - SQLCipher (`brew install sqlcipher` on macOS)
 
-## Install
+---
 
-### npm global (GitHub)
+## For Agents
+
+Autonomous agents can install and run `mors` without shell RC edits or interactive prompts. Use `npx`, a direct `node dist/index.js` invocation, or a global npm install — no `setup-shell` required.
+
+### Quick start (npx — zero install)
+
+```bash
+npx github:jstxn/mors --version
+```
+
+### Self-serve install + run
+
+```bash
+npm install -g github:jstxn/mors
+```
+
+### Direct invocation (from source checkout)
+
+```bash
+node dist/index.js --version
+```
+
+### Agent lifecycle (local, no relay)
+
+Use `MORS_CONFIG_DIR` to isolate each agent's data in its own directory. All commands accept `--json` for deterministic machine-parseable output. Exit code `0` means success; non-zero means failure with an actionable error message.
+
+```bash
+export MORS_CONFIG_DIR=/tmp/mors-agent-session
+node dist/index.js init --json
+node dist/index.js send --to peer-agent --body "hello from agent" --json
+MSG_ID=$(node dist/index.js inbox --json | node -e '
+  let s=""; process.stdin.on("data",d=>s+=d);
+  process.stdin.on("end",()=>{
+    const j=JSON.parse(s);
+    if(!j.messages?.length) process.exit(1);
+    process.stdout.write(j.messages[0].id);
+  });
+')
+node dist/index.js read "$MSG_ID" --json
+node dist/index.js ack "$MSG_ID" --json
+```
+
+### Error handling for agents
+
+Every `--json` error response includes `{ "status": "error", "error": "<type>", "message": "<actionable guidance>" }`. Common remediation patterns:
+
+| Error | Meaning | Next command |
+|---|---|---|
+| `not_initialized` | Config dir not set up | `mors init --json` |
+| `not_authenticated` | Session missing/expired | `mors login --invite-token <token> --json` |
+| `missing_prerequisites` | Login prereqs incomplete | See `missing` array for specifics |
+| `sqlcipher_unavailable` | SQLCipher not installed | `brew install sqlcipher && npm rebuild` |
+
+---
+
+## For Humans
+
+Interactive users who want shell integration and a guided experience.
+
+### Install
+
+#### npm global (GitHub)
 
 ```bash
 npm install -g github:jstxn/mors
@@ -27,14 +88,14 @@ mors --version
 mors setup-shell
 ```
 
-### Homebrew formula path (tap-ready formula)
+#### Homebrew formula path (tap-ready formula)
 
 ```bash
 brew install --formula ./Formula/mors.rb
 mors --version
 ```
 
-## Local setup (from source)
+### Local setup (from source)
 
 ```bash
 npm install
@@ -43,7 +104,7 @@ cp .env.example .env
 node dist/index.js --help
 ```
 
-## How to use
+### How to use
 
 Use `MORS_CONFIG_DIR` if you want to keep data in a custom folder (for example: `MORS_CONFIG_DIR=/tmp/mors-demo mors inbox`).
 
@@ -70,6 +131,8 @@ mors ack <message-id>
 # 7) Watch for new events
 mors watch
 ```
+
+---
 
 ## Validation
 
