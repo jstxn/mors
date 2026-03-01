@@ -104,6 +104,11 @@ export function run(args: string[]): void {
     return;
   }
 
+  if (command === 'quickstart') {
+    runQuickstart(args.slice(1));
+    return;
+  }
+
   if (command === 'setup-shell') {
     runSetupShellCommand(args.slice(1));
     return;
@@ -2210,6 +2215,308 @@ function reportAuthStatus(session: import('./auth/session.js').AuthSession, json
   }
 }
 
+// ── Quickstart command ────────────────────────────────────────────────
+
+/**
+ * Step result from a quickstart lifecycle step.
+ */
+interface QuickstartStep {
+  name: string;
+  status: 'pass' | 'fail' | 'skipped';
+  messageId?: string;
+  error?: string;
+}
+
+/**
+ * Run the quickstart lifecycle check.
+ *
+ * Executes the deterministic local lifecycle: init → send → inbox → read → ack.
+ * Reports per-step results and an overall summary with actionable remediation on failure.
+ *
+ * Flags:
+ *   --json                     Output machine-readable JSON
+ *   --help                     Show quickstart usage
+ *   --simulate-init-failure    (testing) Force init step to fail
+ */
+function runQuickstart(_args: string[]): void {
+  const json = _args.includes('--json');
+  const simulateInitFailure = _args.includes('--simulate-init-failure');
+
+  if (_args.includes('--help') || _args.includes('-h')) {
+    console.log(`mors quickstart — run local lifecycle check
+
+Executes a deterministic local-only lifecycle sequence:
+  init → send → inbox → read → ack
+
+Reports per-step results and overall success/failure status.
+
+Usage:
+  mors quickstart [--json]
+
+Options:
+  --json    Output machine-readable JSON with per-step lifecycle results
+  --help    Show this help`);
+    return;
+  }
+
+  const steps: QuickstartStep[] = [];
+  let messageId: string | undefined;
+  let configDir: string;
+
+  // ── Step 1: init ────────────────────────────────────────────────
+  try {
+    if (simulateInitFailure) {
+      throw new SqlCipherUnavailableError(
+        'SQLCipher is not available. Install it with: brew install sqlcipher && npm rebuild'
+      );
+    }
+
+    // Use synchronous path: call initCommand and wait for result
+    // initCommand is async, so we use a synchronous approach for quickstart
+    const initResult = initCommandSync();
+    configDir = initResult.configDir;
+    steps.push({ name: 'init', status: 'pass' });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    steps.push({ name: 'init', status: 'fail', error: msg });
+
+    // Fill remaining steps as skipped
+    for (const name of ['send', 'inbox', 'read', 'ack']) {
+      steps.push({ name, status: 'skipped' });
+    }
+
+    emitQuickstartResult(json, steps, true, undefined);
+    return;
+  }
+
+  // ── Step 2: send ────────────────────────────────────────────────
+  try {
+    const db = openStore(configDir);
+    try {
+      const result = sendMessage(db, {
+        recipient: 'quickstart-recipient',
+        sender: 'local',
+        body: 'quickstart verification message',
+      });
+      messageId = result.id;
+      steps.push({ name: 'send', status: 'pass', messageId });
+    } finally {
+      db.close();
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    steps.push({ name: 'send', status: 'fail', error: msg });
+
+    for (const name of ['inbox', 'read', 'ack']) {
+      steps.push({ name, status: 'skipped' });
+    }
+
+    emitQuickstartResult(json, steps, true, configDir);
+    return;
+  }
+
+  // ── Step 3: inbox ───────────────────────────────────────────────
+  try {
+    const db = openStore(configDir);
+    try {
+      const inbox = listInbox(db, {});
+      const found = inbox.find((m) => m.id === messageId);
+      if (!found) {
+        throw new Error(`Message ${messageId} not found in inbox`);
+      }
+      steps.push({ name: 'inbox', status: 'pass', messageId });
+    } finally {
+      db.close();
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    steps.push({ name: 'inbox', status: 'fail', error: msg });
+
+    for (const name of ['read', 'ack']) {
+      steps.push({ name, status: 'skipped' });
+    }
+
+    emitQuickstartResult(json, steps, true, configDir);
+    return;
+  }
+
+  // ── Step 4: read ────────────────────────────────────────────────
+  try {
+    const db = openStore(configDir);
+    try {
+      // messageId is guaranteed defined after successful send step
+      const readResult = readMessage(db, messageId as string);
+      if (!readResult) {
+        throw new Error(`Message ${messageId} not found for read`);
+      }
+      if (!readResult.read_at) {
+        throw new Error(`Message ${messageId} read_at not set after read`);
+      }
+      steps.push({ name: 'read', status: 'pass', messageId });
+    } finally {
+      db.close();
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    steps.push({ name: 'read', status: 'fail', error: msg });
+    steps.push({ name: 'ack', status: 'skipped' });
+
+    emitQuickstartResult(json, steps, true, configDir);
+    return;
+  }
+
+  // ── Step 5: ack ─────────────────────────────────────────────────
+  try {
+    const db = openStore(configDir);
+    try {
+      // messageId is guaranteed defined after successful send step
+      const ackResult = ackMessage(db, messageId as string);
+      if (ackResult.state !== 'acked') {
+        throw new Error(`Expected state=acked but got ${ackResult.state}`);
+      }
+      steps.push({ name: 'ack', status: 'pass', messageId });
+    } finally {
+      db.close();
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    steps.push({ name: 'ack', status: 'fail', error: msg });
+
+    emitQuickstartResult(json, steps, true, configDir);
+    return;
+  }
+
+  // ── All steps passed ───────────────────────────────────────────
+  emitQuickstartResult(json, steps, false, configDir);
+}
+
+/**
+ * Synchronous init for quickstart.
+ *
+ * Calls the async initCommand and blocks the event loop until it resolves.
+ * This is acceptable for quickstart which is a one-shot diagnostic flow.
+ */
+function initCommandSync(): {
+  fingerprint: string;
+  configDir: string;
+  alreadyInitialized: boolean;
+} {
+  // We need to run initCommand synchronously. Since initCommand is async,
+  // we use execFileSync to call ourselves with `init --json` and parse the result.
+  const args = ['--json'];
+  const cliPath = new URL('./index.js', import.meta.url).pathname;
+
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+  };
+
+  const stdout = execFileSyncImport(process.execPath, [cliPath, 'init', ...args], {
+    encoding: 'utf8',
+    timeout: 15_000,
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const parsed = JSON.parse(stdout.trim());
+  if (parsed.status === 'error') {
+    throw new MorsError(parsed.message || 'init failed');
+  }
+
+  return {
+    fingerprint: parsed.fingerprint,
+    configDir: parsed.configDir,
+    alreadyInitialized: parsed.status === 'already_initialized',
+  };
+}
+
+/**
+ * Emit quickstart results in JSON or human-readable format.
+ */
+function emitQuickstartResult(
+  json: boolean,
+  steps: QuickstartStep[],
+  failed: boolean,
+  configDir: string | undefined
+): void {
+  const totalSteps = steps.length;
+  const passedSteps = steps.filter((s) => s.status === 'pass').length;
+
+  if (failed) {
+    process.exitCode = 1;
+  }
+
+  // Build remediation guidance for failures
+  const remediation: string[] = [];
+  if (failed) {
+    const failedStep = steps.find((s) => s.status === 'fail');
+    if (failedStep) {
+      switch (failedStep.name) {
+        case 'init':
+          if (failedStep.error?.toLowerCase().includes('sqlcipher')) {
+            remediation.push('brew install sqlcipher && npm rebuild');
+          }
+          remediation.push('mors init --json');
+          break;
+        case 'send':
+          remediation.push('mors init --json');
+          remediation.push('mors send --to test --body "hello" --json');
+          break;
+        case 'inbox':
+          remediation.push('mors inbox --json');
+          break;
+        case 'read':
+          remediation.push('mors inbox --json');
+          break;
+        case 'ack':
+          remediation.push('mors inbox --json');
+          break;
+      }
+    }
+  }
+
+  if (json) {
+    const result: Record<string, unknown> = {
+      status: failed ? 'failure' : 'success',
+      steps,
+      totalSteps,
+      passedSteps,
+      configDir: configDir ?? null,
+    };
+    if (failed) {
+      result['remediation'] = remediation;
+    }
+    console.log(JSON.stringify(result));
+  } else {
+    // Human-readable output
+    console.log('mors quickstart — local lifecycle check\n');
+
+    for (const step of steps) {
+      const icon = step.status === 'pass' ? '✓' : step.status === 'fail' ? '✗' : '○';
+      const label = `${icon} ${step.name}`;
+      if (step.status === 'pass') {
+        console.log(`  ${label}`);
+      } else if (step.status === 'fail') {
+        console.log(`  ${label}: ${step.error}`);
+      } else {
+        console.log(`  ${label} (skipped)`);
+      }
+    }
+
+    console.log('');
+    if (failed) {
+      console.log(`Result: FAIL (${passedSteps}/${totalSteps} steps passed)`);
+      if (remediation.length > 0) {
+        console.log('\nNext steps:');
+        for (const r of remediation) {
+          console.log(`  $ ${r}`);
+        }
+      }
+    } else {
+      console.log(`Result: SUCCESS (${totalSteps}/${totalSteps} steps passed)`);
+    }
+  }
+}
+
 // ── Init command ─────────────────────────────────────────────────────
 
 function runInit(_args: string[]): void {
@@ -2505,6 +2812,7 @@ Usage:
   mors <command> [options]
 
 Commands:
+  quickstart   Run local lifecycle check (init → send → inbox → read → ack)
   init         Initialize identity and encrypted store
   login        Authenticate with mors-native auth
   logout       Clear local auth session
@@ -2587,6 +2895,10 @@ Onboard:
   --handle <handle>      Globally unique handle (3-32 chars, letters/numbers/hyphens/underscores)
   --display-name <name>  Your display name
   --json                 Output JSON
+
+Quickstart:
+  mors quickstart [--json]
+  --json                 Output machine-readable JSON with per-step lifecycle results
 
 Deploy:
   mors deploy [--json] [--dry-run]
