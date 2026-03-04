@@ -157,6 +157,23 @@ mors watch
 
 ---
 
+## A2A Agent Card Discovery
+
+The mors relay serves [A2A-compliant](https://a2a-protocol.org) Agent Cards so external systems can discover mors agents using the standard Agent2Agent protocol. No authentication is required for discovery.
+
+```bash
+# Per-handle Agent Card (dynamic, reflects live account metadata)
+curl -s http://localhost:3100/.well-known/agent-card.json?handle=agent_alice
+
+# Relay-level fallback card (no handle param)
+curl -s http://localhost:3100/.well-known/agent-card.json
+
+# Unknown handle returns 404 with actionable message
+curl -s http://localhost:3100/.well-known/agent-card.json?handle=nonexistent
+```
+
+---
+
 ## Validation
 
 ```bash
