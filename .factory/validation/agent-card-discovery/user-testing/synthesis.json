@@ -1,0 +1,29 @@
+{
+  "milestone": "agent-card-discovery",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-A2A-001",
+    "VAL-A2A-002",
+    "VAL-A2A-003",
+    "VAL-A2A-004",
+    "VAL-A2A-005"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added 'Flow Validator Guidance: A2A Agent Card Discovery' section with endpoint reference, token generation instructions, isolation rules, expected A2A structure, and sensitive field canary list.",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null,
+  "notes": "Flow checks executed inline due to user-testing-flow-validator subagent environment permission failure (known infrastructure issue per AGENTS.md). All 5 assertions validated via curl against running relay with registered test accounts."
+}

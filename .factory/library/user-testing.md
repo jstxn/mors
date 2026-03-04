@@ -334,3 +334,57 @@ function generateSessionToken(opts: { accountId: string; deviceId: string; signi
 3. Human section includes: npm global install + setup-shell, Homebrew path, interactive usage
 4. Validate one command from agent section: `node dist/index.js --version` → exit 0
 5. Validate one command from agent lifecycle: init → send → inbox → read → ack with --json
+
+---
+
+## Flow Validator Guidance: A2A Agent Card Discovery (agent-card-discovery)
+
+**Testing tool:** `curl` against relay on port 3100. No CLI or browser automation needed — pure JSON API.
+
+**Assertions covered:** VAL-A2A-001, VAL-A2A-002, VAL-A2A-003, VAL-A2A-004, VAL-A2A-005
+
+**Setup:**
+- Build first: `npm run build`
+- Start relay with signing key: `MORS_RELAY_SIGNING_KEY=<key> PORT=3100 MORS_RELAY_HOST=127.0.0.1 npm run relay:dev`
+- The relay is already running at http://localhost:3100 for this validation session
+- Signing key for this session: `validation-signing-key-a2a-test-2024`
+
+**Token generation for account registration:**
+To test VAL-A2A-004 (live account metadata), you need to register an account via `POST /accounts/register`. This requires a valid mors-session token. Generate one using:
+```bash
+# Generate a valid mors-session token for account registration
+node -e "
+const crypto = require('crypto');
+const signingKey = 'validation-signing-key-a2a-test-2024';
+const payload = { accountId: 'acct_a2a_test_1', deviceId: 'dev_a2a_test_1', issuedAt: new Date().toISOString(), tokenId: crypto.randomUUID() };
+const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+const signature = crypto.createHmac('sha256', signingKey).update(payloadStr).digest('hex');
+console.log('mors-session.' + payloadStr + '.' + signature);
+"
+```
+
+**Endpoint reference:**
+- `GET /.well-known/agent-card.json` — Relay-level fallback Agent Card (no handle param)
+- `GET /.well-known/agent-card.json?handle={handle}` — Per-handle Agent Card
+- `POST /accounts/register` — Register handle + profile (requires Bearer token, body: `{"handle":"...", "display_name":"..."}`)
+
+**Isolation rules:**
+- All assertions can be tested by a single subagent (no isolation conflict — read-only except for account registration)
+- Use unique account IDs and handles per test run
+- The relay uses in-memory storage; data is ephemeral
+
+**Expected A2A Agent Card structure:**
+- `name`: handle or relay name
+- `description`: relay/agent description
+- `version`: version string
+- `supportedInterfaces`: array with URL, protocolBinding, protocolVersion
+- `capabilities`: object with streaming, pushNotifications
+- `skills`: array of skill objects
+- `securitySchemes`: object with mors_bearer auth scheme
+- `securityRequirements`: array referencing security scheme
+- `defaultInputModes` / `defaultOutputModes`: content type arrays
+
+**Sensitive fields that MUST NOT appear:**
+- No signing keys, session tokens, internal account IDs, device IDs
+- No internal relay state, store references, or config values
+- Only public discovery information (handle, display name, endpoint, capabilities, auth scheme)

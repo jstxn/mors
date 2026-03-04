@@ -1,0 +1,36 @@
+{
+  "flowId": "a2a-agent-card",
+  "milestone": "agent-card-discovery",
+  "executedInline": true,
+  "inlineReason": "user-testing-flow-validator subagent failed with environment permission error (known infrastructure issue per AGENTS.md)",
+  "assertions": {
+    "VAL-A2A-001": {
+      "status": "pass",
+      "evidence": "curl GET /.well-known/agent-card.json?handle=testdevice returned HTTP 200 with valid A2A JSON. name='testdevice', description includes 'Test Device Agent', supportedInterfaces[0].url='http://localhost:3100', securitySchemes.mors_bearer with bearer scheme, capabilities.streaming=true, skills array with async-messaging and realtime-streaming, version='0.1.0'. Cache-Control: public, max-age=300 header present.",
+      "details": "Registered account 'testdevice' with display name 'Test Device Agent' via POST /accounts/register. Agent Card correctly reflects handle as name and display name in description. All A2A-spec fields present: name, description, version, supportedInterfaces, capabilities, skills, securitySchemes, securityRequirements, defaultInputModes, defaultOutputModes."
+    },
+    "VAL-A2A-002": {
+      "status": "pass",
+      "evidence": "Three test cases: (1) GET ?handle=nonexistent → HTTP 404 with {error:'not_found', detail:'Handle \"nonexistent\" not found. Verify the handle is registered on this relay.'}. (2) GET ?handle= (empty) → HTTP 200 relay-level fallback card with name='mors-relay'. (3) GET without handle param → HTTP 200 relay-level fallback card with name='mors-relay', all A2A fields present.",
+      "details": "Unknown handle returns 404 with actionable error message. Empty or absent handle param returns relay-level fallback card. All three behaviors match the assertion specification."
+    },
+    "VAL-A2A-003": {
+      "status": "pass",
+      "evidence": "Four test cases: (1) GET relay fallback without Authorization header → HTTP 200. (2) GET per-handle without Authorization header → HTTP 200. (3) GET with bogus 'Bearer invalid-garbage-token' → HTTP 200. (4) Contrast: GET /messages without auth → HTTP 401. Agent card endpoint is clearly public while other endpoints enforce auth.",
+      "details": "The /.well-known/agent-card.json endpoint is exempted from auth middleware via isPublicRoute() pattern, consistent with A2A discovery convention. No Bearer token required for any agent card request."
+    },
+    "VAL-A2A-004": {
+      "status": "pass",
+      "evidence": "Before registration: GET ?handle=livetest → HTTP 404. After POST /accounts/register with handle='livetest', display_name='Live Test Agent' → 201 success. After registration: GET ?handle=livetest → HTTP 200 with name='livetest', description='Live Test Agent — mors agent on livetest...' dynamically populated from AccountStore.",
+      "details": "Agent Card is dynamically generated from AccountStore data, not stale or hardcoded. Before account exists, handle returns 404. After registration, card immediately reflects the registered handle and display name."
+    },
+    "VAL-A2A-005": {
+      "status": "pass",
+      "evidence": "Canary checks on both per-handle and relay-level cards: (1) Signing key 'validation-signing-key-a2a-test-2024' → 0 occurrences. (2) Account ID 'acct_a2a_test_1' → 0 occurrences. (3) Device ID 'dev_a2a_test_1' → 0 occurrences. (4) Pattern scan for signingKey, tokenId, deviceId, accountId, created_at, store, config, MORS_RELAY → all 0 occurrences. (5) Top-level JSON keys are only: capabilities, defaultInputModes, defaultOutputModes, description, name, securityRequirements, securitySchemes, skills, supportedInterfaces, version.",
+      "details": "Both card types contain only public A2A discovery fields. No internal relay state, signing keys, session tokens, internal IDs, or sensitive data leaked. The bearerFormat 'mors-session' in securitySchemes describes the token format (standard A2A practice) but does not contain an actual token."
+    }
+  },
+  "frictions": [],
+  "blockers": [],
+  "toolsUsed": ["curl", "node (token generation for account registration)"]
+}
