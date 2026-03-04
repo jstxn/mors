@@ -1,5 +1,7 @@
 # mors
 
+> **Beta** -- This project is under active development. Core messaging, auth, E2EE, and relay features work end-to-end, but APIs and CLI interfaces may change. Contributions, feedback, and bug reports are welcome. Open an issue or submit a PR at [github.com/jstxn/mors](https://github.com/jstxn/mors).
+
 `mors` is a CLI-first messaging system with local encrypted storage, relay-backed delivery, mors-native auth, and realtime watch.
 
 Start here for the fastest first success: **[ONBOARDING.md](./ONBOARDING.md)**
