@@ -1,0 +1,28 @@
+{
+  "milestone": "agent-card-discovery",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "npm run test -- --maxConcurrency=7", "exitCode": 0, "summary": "52 test files, 1297 tests passed" },
+    "typecheck": { "passed": true, "command": "npm run typecheck", "exitCode": 0 },
+    "lint": { "passed": true, "command": "npm run lint", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Update Agent Card field reference from 'url' (top-level) to 'supportedInterfaces' array to match actual A2A spec structure used in implementation. Current text says 'url (service endpoint)' but implementation correctly uses supportedInterfaces[].url.",
+      "evidence": "Feature a2a-agent-card-endpoint uses supportedInterfaces array with url, protocolBinding, protocolVersion per A2A spec. AGENTS.md says 'url' as a top-level field.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

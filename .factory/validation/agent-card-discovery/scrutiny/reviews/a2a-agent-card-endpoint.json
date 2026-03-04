@@ -1,0 +1,41 @@
+{
+  "featureId": "a2a-agent-card-endpoint",
+  "milestone": "agent-card-discovery",
+  "workerSessionId": "4469d447-9122-47c0-b6e2-f550e3739803",
+  "status": "pass",
+  "summary": "Well-implemented A2A Agent Card discovery endpoint. Clean architecture, comprehensive tests, proper production wiring, and good security posture.",
+  "codeReview": {
+    "implementationMatch": {
+      "verdict": "pass",
+      "details": "Implementation matches feature description fully: per-handle Agent Cards with dynamic AccountStore metadata, relay-level fallback card, 404 for unknown handles, public endpoint (no auth), Cache-Control headers, and no internal state leakage."
+    },
+    "testCoverage": {
+      "verdict": "pass",
+      "details": "Agent card test suite covers: relay-level fallback (VAL-A2A-002), per-handle cards with dynamic metadata (VAL-A2A-001, VAL-A2A-004), case-insensitive handle lookup, capabilities/security scheme declarations, 404 for unknown handles, public access without auth (VAL-A2A-003), no internal state leakage (VAL-A2A-005), method restrictions (405 for POST), Cache-Control and Content-Type headers, and A2A spec field completeness for both per-handle and relay cards. Entrypoint wiring tests verify accountStore is wired into production options and the agent card endpoint works through production wiring (both fallback and per-handle)."
+    },
+    "codeQuality": {
+      "verdict": "pass",
+      "details": "Clean separation of concerns: buildAgentCard() pure function, handleAgentCard() route handler, isPublicRoute() extended with prefix-based matching for query-parameterized paths. Code follows existing patterns (sendJson, relay server structure). JSDoc comments are thorough."
+    },
+    "securityReview": {
+      "verdict": "pass",
+      "details": "Agent Card does not include internal account IDs (acct_*), signing keys, session tokens, or other sensitive data. Tests explicitly verify absence of signing_key, signingKey, MORS_RELAY_SIGNING_KEY, session_token, sessionToken, and internal userId in responses. The isPublicRoute() function properly exempts the endpoint from auth middleware."
+    },
+    "a2aSpecCompliance": {
+      "verdict": "pass",
+      "details": "Card includes all required A2A fields: name, description, version, supportedInterfaces (with url, protocolBinding, protocolVersion), capabilities, defaultInputModes, defaultOutputModes, skills (with id, name, description, tags), securitySchemes (mors_bearer with httpAuthSecurityScheme), and securityRequirements."
+    },
+    "productionWiring": {
+      "verdict": "pass",
+      "details": "AccountStore is instantiated in createProductionServerOptions() and passed to createRelayServer(). Entrypoint wiring tests verify this explicitly. The endpoint works through the full production path."
+    }
+  },
+  "issues": [],
+  "nonBlockingObservations": [
+    {
+      "description": "The AGENTS.md mentions 'url' as a top-level field (referencing a simpler A2A spec version), but the implementation uses 'supportedInterfaces' array instead. This is actually correct per the A2A spec — the supportedInterfaces approach is more complete. AGENTS.md could be updated to match.",
+      "severity": "suggestion"
+    }
+  ],
+  "sharedStateObservations": []
+}
