@@ -98,11 +98,21 @@ function isWellFormedMorsSessionToken(token: string): boolean {
 /** Routes that are publicly accessible without authentication. */
 const PUBLIC_ROUTES = new Set(['/health']);
 
+/** Route path prefixes that are publicly accessible (matches path before query string). */
+const PUBLIC_ROUTE_PREFIXES = ['/.well-known/agent-card.json'];
+
 /**
  * Check whether a given URL path is a public route (no auth required).
+ *
+ * Matches exact paths in PUBLIC_ROUTES and prefix-based matches for
+ * routes that accept query parameters (e.g., /.well-known/agent-card.json?handle=x).
  */
 export function isPublicRoute(url: string): boolean {
-  return PUBLIC_ROUTES.has(url);
+  if (PUBLIC_ROUTES.has(url)) return true;
+
+  // Strip query string for prefix matching
+  const pathOnly = url.split('?')[0];
+  return PUBLIC_ROUTE_PREFIXES.some((prefix) => pathOnly === prefix);
 }
 
 // ── Token extraction ─────────────────────────────────────────────────

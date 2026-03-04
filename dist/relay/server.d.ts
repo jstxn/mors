@@ -86,6 +86,7 @@ export interface RelayServer {
  *
  * The server exposes:
  * - GET /health — readiness check endpoint (public, no auth)
+ * - GET /.well-known/agent-card.json — A2A Agent Card discovery (public, no auth)
  * - GET /events — SSE baseline endpoint (auth required)
  * - /conversations/:id/messages — conversation API (auth + participant required)
  * - All other routes return 404

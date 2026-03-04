@@ -55,6 +55,9 @@ export type AuthResult = {
 };
 /**
  * Check whether a given URL path is a public route (no auth required).
+ *
+ * Matches exact paths in PUBLIC_ROUTES and prefix-based matches for
+ * routes that accept query parameters (e.g., /.well-known/agent-card.json?handle=x).
  */
 export declare function isPublicRoute(url: string): boolean;
 /**

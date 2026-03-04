@@ -18,7 +18,7 @@
 import { createServer } from 'node:http';
 import { isPublicRoute, extractAndVerify, extractBearerToken, send401, send403, parseConversationRoute, } from './auth-middleware.js';
 import { RelayMessageStore, RelayMessageNotFoundError, RelayUnauthorizedError, } from './message-store.js';
-import { AccountStore, DuplicateHandleError, ImmutableHandleError, InvalidHandleError, } from './account-store.js';
+import { AccountStore, DuplicateHandleError, ImmutableHandleError, InvalidHandleError, normalizeHandle, } from './account-store.js';
 import { ContactStore } from './contact-store.js';
 import { DedupeConflictError } from '../errors.js';
 import { generateEventId } from '../contract/ids.js';
@@ -98,11 +98,134 @@ function sendJson(res, statusCode, body) {
     });
     res.end(json);
 }
+// ── A2A Agent Card constants ─────────────────────────────────────────
+/** Protocol version declared in Agent Card interfaces. */
+const A2A_PROTOCOL_VERSION = '1.0';
+/** Agent card version string. */
+const AGENT_CARD_VERSION = '0.1.0';
+/**
+ * Build an A2A-compliant Agent Card JSON object.
+ *
+ * Follows the Agent2Agent protocol specification for Agent Cards:
+ * - Required fields: name, description, supportedInterfaces, version,
+ *   capabilities, defaultInputModes, defaultOutputModes, skills
+ * - Optional fields: securitySchemes, securityRequirements, provider
+ *
+ * Does NOT include any internal state (signing keys, session tokens,
+ * internal account IDs) — only public discovery information.
+ *
+ * @param name - Agent name (handle for per-handle, 'mors-relay' for fallback).
+ * @param description - Human-readable agent description.
+ * @param baseUrl - Base URL for the relay service endpoint.
+ * @returns A2A Agent Card JSON object.
+ */
+function buildAgentCard(name, description, baseUrl) {
+    return {
+        name,
+        description,
+        version: AGENT_CARD_VERSION,
+        supportedInterfaces: [
+            {
+                url: baseUrl,
+                protocolBinding: 'HTTP+JSON',
+                protocolVersion: A2A_PROTOCOL_VERSION,
+            },
+        ],
+        capabilities: {
+            streaming: true,
+            pushNotifications: false,
+        },
+        defaultInputModes: ['text/plain', 'application/json'],
+        defaultOutputModes: ['text/plain', 'application/json'],
+        skills: [
+            {
+                id: 'async-messaging',
+                name: 'Async Messaging',
+                description: 'Send and receive asynchronous messages with threading, read/ack state tracking, and deduplication.',
+                tags: ['messaging', 'async', 'threading', 'e2ee'],
+            },
+            {
+                id: 'realtime-streaming',
+                name: 'Realtime SSE Streaming',
+                description: 'Subscribe to real-time message lifecycle events via Server-Sent Events with cursor-based reconnect.',
+                tags: ['sse', 'streaming', 'realtime', 'watch'],
+            },
+        ],
+        securitySchemes: {
+            mors_bearer: {
+                httpAuthSecurityScheme: {
+                    scheme: 'bearer',
+                    bearerFormat: 'mors-session',
+                    description: 'mors native HMAC-signed session token. Obtain via "mors login" with an invite token.',
+                },
+            },
+        },
+        securityRequirements: [{ mors_bearer: [] }],
+    };
+}
+/**
+ * Handle GET /.well-known/agent-card.json requests.
+ *
+ * - With ?handle={handle}: returns per-handle Agent Card from AccountStore
+ * - Without handle param or empty handle: returns relay-level fallback card
+ * - Unknown handle: returns 404 with actionable message
+ *
+ * Public endpoint (no auth required). Includes Cache-Control header.
+ * Does not leak internal state or secrets (VAL-A2A-005).
+ */
+function handleAgentCard(url, res, config, accountStore) {
+    // Parse query params
+    const urlObj = new URL(url, 'http://localhost');
+    const handleParam = urlObj.searchParams.get('handle');
+    // Determine base URL from config or fall back to a placeholder
+    const baseUrl = config.baseUrl || `http://localhost:${config.port}`;
+    // Cache-Control: public caching for discovery (AGENTS.md spec)
+    const cacheControl = 'public, max-age=300';
+    // No handle param or empty handle => relay-level fallback card
+    if (!handleParam || handleParam.trim().length === 0) {
+        const card = buildAgentCard('mors-relay', 'mors relay service — CLI-first encrypted messaging with async delivery, threaded replies, SSE streaming, and 1:1 E2EE.', baseUrl);
+        const json = JSON.stringify(card);
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(json),
+            'Cache-Control': cacheControl,
+        });
+        res.end(json);
+        return;
+    }
+    // Per-handle Agent Card: look up from AccountStore
+    if (!accountStore) {
+        sendJson(res, 404, {
+            error: 'not_found',
+            detail: `Handle "${handleParam}" not found. The relay account store is not available.`,
+        });
+        return;
+    }
+    const profile = accountStore.getByHandle(handleParam);
+    if (!profile) {
+        const normalized = normalizeHandle(handleParam);
+        sendJson(res, 404, {
+            error: 'not_found',
+            detail: `Handle "${normalized}" not found. Verify the handle is registered on this relay.`,
+        });
+        return;
+    }
+    // Build per-handle card with dynamic profile data
+    const card = buildAgentCard(profile.handle, `${profile.displayName} — mors agent on ${profile.handle}. Supports async messaging, threaded replies, SSE streaming, and 1:1 E2EE.`, baseUrl);
+    const json = JSON.stringify(card);
+    res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(json),
+        'Cache-Control': cacheControl,
+    });
+    res.end(json);
+}
 /**
  * Create a relay server instance.
  *
  * The server exposes:
  * - GET /health — readiness check endpoint (public, no auth)
+ * - GET /.well-known/agent-card.json — A2A Agent Card discovery (public, no auth)
  * - GET /events — SSE baseline endpoint (auth required)
  * - /conversations/:id/messages — conversation API (auth + participant required)
  * - All other routes return 404
@@ -132,8 +255,22 @@ export function createRelayServer(config, options) {
     async function handleRequest(req, res) {
         const method = req.method ?? 'GET';
         const url = req.url ?? '/';
-        // Route: GET /health (public — no auth required)
+        // ── Public routes (no auth required) ─────────────────────────────
         if (isPublicRoute(url)) {
+            // Parse the path (strip query string) to dispatch to the right handler
+            const pathOnly = url.split('?')[0];
+            // Route: GET /.well-known/agent-card.json (A2A Agent Card discovery)
+            // Public endpoint for agent discovery per A2A protocol.
+            // Covers: VAL-A2A-001, VAL-A2A-002, VAL-A2A-003, VAL-A2A-004, VAL-A2A-005
+            if (pathOnly === '/.well-known/agent-card.json') {
+                if (method !== 'GET' && method !== 'HEAD') {
+                    sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
+                    return;
+                }
+                handleAgentCard(url, res, config, accountStore);
+                return;
+            }
+            // Route: GET /health (readiness check)
             if (method !== 'GET' && method !== 'HEAD') {
                 sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
                 return;
