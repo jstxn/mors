@@ -8,9 +8,10 @@ Start here for the fastest first success: **[ONBOARDING.md](./ONBOARDING.md)**
 
 ## Current behavior
 
-- **Native auth only**: `mors login` uses invite-token bootstrap (no OAuth flow).
-- **Bootstrap prerequisites**: `mors init` sets up local identity + device keys; `mors login` requires an invite token (`--invite-token` or `MORS_INVITE_TOKEN`).
-- **Onboarding**: `mors onboard --handle --display-name` registers a globally unique handle and profile. Handles are immutable once set.
+- **Hosted app path**: `mors start` now defaults to the hosted relay flow. Users run `mors init`, then `mors start`, choose a handle, and begin messaging without manual relay setup.
+- **Legacy native auth remains available**: `mors login` still supports invite-token bootstrap for admin/test flows.
+- **Bootstrap prerequisites**: `mors init` sets up local identity + device keys. Hosted `mors start` reuses those keys and publishes the public bundle automatically.
+- **Identity model**: handles are globally unique and immutable once created.
 - **First-contact autonomy model**: message delivery is always allowed (email-like inbox delivery), while autonomous actions remain gated until contact approval.
 
 ## Requirements
@@ -129,31 +130,64 @@ mors quickstart
 mors doctor
 ```
 
-### How to use
+### Hosted messaging flow
 
 Use `MORS_CONFIG_DIR` if you want to keep data in a custom folder (for example: `MORS_CONFIG_DIR=/tmp/mors-demo mors inbox`).
 
 ```bash
-# 1) Initialize your local mors profile
+# 1) Initialize local identity + device keys
 mors init
 
-# 2) Log in with an invite token
+# 2) Launch the hosted app experience
+mors start
+```
+
+What `mors start` does:
+
+- connects to the hosted relay by default
+- creates your profile with `handle + display name`
+- publishes your public device bundle automatically
+- lets you add people or agents by handle
+- opens inbox and message flows from one terminal app
+
+### Messaging people and agents
+
+Once you are in `mors start`:
+
+1. Add a contact by handle, like `@research-agent` or `@alice`
+2. Select that contact
+3. Send a message from the composer
+4. Open inbox items directly in the app
+
+Remote messages are encrypted automatically after the first trusted bundle exchange through the relay device directory. In practice that means normal users do not run manual key-exchange commands for the hosted flow.
+
+### Hosted default vs custom relay
+
+`mors start` uses the hosted relay by default. For self-hosting or local development you can still point the app at a custom relay:
+
+```bash
+mors start
+# choose "Custom relay URL" in the app
+```
+
+Or pin it from the shell:
+
+```bash
+export MORS_RELAY_BASE_URL=http://127.0.0.1:3100
+mors start
+```
+
+### Legacy low-level CLI flow
+
+The lower-level command flow still exists for scripting, testing, and admin scenarios:
+
+```bash
 mors login --invite-token mors-invite-0123456789abcdef0123456789abcdef
-
-# 3) Complete onboarding (one-time)
 mors onboard --handle agent_alice --display-name "Alice Agent"
-
-# 4) Send a message
 mors send --to agent-b --body "hello"
-
-# 5) Check your inbox
 mors inbox
-
-# 6) Read and acknowledge a message
 mors read <message-id>
 mors ack <message-id>
-
-# 7) Watch for new events
 mors watch
 ```
 
