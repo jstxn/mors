@@ -1,3 +1,4 @@
+import { emitKeypressEvents } from 'node:readline';
 import { createInterface } from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
 import { getConfigDir } from './identity.js';
@@ -11,7 +12,7 @@ import {
   type AuthSession,
   type AccountProfileLocal,
 } from './auth/session.js';
-import { validateHandle, normalizeHandle } from './relay/account-store.js';
+import { normalizeHandle, validateHandle } from './relay/account-store.js';
 import {
   DEFAULT_HOSTED_RELAY_BASE_URL,
   loadClientSettings,
@@ -110,6 +111,26 @@ interface AppContext {
   relayBaseUrl: string;
   session: AuthSession;
   profile: AccountProfileLocal;
+}
+
+type FocusPane = 'contacts' | 'activity';
+type ActivityView = 'inbox' | 'pending';
+
+export interface StartScreenState {
+  handle: string;
+  relayBaseUrl: string;
+  status: string;
+  contacts: HostedContact[];
+  pending: HostedContact[];
+  inbox: RelayMessageResponse[];
+  selectedContactIndex: number;
+  selectedActivityIndex: number;
+  focus: FocusPane;
+  activityView: ActivityView;
+  previewTitle: string;
+  previewBody: string[];
+  composerOpen: boolean;
+  draft: string;
 }
 
 const DEFAULT_RUNTIME: StartRuntime = {
@@ -212,6 +233,7 @@ export async function runStartCommand(
   }
 
   const configDir = options.configDir ?? getConfigDir();
+  const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const error = options.error ?? process.stderr;
   const runtime = options.runtime ?? DEFAULT_RUNTIME;
@@ -225,12 +247,17 @@ export async function runStartCommand(
     return;
   }
 
-  const prompt = options.prompt ?? createPrompt(options.input, output);
+  const prompt = options.prompt ?? createPrompt(input, output);
   try {
     const relayBaseUrl = await ensureRelayConfigured(configDir, prompt, output);
     const app = await ensureIdentityReady(configDir, relayBaseUrl, prompt, output, runtime);
     await publishLocalDeviceBundle(app, runtime);
-    await runMainLoop(app, prompt, output, runtime);
+
+    if (shouldUseFullScreenStartApp({ input, output, promptOverride: options.prompt !== undefined })) {
+      await runFullScreenApp(app, input as NodeJS.ReadStream, output as NodeJS.WriteStream, runtime);
+    } else {
+      await runPromptLoop(app, prompt, output, runtime);
+    }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     writeLine(error, `Error: ${message}`);
@@ -254,6 +281,17 @@ function createPrompt(input?: Readable, output?: Writable): Prompt {
       rl.close();
     },
   };
+}
+
+export function shouldUseFullScreenStartApp(options: {
+  input?: Readable;
+  output?: Writable;
+  promptOverride?: boolean;
+}): boolean {
+  if (options.promptOverride) {
+    return false;
+  }
+  return isTtyInput(options.input ?? process.stdin) && isTtyOutput(options.output ?? process.stdout);
 }
 
 async function ensureRelayConfigured(
@@ -410,7 +448,7 @@ async function promptForDisplayName(prompt: Prompt, output: Writable): Promise<s
   }
 }
 
-async function runMainLoop(
+async function runPromptLoop(
   app: AppContext,
   prompt: Prompt,
   output: Writable,
@@ -479,6 +517,659 @@ async function runMainLoop(
 
     writeLine(output, 'Choose 1-7.');
   }
+}
+
+async function runFullScreenApp(
+  app: AppContext,
+  input: NodeJS.ReadStream,
+  output: NodeJS.WriteStream,
+  runtime: StartRuntime
+): Promise<void> {
+  emitKeypressEvents(input);
+  input.setRawMode(true);
+  input.resume();
+
+  const state = createInitialScreenState(app);
+  let busy = false;
+  let promptActive = false;
+  let resolvePromise: (() => void) | null = null;
+
+  const askQuestion = async (label: string): Promise<string> => {
+    promptActive = true;
+    let answer = '';
+    const row = Math.max(1, output.rows ?? 24);
+
+    const renderPrompt = (): void => {
+      output.write('\x1b[?25h');
+      output.write(`\x1b[${row};1H\x1b[2K${label}${answer}`);
+    };
+
+    return await new Promise<string>((resolve) => {
+      const finish = (value: string): void => {
+        input.off('keypress', onPromptKeypress);
+        output.write('\x1b[?25l');
+        output.write(`\x1b[${row};1H\x1b[2K`);
+        promptActive = false;
+        resolve(value);
+      };
+
+      const onPromptKeypress = (
+        text: string,
+        key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string }
+      ): void => {
+        if (key.ctrl && key.name === 'c') {
+          finish('');
+          return;
+        }
+        if (key.name === 'escape') {
+          finish('');
+          return;
+        }
+        if (key.name === 'return' || key.name === 'enter') {
+          finish(answer);
+          return;
+        }
+        if (key.name === 'backspace') {
+          answer = answer.slice(0, -1);
+          renderPrompt();
+          return;
+        }
+        if (text && !key.ctrl && !key.meta && key.name !== 'tab') {
+          answer += text;
+          renderPrompt();
+        }
+      };
+
+      input.on('keypress', onPromptKeypress);
+      renderPrompt();
+    });
+  };
+
+  const render = (): void => {
+    const width = Math.max(80, output.columns ?? 100);
+    const height = Math.max(24, output.rows ?? 30);
+    output.write('\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l');
+    output.write(buildStartScreen(state, { width, height }));
+  };
+
+  const refresh = async (): Promise<void> => {
+    await refreshScreenData(app, runtime, state);
+  };
+
+  const cleanup = (): void => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    input.off('keypress', keypressListener);
+    input.setRawMode(false);
+    output.write('\x1b[?25h\x1b[?1049l');
+  };
+
+  const onKeypress = async (
+    text: string,
+    key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string }
+  ): Promise<void> => {
+    if (promptActive || busy) {
+      return;
+    }
+    busy = true;
+    try {
+      const shouldExit = await handleFullScreenKeypress({
+        app,
+        runtime,
+        state,
+        input,
+        output,
+        key,
+        text,
+        askQuestion,
+        refresh,
+      });
+      render();
+      if (shouldExit) {
+        cleanup();
+        resolvePromise?.();
+      }
+    } catch (err: unknown) {
+      state.status = err instanceof Error ? err.message : String(err);
+      render();
+    } finally {
+      busy = false;
+    }
+  };
+
+  let cleanedUp = false;
+  const keypressListener = (
+    text: string,
+    key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string }
+  ): void => {
+    void onKeypress(text, key);
+  };
+
+  try {
+    await refresh();
+    render();
+
+    await new Promise<void>((resolve) => {
+      resolvePromise = resolve;
+      input.on('keypress', keypressListener);
+    });
+  } finally {
+    cleanup();
+  }
+}
+
+async function handleFullScreenKeypress(options: {
+  app: AppContext;
+  runtime: StartRuntime;
+  state: StartScreenState;
+  input: NodeJS.ReadStream;
+  output: NodeJS.WriteStream;
+  key: { name?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; sequence?: string };
+  text: string;
+  askQuestion: (label: string) => Promise<string>;
+  refresh: () => Promise<void>;
+}): Promise<boolean> {
+  const { app, runtime, state, key, text, askQuestion, refresh } = options;
+
+  if (key.ctrl && key.name === 'c') {
+    return true;
+  }
+
+  if (state.composerOpen) {
+    if (key.name === 'escape') {
+      state.composerOpen = false;
+      state.draft = '';
+      state.status = 'Composer cancelled.';
+      return false;
+    }
+    if (key.name === 'return' || key.name === 'enter') {
+      const target = getSelectedContact(state);
+      if (!target) {
+        state.status = 'Choose a contact before sending.';
+        state.composerOpen = false;
+        state.draft = '';
+        return false;
+      }
+      const body = state.draft.trim();
+      if (!body) {
+        state.status = 'Message body cannot be empty.';
+        return false;
+      }
+      const result = await sendToContact(app, runtime, target, body);
+      state.composerOpen = false;
+      state.draft = '';
+      state.status = result.queued
+        ? `Queued message for @${target.handle}.`
+        : result.encrypted
+          ? `Sent encrypted message to @${target.handle}.`
+          : `Sent message to @${target.handle}.`;
+      await refresh();
+      return false;
+    }
+    if (key.name === 'backspace') {
+      state.draft = state.draft.slice(0, -1);
+      return false;
+    }
+    if (text && !key.ctrl && !key.meta && key.name !== 'tab') {
+      state.draft += text;
+    }
+    return false;
+  }
+
+  if (key.name === 'q') {
+    return true;
+  }
+
+  if (key.name === 'tab' || key.name === 'left' || key.name === 'right') {
+    state.focus = state.focus === 'contacts' ? 'activity' : 'contacts';
+    state.status = state.focus === 'contacts' ? 'Contacts focused.' : 'Activity focused.';
+    return false;
+  }
+
+  if (key.name === 'down' || key.name === 'j') {
+    moveSelection(state, 1);
+    return false;
+  }
+
+  if (key.name === 'up' || key.name === 'k') {
+    moveSelection(state, -1);
+    return false;
+  }
+
+  if (key.name === 'i') {
+    state.activityView = 'inbox';
+    state.focus = 'activity';
+    state.status = 'Inbox view.';
+    return false;
+  }
+
+  if (key.name === 'p') {
+    state.activityView = 'pending';
+    state.focus = 'activity';
+    state.status = 'Pending approvals view.';
+    return false;
+  }
+
+  if (key.name === 'g') {
+    await refresh();
+    state.status = 'Refreshed contacts and inbox.';
+    return false;
+  }
+
+  if (key.name === 'a') {
+    const contact = await addContactViaFullscreen(app, runtime, state, askQuestion);
+    if (contact) {
+      await refresh();
+      const nextIndex = state.contacts.findIndex((entry) => entry.account_id === contact.account_id);
+      state.selectedContactIndex = nextIndex >= 0 ? nextIndex : state.selectedContactIndex;
+    }
+    return false;
+  }
+
+  if (key.name === 'r') {
+    await reconfigureRelayFullscreen(app, state, askQuestion, runtime);
+    await refresh();
+    return false;
+  }
+
+  if (key.name === 'c') {
+    if (!getSelectedContact(state)) {
+      state.status = 'Add or select a contact first.';
+      return false;
+    }
+    state.composerOpen = true;
+    state.draft = '';
+    state.status = 'Composer open. Type your message and press Enter to send.';
+    return false;
+  }
+
+  if (key.name === 'return' || key.name === 'enter') {
+    if (state.focus === 'contacts') {
+      const contact = getSelectedContact(state);
+      state.status = contact
+        ? `Selected @${contact.handle}. Press c to compose.`
+        : 'No contacts yet. Press a to add one.';
+      return false;
+    }
+
+    if (state.activityView === 'pending') {
+      const pending = getSelectedActivity(state) as HostedContact | null;
+      if (!pending) {
+        state.status = 'No pending approvals.';
+        return false;
+      }
+      await runtime.approveContact(app.relayBaseUrl, app.session.accessToken, pending.account_id);
+      ensureContactSession(app.configDir, pending);
+      await refresh();
+      state.status = `Approved @${pending.handle}.`;
+      return false;
+    }
+
+    const message = getSelectedActivity(state) as RelayMessageResponse | null;
+    if (!message) {
+      state.status = 'Inbox is empty.';
+      return false;
+    }
+    const body = await readMessageBody(app, message, runtime);
+    state.previewTitle = `Message from ${describeMessageSender(state, message)}`;
+    state.previewBody = wrapText(body, 54);
+    state.status = 'Opened selected message.';
+  }
+
+  return false;
+}
+
+function createInitialScreenState(app: AppContext): StartScreenState {
+  return {
+    handle: app.profile.handle,
+    relayBaseUrl: app.relayBaseUrl,
+    status: 'Press a to add a contact, c to compose, or Enter to open a message.',
+    contacts: [],
+    pending: [],
+    inbox: [],
+    selectedContactIndex: 0,
+    selectedActivityIndex: 0,
+    focus: 'contacts',
+    activityView: 'inbox',
+    previewTitle: 'Welcome',
+    previewBody: ['Add a contact, then open inbox items or send messages from the composer.'],
+    composerOpen: false,
+    draft: '',
+  };
+}
+
+async function refreshScreenData(
+  app: AppContext,
+  runtime: StartRuntime,
+  state: StartScreenState
+): Promise<void> {
+  const [contacts, pending, inbox] = await Promise.all([
+    runtime.listContacts(app.relayBaseUrl, app.session.accessToken),
+    runtime.listPending(app.relayBaseUrl, app.session.accessToken),
+    runtime.listInbox(app.relayBaseUrl, app.session.accessToken),
+  ]);
+
+  state.contacts = contacts;
+  state.pending = pending;
+  state.inbox = inbox;
+  state.selectedContactIndex = clampIndex(state.selectedContactIndex, contacts.length);
+  state.selectedActivityIndex = clampIndex(
+    state.selectedActivityIndex,
+    state.activityView === 'pending' ? pending.length : inbox.length
+  );
+
+  if (state.contacts.length === 0) {
+    state.previewTitle = 'No contacts yet';
+    state.previewBody = ['Press a to add someone by handle.'];
+  } else if (state.activityView === 'pending' && state.pending.length === 0) {
+    state.previewTitle = 'No pending approvals';
+    state.previewBody = ['Switch to inbox with i, or add a contact with a.'];
+  } else if (state.activityView === 'inbox' && state.inbox.length === 0) {
+    state.previewTitle = 'Inbox is empty';
+    state.previewBody = ['Send a message with c after selecting a contact.'];
+  }
+}
+
+async function addContactViaFullscreen(
+  app: AppContext,
+  runtime: StartRuntime,
+  state: StartScreenState,
+  askQuestion: (label: string) => Promise<string>
+): Promise<HostedContact | null> {
+  const raw = (await askQuestion('Add contact by handle: ')).trim();
+  if (!raw) {
+    state.status = 'Add contact cancelled.';
+    return null;
+  }
+
+  let handle: string;
+  try {
+    handle = normalizeHandle(raw.startsWith('@') ? raw.slice(1) : raw);
+    validateHandle(handle);
+  } catch (err: unknown) {
+    state.status = err instanceof Error ? err.message : 'Invalid handle.';
+    return null;
+  }
+
+  const contact = await runtime.addContact(app.relayBaseUrl, app.session.accessToken, handle);
+  ensureContactSession(app.configDir, contact);
+  state.status = `Added @${contact.handle}.`;
+  return contact;
+}
+
+async function reconfigureRelayFullscreen(
+  app: AppContext,
+  state: StartScreenState,
+  askQuestion: (label: string) => Promise<string>,
+  runtime: StartRuntime
+): Promise<void> {
+  const envRelay = process.env['MORS_RELAY_BASE_URL']?.trim();
+  if (envRelay) {
+    state.status = `Relay pinned by MORS_RELAY_BASE_URL: ${envRelay}`;
+    return;
+  }
+
+  const choice = (await askQuestion(`Relay [1 hosted / 2 custom] (current: ${app.relayBaseUrl}): `))
+    .trim()
+    .toLowerCase();
+
+  if (choice === '1' || choice === 'hosted' || choice === '') {
+    saveClientSettings(app.configDir, {
+      relayMode: 'hosted',
+      relayBaseUrl: DEFAULT_HOSTED_RELAY_BASE_URL,
+    });
+    app.relayBaseUrl = DEFAULT_HOSTED_RELAY_BASE_URL;
+    state.relayBaseUrl = DEFAULT_HOSTED_RELAY_BASE_URL;
+    await publishLocalDeviceBundle(app, runtime);
+    state.status = `Using hosted relay ${DEFAULT_HOSTED_RELAY_BASE_URL}.`;
+    return;
+  }
+
+  if (choice === '2' || choice === 'custom') {
+    const custom = (await askQuestion('Custom relay URL: ')).trim();
+    try {
+      const normalized = new URL(custom).toString().replace(/\/$/, '');
+      saveClientSettings(app.configDir, {
+        relayMode: 'custom',
+        relayBaseUrl: normalized,
+      });
+      app.relayBaseUrl = normalized;
+      state.relayBaseUrl = normalized;
+      await publishLocalDeviceBundle(app, runtime);
+      state.status = `Using custom relay ${normalized}.`;
+    } catch {
+      state.status = 'Please enter a valid http(s) URL.';
+    }
+    return;
+  }
+
+  state.status = 'Relay change cancelled.';
+}
+
+function moveSelection(state: StartScreenState, delta: number): void {
+  if (state.focus === 'contacts') {
+    state.selectedContactIndex = clampIndex(state.selectedContactIndex + delta, state.contacts.length);
+    return;
+  }
+
+  const length = state.activityView === 'pending' ? state.pending.length : state.inbox.length;
+  state.selectedActivityIndex = clampIndex(state.selectedActivityIndex + delta, length);
+}
+
+function getSelectedContact(state: StartScreenState): HostedContact | null {
+  if (state.contacts.length === 0) {
+    return null;
+  }
+  return state.contacts[clampIndex(state.selectedContactIndex, state.contacts.length)];
+}
+
+function getSelectedActivity(state: StartScreenState): HostedContact | RelayMessageResponse | null {
+  if (state.activityView === 'pending') {
+    if (state.pending.length === 0) {
+      return null;
+    }
+    return state.pending[clampIndex(state.selectedActivityIndex, state.pending.length)];
+  }
+
+  if (state.inbox.length === 0) {
+    return null;
+  }
+  return state.inbox[clampIndex(state.selectedActivityIndex, state.inbox.length)];
+}
+
+export function buildStartScreen(
+  state: StartScreenState,
+  options: { width?: number; height?: number } = {}
+): string {
+  const width = Math.max(80, options.width ?? 100);
+  const height = Math.max(24, options.height ?? 30);
+  const leftWidth = Math.max(26, Math.floor(width * 0.32));
+  const rightWidth = width - leftWidth - 3;
+  const bodyHeight = Math.max(12, height - 8);
+  const activityHeight = Math.max(6, Math.floor(bodyHeight * 0.45));
+  const previewHeight = bodyHeight - activityHeight - 1;
+
+  const header = [
+    truncate(`mors start | @${state.handle} | ${state.relayBaseUrl}`, width),
+    truncate(`Status: ${state.status}`, width),
+    ''.padEnd(width),
+  ];
+
+  const contactsLines = buildContactsPanel(state, leftWidth, bodyHeight);
+  const activityLines = buildActivityPanel(state, rightWidth, activityHeight);
+  const previewLines = buildPreviewPanel(state, rightWidth, previewHeight);
+
+  const body: string[] = [];
+  for (let index = 0; index < bodyHeight; index++) {
+    const left = contactsLines[index] ?? ''.padEnd(leftWidth);
+    const rightSource = index < activityHeight ? activityLines[index] : previewLines[index - activityHeight - 1] ?? ''.padEnd(rightWidth);
+    const right = rightSource ?? ''.padEnd(rightWidth);
+    const divider = index === activityHeight ? '-' : '|';
+    body.push(`${left} ${divider} ${right}`);
+  }
+
+  const footer = [
+    ''.padEnd(width, '-'),
+    truncate('Keys: Tab switch | j/k move | Enter open/approve | a add | c compose | i inbox | p pending | r relay | g refresh | q quit', width),
+    truncate(
+      state.composerOpen
+        ? `Compose -> @${getSelectedContact(state)?.handle ?? 'nobody'}: ${state.draft}_`
+        : 'Composer closed. Select a contact and press c to send.',
+      width
+    ),
+  ];
+
+  return [...header, ...body, ...footer].join('\n');
+}
+
+function buildContactsPanel(state: StartScreenState, width: number, height: number): string[] {
+  const lines = [panelHeader('Contacts', width, state.focus === 'contacts')];
+  if (state.contacts.length === 0) {
+    lines.push(padLine('No contacts yet', width));
+  } else {
+    state.contacts.forEach((contact, index) => {
+      const prefix = state.selectedContactIndex === index ? '>' : ' ';
+      lines.push(
+        padLine(
+          `${prefix} @${contact.handle} ${contact.status === 'approved' ? '[ok]' : '[pending]'}`,
+          width
+        )
+      );
+      lines.push(padLine(`  ${contact.display_name}`, width));
+    });
+  }
+
+  return fillLines(lines, width, height);
+}
+
+function buildActivityPanel(state: StartScreenState, width: number, height: number): string[] {
+  const title = state.activityView === 'pending' ? 'Pending approvals' : 'Inbox';
+  const focused = state.focus === 'activity';
+  const lines = [panelHeader(title, width, focused)];
+
+  if (state.activityView === 'pending') {
+    if (state.pending.length === 0) {
+      lines.push(padLine('No pending contacts', width));
+    } else {
+      state.pending.forEach((contact, index) => {
+        const prefix = state.selectedActivityIndex === index ? '>' : ' ';
+        lines.push(padLine(`${prefix} @${contact.handle}`, width));
+        lines.push(padLine(`  ${contact.display_name}`, width));
+      });
+    }
+  } else if (state.inbox.length === 0) {
+    lines.push(padLine('No messages yet', width));
+  } else {
+    state.inbox.forEach((message, index) => {
+      const prefix = state.selectedActivityIndex === index ? '>' : ' ';
+      const senderLabel = describeMessageSender(state, message);
+      const preview = isEncryptedPayload(message.body)
+        ? '[encrypted message]'
+        : message.body.replace(/\s+/g, ' ').slice(0, Math.max(12, width - 18));
+      lines.push(padLine(`${prefix} ${senderLabel} (${message.state})`, width));
+      lines.push(padLine(`  ${preview}`, width));
+    });
+  }
+
+  return fillLines(lines, width, height);
+}
+
+function buildPreviewPanel(state: StartScreenState, width: number, height: number): string[] {
+  const lines = [panelHeader(state.previewTitle, width, false)];
+  for (const line of state.previewBody) {
+    for (const wrapped of wrapText(line, Math.max(10, width - 2))) {
+      lines.push(padLine(wrapped, width));
+    }
+  }
+  return fillLines(lines, width, height);
+}
+
+function panelHeader(title: string, width: number, focused: boolean): string {
+  const label = focused ? `[${title} *]` : `[${title}]`;
+  return padLine(label, width);
+}
+
+function fillLines(lines: string[], width: number, height: number): string[] {
+  const filled = lines.slice(0, height).map((line) => padLine(line, width));
+  while (filled.length < height) {
+    filled.push(''.padEnd(width));
+  }
+  return filled;
+}
+
+function padLine(value: string, width: number): string {
+  return truncate(value, width).padEnd(width);
+}
+
+function truncate(value: string, width: number): string {
+  if (value.length <= width) {
+    return value;
+  }
+  if (width <= 1) {
+    return value.slice(0, width);
+  }
+  return `${value.slice(0, width - 1)}~`;
+}
+
+function wrapText(value: string, width: number): string[] {
+  if (value.length <= width) {
+    return [value];
+  }
+
+  const words = value.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= width) {
+      current = candidate;
+      continue;
+    }
+    if (current) {
+      lines.push(current);
+      current = word;
+    } else {
+      lines.push(word.slice(0, width));
+      current = word.slice(width);
+    }
+  }
+  if (current) {
+    lines.push(current);
+  }
+  return lines.length > 0 ? lines : [''];
+}
+
+function clampIndex(index: number, length: number): number {
+  if (length <= 0) {
+    return 0;
+  }
+  if (index < 0) {
+    return 0;
+  }
+  if (index >= length) {
+    return length - 1;
+  }
+  return index;
+}
+
+function describeMessageSender(state: StartScreenState, message: RelayMessageResponse): string {
+  const knownContact =
+    state.contacts.find((contact) => contact.account_id === message.sender_id) ??
+    state.pending.find((contact) => contact.account_id === message.sender_id);
+  if (knownContact) {
+    return `@${knownContact.handle}`;
+  }
+  return message.sender_login;
+}
+
+function isTtyInput(stream: Readable): stream is NodeJS.ReadStream {
+  return Boolean((stream as NodeJS.ReadStream).isTTY && (stream as NodeJS.ReadStream).setRawMode);
+}
+
+function isTtyOutput(stream: Writable): stream is NodeJS.WriteStream {
+  return Boolean((stream as NodeJS.WriteStream).isTTY);
 }
 
 async function showContacts(
@@ -610,26 +1301,7 @@ async function sendFlow(
     return target;
   }
 
-  const queueStorePath = getQueueStorePath(app.configDir);
-  const session = ensureContactSession(app.configDir, target);
-  const result =
-    session && runtime.sendEncryptedMessage
-      ? await runtime.sendEncryptedMessage(
-          app.relayBaseUrl,
-          app.session.accessToken,
-          queueStorePath,
-          target.account_id,
-          body,
-          session.sharedSecret
-        )
-      : await runtime.sendMessage(
-          app.relayBaseUrl,
-          app.session.accessToken,
-          queueStorePath,
-          target.account_id,
-          body
-        );
-
+  const result = await sendToContact(app, runtime, target, body);
   if (result.queued) {
     writeLine(output, 'Message queued offline.');
   } else {
@@ -701,6 +1373,36 @@ function ensureContactSession(configDir: string, contact: HostedContact) {
   const keysDir = getDeviceKeysDir(configDir);
   const localBundle = requireDeviceBootstrap(keysDir);
   return ensureSessionFromPeerBundle(keysDir, mapHostedBundle(contact.device_bundle), localBundle);
+}
+
+async function sendToContact(
+  app: AppContext,
+  runtime: StartRuntime,
+  target: HostedContact,
+  body: string
+): Promise<SendResult & { encrypted: boolean }> {
+  const queueStorePath = getQueueStorePath(app.configDir);
+  const session = ensureContactSession(app.configDir, target);
+  if (session && runtime.sendEncryptedMessage) {
+    const result = await runtime.sendEncryptedMessage(
+      app.relayBaseUrl,
+      app.session.accessToken,
+      queueStorePath,
+      target.account_id,
+      body,
+      session.sharedSecret
+    );
+    return { ...result, encrypted: true };
+  }
+
+  const result = await runtime.sendMessage(
+    app.relayBaseUrl,
+    app.session.accessToken,
+    queueStorePath,
+    target.account_id,
+    body
+  );
+  return { ...result, encrypted: false };
 }
 
 async function readMessageBody(
@@ -798,5 +1500,5 @@ function printStartUsage(output: Writable = process.stdout): void {
   writeLine(output, '  - sign up with handle + display name');
   writeLine(output, '  - publish device keys for automatic encrypted messaging');
   writeLine(output, '  - add contacts by handle');
-  writeLine(output, '  - read and send messages');
+  writeLine(output, '  - use the full-screen terminal app when running in a real TTY');
 }

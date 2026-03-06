@@ -2,14 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Writable } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { persistIdentity, generateIdentity } from '../src/identity.js';
+import {
+  markAuthEnabled,
+  saveProfile,
+  saveSession,
+  type AccountProfileLocal,
+  type AuthSession,
+} from '../src/auth/session.js';
 import {
   generateDeviceKeys,
   getDeviceKeysDir,
   persistDeviceKeys,
 } from '../src/e2ee/device-keys.js';
-import { runStartCommand } from '../src/start.js';
+import { buildStartScreen, runStartCommand, shouldUseFullScreenStartApp } from '../src/start.js';
 
 class ScriptedPrompt {
   constructor(private readonly answers: string[]) {}
@@ -41,13 +48,129 @@ class MemoryWritable extends Writable {
   }
 }
 
+class FakeTtyInput extends PassThrough {
+  isTTY = true;
+  readonly rawModeChanges: boolean[] = [];
+
+  setRawMode(enabled: boolean): void {
+    this.rawModeChanges.push(enabled);
+  }
+}
+
+class FakeTtyOutput extends MemoryWritable {
+  isTTY = true;
+  columns = 100;
+  rows = 30;
+}
+
 function markInitialized(configDir: string): void {
   persistIdentity(configDir, generateIdentity());
   persistDeviceKeys(getDeviceKeysDir(configDir), generateDeviceKeys());
   writeFileSync(join(configDir, '.initialized'), 'ok\n');
 }
 
+function seedHostedSession(configDir: string, overrides: Partial<AuthSession> = {}): void {
+  const createdAt = '2026-03-07T00:00:00.000Z';
+  const session: AuthSession = {
+    accessToken: 'token-seeded',
+    tokenType: 'bearer',
+    accountId: 'acct-seeded',
+    deviceId: 'device-seeded',
+    createdAt,
+    ...overrides,
+  };
+  const profile: AccountProfileLocal = {
+    handle: 'seeded',
+    displayName: 'Seeded User',
+    accountId: session.accountId,
+    createdAt,
+  };
+  markAuthEnabled(configDir);
+  saveSession(configDir, session);
+  saveProfile(configDir, profile);
+}
+
 describe('mors start', () => {
+  it('uses the full-screen app only for real tty sessions without a prompt override', () => {
+    expect(
+      shouldUseFullScreenStartApp({
+        input: new FakeTtyInput(),
+        output: new FakeTtyOutput(),
+      })
+    ).toBe(true);
+
+    expect(
+      shouldUseFullScreenStartApp({
+        input: new FakeTtyInput(),
+        output: new FakeTtyOutput(),
+        promptOverride: true,
+      })
+    ).toBe(false);
+
+    expect(
+      shouldUseFullScreenStartApp({
+        input: new PassThrough(),
+        output: new FakeTtyOutput(),
+      })
+    ).toBe(false);
+  });
+
+  it('renders the full-screen dashboard with contacts, inbox, and composer state', () => {
+    const screen = buildStartScreen(
+      {
+        handle: 'alice',
+        relayBaseUrl: 'https://relay.mors.app',
+        status: 'Ready to message',
+        contacts: [
+          {
+            account_id: 'acct-bob',
+            handle: 'bob',
+            display_name: 'Bob',
+            status: 'approved',
+            autonomy_allowed: true,
+          },
+        ],
+        pending: [],
+        inbox: [
+          {
+            id: 'msg-1',
+            thread_id: 'thread-1',
+            in_reply_to: null,
+            sender_id: 'acct-bob',
+            sender_device_id: 'device-bob',
+            sender_login: 'bob',
+            recipient_id: 'acct-alice',
+            body: '{"ciphertext":"abc","iv":"def","authTag":"ghi"}',
+            subject: null,
+            state: 'delivered',
+            read_at: null,
+            acked_at: null,
+            created_at: '2026-03-07T00:00:00.000Z',
+            updated_at: '2026-03-07T00:00:00.000Z',
+          },
+        ],
+        selectedContactIndex: 0,
+        selectedActivityIndex: 0,
+        focus: 'contacts',
+        activityView: 'inbox',
+        previewTitle: 'Message from bob',
+        previewBody: ['hello from bob'],
+        composerOpen: true,
+        draft: 'hi there',
+      },
+      { width: 100, height: 24 }
+    );
+
+    expect(screen).toContain('mors start | @alice');
+    expect(screen).toContain('[Contacts *]');
+    expect(screen).toContain('@bob');
+    expect(screen).toContain('[Inbox]');
+    expect(screen).toContain('> @bob (delivered)');
+    expect(screen).toContain('[encrypted message]');
+    expect(screen).toContain('Message from bob');
+    expect(screen).toContain('Compose -> @bob: hi there_');
+  });
+
   it('requires init before interactive startup', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'mors-start-'));
     const output = new MemoryWritable();
@@ -197,6 +320,58 @@ describe('mors start', () => {
       expect(transcript).toContain('Inbox:');
       expect(transcript).toContain('hello from bob');
       expect(sendCalls).toEqual([{ recipientId: 'acct-bob', body: 'hello bob' }]);
+    } finally {
+      process.exitCode = originalExitCode;
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores tty state when fullscreen startup fails during initial refresh', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'mors-start-'));
+    const input = new FakeTtyInput();
+    const output = new FakeTtyOutput();
+    const error = new MemoryWritable();
+    const originalExitCode = process.exitCode;
+
+    markInitialized(configDir);
+    seedHostedSession(configDir);
+
+    try {
+      process.exitCode = undefined;
+
+      await runStartCommand([], {
+        configDir,
+        input,
+        output,
+        error,
+        runtime: {
+          async signup() {
+            throw new Error('signup should not be called');
+          },
+          async listContacts() {
+            throw new Error('contacts unavailable');
+          },
+          async addContact() {
+            throw new Error('addContact should not be called');
+          },
+          async listPending() {
+            return [];
+          },
+          async approveContact() {},
+          async listInbox() {
+            return [];
+          },
+          async sendMessage() {
+            throw new Error('sendMessage should not be called');
+          },
+        },
+      });
+
+      expect(process.exitCode).toBe(1);
+      expect(error.toString()).toContain('contacts unavailable');
+      expect(input.rawModeChanges.at(0)).toBe(true);
+      expect(input.rawModeChanges.at(-1)).toBe(false);
+      expect(output.toString()).toContain('\x1b[?25h\x1b[?1049l');
     } finally {
       process.exitCode = originalExitCode;
       rmSync(configDir, { recursive: true, force: true });

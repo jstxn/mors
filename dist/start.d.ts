@@ -31,6 +31,33 @@ export interface RunStartCommandOptions extends StartIo {
     prompt?: Prompt;
     runtime?: StartRuntime;
 }
+type FocusPane = 'contacts' | 'activity';
+type ActivityView = 'inbox' | 'pending';
+export interface StartScreenState {
+    handle: string;
+    relayBaseUrl: string;
+    status: string;
+    contacts: HostedContact[];
+    pending: HostedContact[];
+    inbox: RelayMessageResponse[];
+    selectedContactIndex: number;
+    selectedActivityIndex: number;
+    focus: FocusPane;
+    activityView: ActivityView;
+    previewTitle: string;
+    previewBody: string[];
+    composerOpen: boolean;
+    draft: string;
+}
 export declare function runStartCommand(args: string[], options?: RunStartCommandOptions): Promise<void>;
+export declare function shouldUseFullScreenStartApp(options: {
+    input?: Readable;
+    output?: Writable;
+    promptOverride?: boolean;
+}): boolean;
+export declare function buildStartScreen(state: StartScreenState, options?: {
+    width?: number;
+    height?: number;
+}): string;
 export {};
 //# sourceMappingURL=start.d.ts.map
