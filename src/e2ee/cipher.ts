@@ -190,7 +190,7 @@ export function decryptMessage(sharedSecret: Buffer, payload: EncryptedPayload):
     throw new CipherError(
       'Decryption failed: message integrity or authentication check failed. ' +
         'The ciphertext may have been tampered with, or the shared secret may not match. ' +
-        'If this persists, try re-exchanging keys with "mors key-exchange".'
+        'If this persists, re-establish key exchange with the peer device and retry.'
     );
   }
 }
@@ -237,7 +237,7 @@ export function decryptMessageStrict(sharedSecret: Buffer, payload: EncryptedPay
     throw new StaleKeyError(
       'Decryption failed: the shared secret appears stale or mismatched. ' +
         'This typically occurs after a device rotation or when keys are out of sync. ' +
-        'Run "mors key-exchange" to re-establish a fresh shared secret with the peer device.'
+        'Re-establish key exchange with the peer device to create a fresh shared secret, then retry.'
     );
   }
 }

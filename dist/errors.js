@@ -65,7 +65,7 @@ export class KeyExchangeNotCompleteError extends MorsError {
     constructor(peerDeviceId, message) {
         super(message ??
             `Key exchange has not been completed with peer device "${peerDeviceId}". ` +
-                'Run "mors key-exchange" with the peer\'s public key before sending encrypted messages.');
+                'Complete key exchange with this peer device before sending encrypted messages.');
         this.name = 'KeyExchangeNotCompleteError';
     }
 }
@@ -95,7 +95,7 @@ export class StaleKeyError extends CipherError {
         super(message ??
             'Decryption failed: the shared secret appears stale or mismatched. ' +
                 'This typically occurs after a device rotation or when keys are out of sync. ' +
-                'Run "mors key-exchange" to re-establish a fresh shared secret with the peer device.');
+                'Re-establish key exchange with the peer device to create a fresh shared secret, then retry.');
         this.name = 'StaleKeyError';
     }
 }
@@ -108,7 +108,7 @@ export class DeviceRevokedError extends CipherError {
     constructor(deviceId, message) {
         super(message ??
             `Device "${deviceId}" has been revoked and can no longer decrypt new messages. ` +
-                'Run "mors key-exchange" from an active device to establish new encryption keys.');
+                'Use an active device to establish new encryption keys before retrying.');
         this.name = 'DeviceRevokedError';
         this.revokedDeviceId = deviceId;
     }

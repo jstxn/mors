@@ -81,6 +81,28 @@ const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread
 const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack', 'reply', 'thread', 'watch']);
 
 /**
+ * Commands that should short-circuit to help output when `--help`/`-h` is present.
+ *
+ * Commands with dedicated help handling (quickstart, doctor, deploy) are excluded
+ * to preserve their existing command-specific help output.
+ */
+const HELP_BYPASS_COMMANDS = new Set([
+  'init',
+  'login',
+  'logout',
+  'status',
+  'onboard',
+  'setup-shell',
+  'send',
+  'inbox',
+  'read',
+  'reply',
+  'ack',
+  'thread',
+  'watch',
+]);
+
+/**
  * Commands that require an authenticated session (in addition to init).
  *
  * After logout, these commands fail with login-required guidance (VAL-AUTH-005).
@@ -89,6 +111,7 @@ const AUTH_GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 't
 
 export function run(args: string[]): void {
   const command = args[0];
+  const commandArgs = args.slice(1);
 
   if (!command || command === '--help' || command === '-h') {
     printUsage();
@@ -100,40 +123,46 @@ export function run(args: string[]): void {
     return;
   }
 
+  // Command-level help should never run init/auth/prerequisite logic.
+  if (HELP_BYPASS_COMMANDS.has(command) && hasHelpFlag(commandArgs)) {
+    printUsage();
+    return;
+  }
+
   if (command === 'init') {
-    runInit(args.slice(1));
+    runInit(commandArgs);
     return;
   }
 
   if (command === 'quickstart') {
-    runQuickstart(args.slice(1));
+    runQuickstart(commandArgs);
     return;
   }
 
   if (command === 'doctor') {
-    runDoctor(args.slice(1));
+    runDoctor(commandArgs);
     return;
   }
 
   if (command === 'setup-shell') {
-    runSetupShellCommand(args.slice(1));
+    runSetupShellCommand(commandArgs);
     return;
   }
 
   if (command === 'login') {
-    runLogin(args.slice(1));
+    runLogin(commandArgs);
     return;
   }
 
   if (command === 'logout') {
-    runLogout(args.slice(1));
+    runLogout(commandArgs);
     return;
   }
 
   if (command === 'status') {
     // runStatus is async (token-liveness check); attach error handler
     // so the process waits for completion and sets exitCode deterministically.
-    runStatus(args.slice(1)).catch((err: unknown) => {
+    runStatus(commandArgs).catch((err: unknown) => {
       process.exitCode = 1;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Error: ${msg}`);
@@ -142,12 +171,12 @@ export function run(args: string[]): void {
   }
 
   if (command === 'deploy') {
-    runDeploy(args.slice(1));
+    runDeploy(commandArgs);
     return;
   }
 
   if (command === 'onboard') {
-    runOnboard(args.slice(1)).catch((err: unknown) => {
+    runOnboard(commandArgs).catch((err: unknown) => {
       process.exitCode = 1;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Error: ${msg}`);
@@ -171,8 +200,7 @@ export function run(args: string[]): void {
 
     // ── Auth gating: require active session (VAL-AUTH-005) ────────
     if (AUTH_GATED_COMMANDS.has(command)) {
-      const cmdArgs = args.slice(1);
-      const { flags: cmdFlags } = parseArgs(cmdArgs);
+      const { flags: cmdFlags } = parseArgs(commandArgs);
       const isJson = 'json' in cmdFlags;
 
       try {
@@ -199,7 +227,7 @@ export function run(args: string[]): void {
 
     // Dispatch to implemented commands.
     if (IMPLEMENTED_COMMANDS.has(command)) {
-      runCommand(command, args.slice(1), configDir);
+      runCommand(command, commandArgs, configDir);
       return;
     }
 
@@ -212,6 +240,10 @@ export function run(args: string[]): void {
   console.error(`Unknown command: ${command}`);
   console.error('Run "mors --help" for usage information.');
   process.exitCode = 1;
+}
+
+function hasHelpFlag(args: string[]): boolean {
+  return args.includes('--help') || args.includes('-h');
 }
 
 /**
@@ -298,8 +330,9 @@ function resolveKeyExchangeSession(configDir: string, peerDeviceId?: string): Ke
   if (sessions.length === 0) {
     throw new KeyExchangeNotCompleteError(
       'any',
-      'No key exchange sessions found. Run "mors key-exchange" with a peer device\'s ' +
-        'public key before sending encrypted messages, or use --peer-device to specify a peer.'
+      'No key exchange sessions found. Encrypted remote messaging requires a pre-established ' +
+        'key exchange session. Use --no-encrypt to send plaintext via relay, or use ' +
+        '--peer-device <device-id> after a session is available.'
     );
   }
   if (sessions.length === 1) {
@@ -3112,7 +3145,10 @@ Watch:
   --poll-interval <ms>   Polling interval in ms (default: 500, min: 10; local only)
 
 Login:
-  mors login [--json]
+  mors login --invite-token <token> [--json]
+  mors login [--json]    (uses MORS_INVITE_TOKEN env var when set)
+  --invite-token <token> Invite token (required unless MORS_INVITE_TOKEN is set)
+  MORS_INVITE_TOKEN      Environment fallback for invite token
   --json                 Output JSON
 
 Logout:

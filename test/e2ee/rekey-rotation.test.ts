@@ -116,7 +116,7 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
       expect(() => decryptMessageStrict(staleSecret, encrypted)).toThrow(StaleKeyError);
     });
 
-    it('StaleKeyError message includes rekey guidance mentioning key-exchange', () => {
+    it('StaleKeyError message includes rekey guidance without requiring a CLI command', () => {
       const { sharedSecret } = setupKeyExchangePair(tempDir);
       const encrypted = encryptMessage(sharedSecret, 'test');
       const staleSecret = randomBytes(32);
@@ -128,7 +128,7 @@ describe('E2EE rekey, rotation, revocation, and leak hardening', () => {
         expect(err).toBeInstanceOf(StaleKeyError);
         const msg = (err as Error).message;
         expect(msg).toMatch(/key.?exchange|rekey/i);
-        expect(msg).toMatch(/mors\s+key-exchange/i);
+        expect(msg).toMatch(/shared secret|retry/i);
       }
     });
 

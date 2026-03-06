@@ -474,7 +474,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
     const parsed = JSON.parse(result.stdout);
     expect(parsed.status).toBe('error');
     expect(parsed.error).toBe('key_exchange_required');
-    expect(parsed.message).toContain('key-exchange');
+    expect(parsed.message).toMatch(/key exchange/i);
   });
 
   it('read --remote without key exchange returns exchange guidance', async () => {
@@ -494,7 +494,7 @@ describe('CLI secure-setup guidance when prerequisites missing', () => {
     const parsed = JSON.parse(result.stdout);
     expect(parsed.status).toBe('error');
     expect(parsed.error).toBe('key_exchange_required');
-    expect(parsed.message).toContain('key-exchange');
+    expect(parsed.message).toMatch(/key exchange/i);
   });
 
   it('reply --remote without device bootstrap returns bootstrap guidance', async () => {
