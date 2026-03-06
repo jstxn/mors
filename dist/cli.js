@@ -10,16 +10,17 @@ import { openEncryptedDb, verifySqlCipherAvailable } from './store.js';
 import { sendMessage, listInbox, readMessage, ackMessage, replyMessage, listThread, } from './message.js';
 import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
+import { runStartCommand } from './start.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
 import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
 import { getDeviceKeysDir, isDeviceBootstrapped } from './e2ee/device-keys.js';
-import { loadKeyExchangeSession, listKeyExchangeSessions, } from './e2ee/key-exchange.js';
+import { performKeyExchange, loadKeyExchangeSession, listKeyExchangeSessions, } from './e2ee/key-exchange.js';
 import { ContractValidationError } from './contract/errors.js';
 import { saveSession, loadSession, clearSession, markAuthEnabled, saveSigningKey, loadSigningKey, saveProfile, loadProfile, } from './auth/session.js';
 import { validateInviteToken, generateSessionToken, generateSigningKey, NativeAuthPrerequisiteError, } from './auth/native.js';
 import { requireAuth, verifyTokenLiveness, NotAuthenticatedError, TokenLivenessError, SigningKeyMismatchError, } from './auth/guards.js';
 import { getConfigDir } from './identity.js';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync as execFileSyncImport } from 'node:child_process';
@@ -27,6 +28,7 @@ import { RelayClient, RelayClientError } from './relay/client.js';
 import { connectRemoteWatch } from './remote-watch.js';
 import { runDeployPreflight, formatDeployIssues, formatDeployResultJson, redactSecrets, } from './deploy.js';
 import { validateHandle, normalizeHandle } from './relay/account-store.js';
+import { resolveRelayBaseUrl } from './settings.js';
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 /** Commands that are implemented. */
@@ -42,6 +44,7 @@ const HELP_BYPASS_COMMANDS = new Set([
     'login',
     'logout',
     'status',
+    'start',
     'onboard',
     'setup-shell',
     'send',
@@ -90,6 +93,14 @@ export function run(args) {
         runSetupShellCommand(commandArgs);
         return;
     }
+    if (command === 'start') {
+        runStartCommand(commandArgs).catch((err) => {
+            process.exitCode = 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${msg}`);
+        });
+        return;
+    }
     if (command === 'login') {
         runLogin(commandArgs);
         return;
@@ -110,6 +121,10 @@ export function run(args) {
     }
     if (command === 'deploy') {
         runDeploy(commandArgs);
+        return;
+    }
+    if (command === 'key-exchange') {
+        runKeyExchange(commandArgs);
         return;
     }
     if (command === 'onboard') {
@@ -196,7 +211,7 @@ class RemoteUnavailableError extends MorsError {
  * Create a RelayClient from the current session and relay config.
  *
  * Requires both an active authenticated session (with access token) and
- * a relay base URL (MORS_RELAY_BASE_URL env var).
+ * a relay base URL (env override, saved setting, or hosted default).
  *
  * @param configDir - Config directory containing the session.
  * @returns A configured RelayClient.
@@ -208,10 +223,9 @@ function createRelayClientFromSession(configDir) {
     if (!session) {
         throw new NotAuthenticatedError();
     }
-    const relayBaseUrl = process.env['MORS_RELAY_BASE_URL'];
+    const relayBaseUrl = resolveRelayBaseUrl(configDir);
     if (!relayBaseUrl) {
-        throw new RemoteUnavailableError('Remote mode requires MORS_RELAY_BASE_URL to be set. ' +
-            'Set this environment variable to the relay server URL (e.g. http://localhost:3100).');
+        throw new RemoteUnavailableError('Remote relay is not configured. Run "mors start" or set MORS_RELAY_BASE_URL.');
     }
     return new RelayClient({
         baseUrl: relayBaseUrl,
@@ -606,7 +620,7 @@ function runRemoteInbox(configDir, json, opts) {
         return;
     }
     const session = loadSession(configDir);
-    const baseUrl = process.env['MORS_RELAY_BASE_URL'];
+    const baseUrl = resolveRelayBaseUrl(configDir);
     // Both are validated by createRelayClientFromSession above
     if (!session || !baseUrl)
         return;
@@ -616,6 +630,7 @@ function runRemoteInbox(configDir, json, opts) {
         headers: {
             Authorization: `Bearer ${token}`,
             Accept: 'application/json',
+            Connection: 'close',
         },
     })
         .then(async (res) => {
@@ -1280,10 +1295,10 @@ function runRemoteWatch(configDir, json) {
         handleRemoteError(new NotAuthenticatedError(), json);
         return;
     }
-    const relayBaseUrl = process.env['MORS_RELAY_BASE_URL'];
+    const relayBaseUrl = resolveRelayBaseUrl(configDir);
     if (!relayBaseUrl) {
         process.exitCode = 1;
-        handleRemoteError(new RemoteUnavailableError('MORS_RELAY_BASE_URL is not set. Configure the relay base URL to use remote watch.'), json);
+        handleRemoteError(new RemoteUnavailableError('Remote relay is not configured. Run "mors start" or set MORS_RELAY_BASE_URL.'), json);
         return;
     }
     if (!json) {
@@ -1806,7 +1821,7 @@ async function runOnboard(_args) {
     // to enforce the global unique-handle constraint end-to-end.
     // On relay rejection (duplicate/immutable), fail without local persistence.
     // On relay unreachable, persist locally as graceful degradation.
-    const relayBaseUrl = process.env['MORS_RELAY_BASE_URL'];
+    const relayBaseUrl = resolveRelayBaseUrl(configDir);
     if (relayBaseUrl) {
         const relayResult = await relayRegisterHandle(relayBaseUrl, session.accessToken, {
             handle,
@@ -1959,6 +1974,202 @@ function reportAuthStatus(session, json) {
         console.log(`Device: ${session.deviceId}`);
         console.log(`Session created: ${session.createdAt}`);
     }
+}
+function runKeyExchange(args) {
+    const { positional, flags } = parseArgs(args);
+    const json = 'json' in flags;
+    if (hasHelpFlag(args) || positional.length === 0) {
+        printKeyExchangeHelp();
+        return;
+    }
+    try {
+        requireInit();
+    }
+    catch (err) {
+        if (err instanceof NotInitializedError) {
+            formatError(err.message, json, 'not_initialized');
+            process.exitCode = 1;
+            return;
+        }
+        throw err;
+    }
+    const configDir = getConfigDir();
+    const subcommand = positional[0];
+    const subArgs = args.slice(1);
+    try {
+        if (subcommand === 'offer') {
+            runKeyExchangeOffer(configDir, json);
+            return;
+        }
+        if (subcommand === 'accept') {
+            runKeyExchangeAccept(configDir, subArgs, json);
+            return;
+        }
+        if (subcommand === 'list') {
+            runKeyExchangeList(configDir, json);
+            return;
+        }
+        formatError(`Unknown key-exchange subcommand: ${subcommand}. Run "mors key-exchange --help" for usage.`, json, 'unknown_subcommand');
+        process.exitCode = 1;
+    }
+    catch (err) {
+        handleCommandError(err, json);
+    }
+}
+function printKeyExchangeHelp() {
+    console.log(`mors key-exchange - establish E2EE sessions with peer devices
+
+Usage:
+  mors key-exchange offer [--json]
+  mors key-exchange accept --bundle <json|-> [--json]
+  mors key-exchange accept --bundle-file <path> [--json]
+  mors key-exchange list [--json]
+
+Subcommands:
+  offer                  Print your shareable E2EE device bundle
+  accept                 Import a peer bundle and persist a shared session
+  list                   Show established peer key-exchange sessions
+
+Options:
+  --bundle <json|->      Peer bundle JSON inline, or "-" to read from stdin
+  --bundle-file <path>   Read peer bundle JSON from a file
+  --json                 Output JSON
+
+Typical flow:
+  mors key-exchange offer --json > my-bundle.json
+  mors key-exchange accept --bundle-file peer-bundle.json
+
+Notes:
+  Exchange bundles out-of-band with the other user or agent.
+  When exactly one session exists, encrypted remote messaging auto-selects it.
+  Use --peer-device <device-id> on send/read/reply when multiple sessions exist.`);
+}
+function runKeyExchangeOffer(configDir, json) {
+    const localBundle = requireDeviceBootstrap(getDeviceKeysDir(configDir));
+    const bundle = buildKeyExchangeBundle(localBundle);
+    if (json) {
+        console.log(JSON.stringify({ status: 'ok', bundle }));
+        return;
+    }
+    console.log('Share this bundle with the peer device you want to trust:');
+    console.log(JSON.stringify(bundle, null, 2));
+    console.log('');
+    console.log('Next step: have the peer run:');
+    console.log('  mors key-exchange accept --bundle-file <your-bundle.json>');
+}
+function runKeyExchangeAccept(configDir, args, json) {
+    const { flags } = parseArgs(args);
+    const inlineBundle = typeof flags['bundle'] === 'string' ? flags['bundle'] : undefined;
+    const bundleFile = typeof flags['bundle-file'] === 'string' ? flags['bundle-file'] : undefined;
+    if (!inlineBundle && !bundleFile) {
+        formatError('Missing required input. Provide --bundle <json|-> or --bundle-file <path>.', json, 'missing_bundle');
+        process.exitCode = 1;
+        return;
+    }
+    if (inlineBundle && bundleFile) {
+        formatError('Provide exactly one bundle source: --bundle or --bundle-file.', json, 'ambiguous_bundle');
+        process.exitCode = 1;
+        return;
+    }
+    let rawInput;
+    if (inlineBundle === '-') {
+        rawInput = readFileSync(0, 'utf8');
+    }
+    else if (inlineBundle) {
+        rawInput = inlineBundle;
+    }
+    else if (bundleFile) {
+        rawInput = readFileSync(bundleFile, 'utf8');
+    }
+    else {
+        formatError('Missing required input. Provide --bundle <json|-> or --bundle-file <path>.', json, 'missing_bundle');
+        process.exitCode = 1;
+        return;
+    }
+    const peerBundle = parseKeyExchangeBundle(rawInput);
+    const keysDir = getDeviceKeysDir(configDir);
+    const localBundle = requireDeviceBootstrap(keysDir);
+    const session = performKeyExchange(keysDir, localBundle, Buffer.from(peerBundle.x25519_public_key, 'hex'), peerBundle.device_id, peerBundle.fingerprint);
+    if (json) {
+        console.log(JSON.stringify({
+            status: 'ok',
+            peer_device_id: session.peerDeviceId,
+            peer_fingerprint: session.peerFingerprint,
+            completed_at: session.completedAt,
+        }));
+        return;
+    }
+    console.log('Key exchange complete.');
+    console.log(`Peer device: ${session.peerDeviceId}`);
+    console.log(`Peer fingerprint: ${session.peerFingerprint}`);
+    console.log(`Completed at: ${session.completedAt}`);
+}
+function runKeyExchangeList(configDir, json) {
+    const sessions = listKeyExchangeSessions(getDeviceKeysDir(configDir));
+    if (json) {
+        console.log(JSON.stringify({
+            status: 'ok',
+            count: sessions.length,
+            sessions: sessions.map((session) => ({
+                peer_device_id: session.peerDeviceId,
+                peer_fingerprint: session.peerFingerprint,
+                completed_at: session.completedAt,
+            })),
+        }));
+        return;
+    }
+    if (sessions.length === 0) {
+        console.log('No key exchange sessions found.');
+        return;
+    }
+    console.log(`Key exchange sessions (${sessions.length}):`);
+    for (const session of sessions) {
+        console.log(`- ${session.peerDeviceId} (${session.peerFingerprint})`);
+        console.log(`  completed: ${session.completedAt}`);
+    }
+}
+function buildKeyExchangeBundle(bundle) {
+    return {
+        kind: 'mors-key-exchange-bundle-v1',
+        device_id: bundle.deviceId,
+        fingerprint: bundle.fingerprint,
+        x25519_public_key: bundle.x25519PublicKey.toString('hex'),
+    };
+}
+function parseKeyExchangeBundle(raw) {
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        throw new MorsError('Invalid bundle JSON. Expected a JSON object from "mors key-exchange offer".');
+    }
+    const candidate = parsed &&
+        typeof parsed === 'object' &&
+        'bundle' in parsed &&
+        parsed.bundle &&
+        typeof parsed.bundle === 'object'
+        ? parsed.bundle
+        : parsed;
+    if (!candidate || typeof candidate !== 'object') {
+        throw new MorsError('Invalid key exchange bundle. Expected an object payload.');
+    }
+    const bundle = candidate;
+    if (bundle.kind !== 'mors-key-exchange-bundle-v1') {
+        throw new MorsError('Invalid key exchange bundle kind.');
+    }
+    if (!bundle.device_id || !bundle.fingerprint || !bundle.x25519_public_key) {
+        throw new MorsError('Invalid key exchange bundle. Missing required fields.');
+    }
+    if (!/^[0-9a-fA-F]+$/.test(bundle.x25519_public_key) || bundle.x25519_public_key.length !== 64) {
+        throw new MorsError('Invalid key exchange bundle. x25519_public_key must be 32-byte hex.');
+    }
+    return {
+        kind: 'mors-key-exchange-bundle-v1',
+        device_id: bundle.device_id,
+        fingerprint: bundle.fingerprint,
+        x25519_public_key: bundle.x25519_public_key.toLowerCase(),
+    };
 }
 /**
  * Run the quickstart lifecycle check.
@@ -2368,7 +2579,7 @@ Options:
     }
     // ── Check 6: Relay configuration ──────────────────────────────────
     {
-        const relayUrl = process.env['MORS_RELAY_BASE_URL'];
+        const relayUrl = resolveRelayBaseUrl(configDir);
         if (relayUrl) {
             checks.push({
                 name: 'relay_config',
@@ -2380,8 +2591,8 @@ Options:
             checks.push({
                 name: 'relay_config',
                 status: 'warn',
-                message: 'MORS_RELAY_BASE_URL not set (remote features unavailable)',
-                remediation: ['export MORS_RELAY_BASE_URL=https://relay.example.com'],
+                message: 'Relay URL not configured (remote features unavailable)',
+                remediation: ['mors start', 'export MORS_RELAY_BASE_URL=https://relay.example.com'],
             });
         }
     }
@@ -2713,9 +2924,11 @@ Commands:
   quickstart   Run local lifecycle check (init → send → inbox → read → ack)
   doctor       Check prerequisites and configuration health
   init         Initialize identity and encrypted store
+  key-exchange Share, accept, and inspect E2EE peer sessions
   login        Authenticate with mors-native auth
   logout       Clear local auth session
   status       Show current auth status
+  start        Launch the hosted mors app experience
   onboard      First-run setup: register handle + profile
   send         Send a message
   inbox        List messages
@@ -2732,7 +2945,7 @@ Options:
   -v, --version  Show version
 
 Remote mode:
-  --remote               Route command through relay (requires auth + MORS_RELAY_BASE_URL)
+  --remote               Route command through relay (requires auth + relay config)
   --peer-device <id>     Peer device ID for E2EE key exchange session lookup
   --no-encrypt           Bypass E2EE encryption (send/read plaintext via relay)
 
@@ -2792,6 +3005,10 @@ Status:
   --json                 Output JSON
   --offline              Skip token liveness check (report local session only)
 
+Start:
+  mors start
+  Interactive relay-backed app for signup, contacts, inbox, and messaging
+
 Onboard:
   mors onboard --handle <handle> --display-name <name> [--json]
   --handle <handle>      Globally unique handle (3-32 chars, letters/numbers/hyphens/underscores)
@@ -2805,6 +3022,15 @@ Quickstart:
 Doctor:
   mors doctor [--json]
   --json                 Output machine-readable JSON with per-check health results
+
+Key Exchange:
+  mors key-exchange offer [--json]
+  mors key-exchange accept --bundle <json|-> [--json]
+  mors key-exchange accept --bundle-file <path> [--json]
+  mors key-exchange list [--json]
+  offer                  Print your shareable E2EE device bundle
+  accept                 Import a peer bundle and persist a shared session
+  list                   Show established peer key-exchange sessions
 
 Deploy:
   mors deploy [--json] [--dry-run]

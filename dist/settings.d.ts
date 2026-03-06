@@ -1,0 +1,11 @@
+export declare const DEFAULT_HOSTED_RELAY_BASE_URL = "https://relay.mors.app";
+export interface ClientSettings {
+    relayMode?: 'hosted' | 'custom';
+    relayBaseUrl?: string;
+    updatedAt?: string;
+}
+export declare function getSettingsPath(configDir: string): string;
+export declare function loadClientSettings(configDir: string): ClientSettings;
+export declare function saveClientSettings(configDir: string, settings: ClientSettings): void;
+export declare function resolveRelayBaseUrl(configDir: string): string;
+//# sourceMappingURL=settings.d.ts.map

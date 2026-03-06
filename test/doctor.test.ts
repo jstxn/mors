@@ -289,7 +289,7 @@ describe('VAL-LAUNCH-008: doctor command failure detection', () => {
 
   // ── Relay configuration ──────────────────────────────────────────
 
-  it('relay_config check warns when MORS_RELAY_BASE_URL is not set', () => {
+  it('relay_config check passes with the hosted relay default when MORS_RELAY_BASE_URL is not set', () => {
     // Initialize first
     execSync(`node ${CLI} init --json`, {
       cwd: ROOT,
@@ -315,11 +315,8 @@ describe('VAL-LAUNCH-008: doctor command failure detection', () => {
 
     const relayCheck = parsed.checks.find((c: { name: string }) => c.name === 'relay_config');
     expect(relayCheck).toBeDefined();
-    expect(relayCheck.status).toBe('warn');
-    expect(relayCheck.remediation).toBeDefined();
-    // Should suggest setting MORS_RELAY_BASE_URL
-    const hasEnvVar = relayCheck.remediation.some((r: string) => r.includes('MORS_RELAY_BASE_URL'));
-    expect(hasEnvVar).toBe(true);
+    expect(relayCheck.status).toBe('pass');
+    expect(relayCheck.message).toContain('https://relay.mors.app');
   });
 
   // ── Multiple failures ────────────────────────────────────────────

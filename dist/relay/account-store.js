@@ -115,6 +115,8 @@ export class AccountStore {
     handleToAccountId = new Map();
     /** Map from account ID to its registered device identities (VAL-AUTH-009). */
     devicesByAccountId = new Map();
+    /** Map from account ID to published public device bundles by device ID. */
+    deviceBundlesByAccountId = new Map();
     /**
      * Register an account with a handle and profile.
      *
@@ -230,6 +232,59 @@ export class AccountStore {
         if (!deviceMap)
             return [];
         return Array.from(deviceMap.values());
+    }
+    /**
+     * Publish or update a public device bundle for an account.
+     *
+     * Publication is idempotent per (accountId, deviceId). Re-publishing the same
+     * device updates its public metadata and refreshes the publishedAt timestamp.
+     *
+     * @param accountId - Owning account ID.
+     * @param bundle - Public device metadata to publish.
+     * @returns The canonical published bundle stored by the relay.
+     */
+    publishDeviceBundle(accountId, bundle) {
+        this.registerDevice(accountId, bundle.deviceId);
+        let bundleMap = this.deviceBundlesByAccountId.get(accountId);
+        if (!bundleMap) {
+            bundleMap = new Map();
+            this.deviceBundlesByAccountId.set(accountId, bundleMap);
+        }
+        const published = {
+            accountId,
+            deviceId: bundle.deviceId,
+            fingerprint: bundle.fingerprint,
+            x25519PublicKey: bundle.x25519PublicKey,
+            ed25519PublicKey: bundle.ed25519PublicKey,
+            createdAt: bundle.createdAt,
+            publishedAt: new Date().toISOString(),
+        };
+        bundleMap.set(bundle.deviceId, published);
+        return published;
+    }
+    /**
+     * Look up a published device bundle for a specific account/device pair.
+     *
+     * @param accountId - Owning account ID.
+     * @param deviceId - Device identifier.
+     * @returns The published bundle, or null when none exists.
+     */
+    getPublishedDeviceBundle(accountId, deviceId) {
+        return this.deviceBundlesByAccountId.get(accountId)?.get(deviceId) ?? null;
+    }
+    /**
+     * List all published device bundles for an account.
+     *
+     * Results preserve publication insertion order.
+     *
+     * @param accountId - Owning account ID.
+     * @returns Published bundles for the account.
+     */
+    listPublishedDeviceBundles(accountId) {
+        const bundleMap = this.deviceBundlesByAccountId.get(accountId);
+        if (!bundleMap)
+            return [];
+        return Array.from(bundleMap.values());
     }
 }
 //# sourceMappingURL=account-store.js.map

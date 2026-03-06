@@ -18,6 +18,11 @@
  */
 /** Contact approval status. */
 export type ContactStatus = 'pending' | 'approved';
+/** A stored contact entry. */
+export interface ContactEntry {
+    contactAccountId: string;
+    status: ContactStatus;
+}
 /**
  * In-memory contact store tracking first-contact approval per account.
  *
@@ -92,6 +97,12 @@ export declare class ContactStore {
      * @returns Array of pending contact account IDs.
      */
     listPendingContacts(ownerAccountId: string): string[];
+    /**
+     * List all stored contacts for an owner.
+     *
+     * Returns both pending and approved contacts in insertion order.
+     */
+    listContacts(ownerAccountId: string): ContactEntry[];
     /**
      * Evaluate the first-contact autonomy policy for a message.
      *

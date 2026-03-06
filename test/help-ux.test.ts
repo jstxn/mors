@@ -51,7 +51,9 @@ describe('CLI help UX regressions', () => {
   });
 
   const helpCommands: string[][] = [
+    ['key-exchange', '--help'],
     ['login', '--help'],
+    ['start', '--help'],
     ['send', '--help'],
     ['onboard', '--help'],
     ['status', '--help'],
@@ -88,6 +90,17 @@ describe('CLI help UX regressions', () => {
     expect(result.exitCode).toBe(0);
     expect(combined).toContain('mors login --invite-token <token>');
     expect(combined).toContain('MORS_INVITE_TOKEN');
+  });
+
+  it('--help documents the key-exchange command family', () => {
+    const result = runCli(['--help'], { configDir: tempConfigDir });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.exitCode).toBe(0);
+    expect(combined).toContain('Key Exchange:');
+    expect(combined).toContain('mors key-exchange offer [--json]');
+    expect(combined).toContain('mors key-exchange accept --bundle <json|-> [--json]');
+    expect(combined).toContain('mors key-exchange list [--json]');
   });
 
   it('setup-shell --help --json does not prompt interactively', () => {

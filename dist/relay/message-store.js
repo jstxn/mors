@@ -92,7 +92,7 @@ export class RelayMessageStore {
      * @returns A RelaySendResult with the message and whether it was newly created.
      */
     send(senderId, senderLogin, options) {
-        const { recipientId, body, subject, inReplyTo, dedupeKey } = options;
+        const { recipientId, body, subject, inReplyTo, dedupeKey, senderDeviceId } = options;
         // Check dedupe index first — if this key was already used by this sender,
         // verify context compatibility before returning the canonical message.
         // Incompatible reuse (different recipient, thread, or reply-parent) is rejected.
@@ -137,6 +137,7 @@ export class RelayMessageStore {
             thread_id: threadId,
             in_reply_to: inReplyTo ?? null,
             sender_id: senderId,
+            sender_device_id: senderDeviceId ?? null,
             sender_login: senderLogin,
             recipient_id: recipientId,
             body,
@@ -387,6 +388,7 @@ export class RelayMessageStore {
             thread_id: message.thread_id,
             in_reply_to: message.in_reply_to,
             sender_id: message.sender_id,
+            sender_device_id: message.sender_device_id,
             recipient_id: message.recipient_id,
             timestamp: new Date().toISOString(),
         };

@@ -22,6 +22,12 @@
 /** Contact approval status. */
 export type ContactStatus = 'pending' | 'approved';
 
+/** A stored contact entry. */
+export interface ContactEntry {
+  contactAccountId: string;
+  status: ContactStatus;
+}
+
 // ── Contact Store ────────────────────────────────────────────────────
 
 /**
@@ -137,6 +143,21 @@ export class ContactStore {
       }
     }
     return pending;
+  }
+
+  /**
+   * List all stored contacts for an owner.
+   *
+   * Returns both pending and approved contacts in insertion order.
+   */
+  listContacts(ownerAccountId: string): ContactEntry[] {
+    const ownerContacts = this.contacts.get(ownerAccountId);
+    if (!ownerContacts) return [];
+
+    return Array.from(ownerContacts.entries()).map(([contactAccountId, status]) => ({
+      contactAccountId,
+      status,
+    }));
   }
 
   /**

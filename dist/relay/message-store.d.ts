@@ -26,6 +26,8 @@ export interface RelayMessage {
     in_reply_to: string | null;
     /** Sender account ID (from auth principal). */
     sender_id: string;
+    /** Sender device ID (from auth principal), if known. */
+    sender_device_id: string | null;
     /** Sender display name (informational). */
     sender_login: string;
     /** Recipient account ID. */
@@ -47,6 +49,8 @@ export interface RelayMessage {
 }
 /** Options for sending a message via relay. */
 export interface RelaySendOptions {
+    /** Sender device ID derived from the authenticated principal. */
+    senderDeviceId?: string;
     /** Recipient account ID. */
     recipientId: string;
     /** Message body (markdown). */
@@ -103,6 +107,8 @@ export interface RelayStreamEvent {
     in_reply_to: string | null;
     /** Sender account ID. */
     sender_id: string;
+    /** Sender device ID, if known. */
+    sender_device_id: string | null;
     /** Recipient account ID. */
     recipient_id: string;
     /** ISO-8601 timestamp of when the event occurred. */

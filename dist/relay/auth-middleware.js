@@ -52,7 +52,7 @@ function isWellFormedMorsSessionToken(token) {
 }
 // ── Public routes (no auth required) ─────────────────────────────────
 /** Routes that are publicly accessible without authentication. */
-const PUBLIC_ROUTES = new Set(['/health']);
+const PUBLIC_ROUTES = new Set(['/health', '/auth/signup']);
 /** Route path prefixes that are publicly accessible (matches path before query string). */
 const PUBLIC_ROUTE_PREFIXES = ['/.well-known/agent-card.json'];
 /**

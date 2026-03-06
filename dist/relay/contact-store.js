@@ -127,6 +127,20 @@ export class ContactStore {
         return pending;
     }
     /**
+     * List all stored contacts for an owner.
+     *
+     * Returns both pending and approved contacts in insertion order.
+     */
+    listContacts(ownerAccountId) {
+        const ownerContacts = this.contacts.get(ownerAccountId);
+        if (!ownerContacts)
+            return [];
+        return Array.from(ownerContacts.entries()).map(([contactAccountId, status]) => ({
+            contactAccountId,
+            status,
+        }));
+    }
+    /**
      * Evaluate the first-contact autonomy policy for a message.
      *
      * Returns a policy result indicating:

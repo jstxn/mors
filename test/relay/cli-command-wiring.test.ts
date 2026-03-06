@@ -398,7 +398,7 @@ describe('CLI fallback guidance when remote prerequisites absent', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('send --remote without MORS_RELAY_BASE_URL fails with actionable guidance', async () => {
+  it('send --remote without explicit relay env still checks hosted-default secure prerequisites', async () => {
     markAuthEnabled(tempDir);
     saveSession(tempDir, makeSession());
 
@@ -415,8 +415,8 @@ describe('CLI fallback guidance when remote prerequisites absent', () => {
     expect(result.exitCode).not.toBe(0);
     const parsed = JSON.parse(result.stdout);
     expect(parsed.status).toBe('error');
-    expect(parsed.error).toBe('remote_unavailable');
-    expect(parsed.message).toContain('MORS_RELAY_BASE_URL');
+    expect(parsed.error).toBe('device_not_bootstrapped');
+    expect(parsed.message).toContain('mors init');
   });
 
   it('send --remote without authenticated session fails with login guidance', async () => {

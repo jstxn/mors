@@ -75,6 +75,7 @@ export interface RelayMessageResponse {
     thread_id: string;
     in_reply_to: string | null;
     sender_id: string;
+    sender_device_id: string | null;
     sender_login: string;
     recipient_id: string;
     body: string;
@@ -84,6 +85,24 @@ export interface RelayMessageResponse {
     acked_at: string | null;
     created_at: string;
     updated_at: string;
+}
+/** Public device bundle metadata as returned by the relay device directory. */
+export interface RelayDeviceBundleResponse {
+    account_id: string;
+    device_id: string;
+    fingerprint: string;
+    x25519_public_key: string;
+    ed25519_public_key: string;
+    created_at: string;
+    published_at: string;
+}
+/** Device bundle payload sent by the client for publication. */
+export interface PublishDeviceBundleOptions {
+    deviceId: string;
+    fingerprint: string;
+    x25519PublicKey: string;
+    ed25519PublicKey: string;
+    createdAt: string;
 }
 /** Result of a send operation. */
 export interface SendResult {
@@ -201,6 +220,16 @@ export declare class RelayClient {
      * Ack a message by ID with transient failure retry.
      */
     ack(messageId: string): Promise<AckResult>;
+    /**
+     * Publish the current device's public key bundle to the relay.
+     */
+    publishDeviceBundle(bundle: PublishDeviceBundleOptions): Promise<RelayDeviceBundleResponse>;
+    /**
+     * Fetch a peer device's public key bundle from the relay device directory.
+     *
+     * Returns null when the relay reports the device bundle is not available.
+     */
+    fetchDeviceBundle(accountId: string, deviceId: string): Promise<RelayDeviceBundleResponse | null>;
     /**
      * Send an encrypted message via the relay.
      *

@@ -89,6 +89,7 @@ export interface RelayMessageResponse {
   thread_id: string;
   in_reply_to: string | null;
   sender_id: string;
+  sender_device_id: string | null;
   sender_login: string;
   recipient_id: string;
   body: string;
@@ -98,6 +99,26 @@ export interface RelayMessageResponse {
   acked_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Public device bundle metadata as returned by the relay device directory. */
+export interface RelayDeviceBundleResponse {
+  account_id: string;
+  device_id: string;
+  fingerprint: string;
+  x25519_public_key: string;
+  ed25519_public_key: string;
+  created_at: string;
+  published_at: string;
+}
+
+/** Device bundle payload sent by the client for publication. */
+export interface PublishDeviceBundleOptions {
+  deviceId: string;
+  fingerprint: string;
+  x25519PublicKey: string;
+  ed25519PublicKey: string;
+  createdAt: string;
 }
 
 /** Result of a send operation. */
@@ -334,6 +355,46 @@ export class RelayClient {
     };
   }
 
+  /**
+   * Publish the current device's public key bundle to the relay.
+   */
+  async publishDeviceBundle(
+    bundle: PublishDeviceBundleOptions
+  ): Promise<RelayDeviceBundleResponse> {
+    const response = await this.requestWithRetry('PUT', '/accounts/me/device-bundle', {
+      device_id: bundle.deviceId,
+      fingerprint: bundle.fingerprint,
+      x25519_public_key: bundle.x25519PublicKey,
+      ed25519_public_key: bundle.ed25519PublicKey,
+      created_at: bundle.createdAt,
+    });
+
+    return (await response.json()) as RelayDeviceBundleResponse;
+  }
+
+  /**
+   * Fetch a peer device's public key bundle from the relay device directory.
+   *
+   * Returns null when the relay reports the device bundle is not available.
+   */
+  async fetchDeviceBundle(
+    accountId: string,
+    deviceId: string
+  ): Promise<RelayDeviceBundleResponse | null> {
+    try {
+      const response = await this.requestWithRetry(
+        'GET',
+        `/accounts/${encodeURIComponent(accountId)}/device-bundles/${encodeURIComponent(deviceId)}`
+      );
+      return (await response.json()) as RelayDeviceBundleResponse;
+    } catch (err: unknown) {
+      if (err instanceof RelayClientError && err.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
   // ── E2EE Transport Integration ─────────────────────────────────────
 
   /**
@@ -455,6 +516,7 @@ export class RelayClient {
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${this.token}`,
+          Connection: 'close',
         };
 
         const controller = new AbortController();
@@ -582,6 +644,7 @@ export class RelayClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${this.token}`,
+      Connection: 'close',
     };
 
     const response = await this.fetchFn(`${this.baseUrl}/messages`, {

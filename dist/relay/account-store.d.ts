@@ -58,6 +58,23 @@ export interface DeviceRegistration {
     /** ISO-8601 timestamp of device registration. */
     registeredAt: string;
 }
+/** Public device bundle metadata published to the relay for peer discovery. */
+export interface PublishedDeviceBundle {
+    /** Owning account ID. */
+    accountId: string;
+    /** Device identifier. */
+    deviceId: string;
+    /** Device fingerprint for display/verification. */
+    fingerprint: string;
+    /** Hex-encoded X25519 public key. */
+    x25519PublicKey: string;
+    /** Hex-encoded Ed25519 public key. */
+    ed25519PublicKey: string;
+    /** Original device key creation timestamp. */
+    createdAt: string;
+    /** ISO-8601 timestamp of relay publication. */
+    publishedAt: string;
+}
 /**
  * Normalize a handle string by trimming whitespace and lowercasing.
  *
@@ -99,6 +116,8 @@ export declare class AccountStore {
     private readonly handleToAccountId;
     /** Map from account ID to its registered device identities (VAL-AUTH-009). */
     private readonly devicesByAccountId;
+    /** Map from account ID to published public device bundles by device ID. */
+    private readonly deviceBundlesByAccountId;
     /**
      * Register an account with a handle and profile.
      *
@@ -158,5 +177,33 @@ export declare class AccountStore {
      * @returns Array of device registrations.
      */
     listDevices(accountId: string): DeviceRegistration[];
+    /**
+     * Publish or update a public device bundle for an account.
+     *
+     * Publication is idempotent per (accountId, deviceId). Re-publishing the same
+     * device updates its public metadata and refreshes the publishedAt timestamp.
+     *
+     * @param accountId - Owning account ID.
+     * @param bundle - Public device metadata to publish.
+     * @returns The canonical published bundle stored by the relay.
+     */
+    publishDeviceBundle(accountId: string, bundle: Omit<PublishedDeviceBundle, 'accountId' | 'publishedAt'>): PublishedDeviceBundle;
+    /**
+     * Look up a published device bundle for a specific account/device pair.
+     *
+     * @param accountId - Owning account ID.
+     * @param deviceId - Device identifier.
+     * @returns The published bundle, or null when none exists.
+     */
+    getPublishedDeviceBundle(accountId: string, deviceId: string): PublishedDeviceBundle | null;
+    /**
+     * List all published device bundles for an account.
+     *
+     * Results preserve publication insertion order.
+     *
+     * @param accountId - Owning account ID.
+     * @returns Published bundles for the account.
+     */
+    listPublishedDeviceBundles(accountId: string): PublishedDeviceBundle[];
 }
 //# sourceMappingURL=account-store.d.ts.map

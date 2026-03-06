@@ -35,6 +35,14 @@ export {
 } from './key-exchange.js';
 
 export {
+  ensureSessionFromPeerBundle,
+  ensureSessionForInboundMessage,
+  type PeerDeviceBundle,
+  type InboundAutoSessionMessage,
+  type PeerBundleResolver,
+} from './auto-session.js';
+
+export {
   encryptMessage,
   decryptMessage,
   decryptMessageStrict,

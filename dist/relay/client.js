@@ -177,6 +177,36 @@ export class RelayClient {
             firstAck: body['first_ack'],
         };
     }
+    /**
+     * Publish the current device's public key bundle to the relay.
+     */
+    async publishDeviceBundle(bundle) {
+        const response = await this.requestWithRetry('PUT', '/accounts/me/device-bundle', {
+            device_id: bundle.deviceId,
+            fingerprint: bundle.fingerprint,
+            x25519_public_key: bundle.x25519PublicKey,
+            ed25519_public_key: bundle.ed25519PublicKey,
+            created_at: bundle.createdAt,
+        });
+        return (await response.json());
+    }
+    /**
+     * Fetch a peer device's public key bundle from the relay device directory.
+     *
+     * Returns null when the relay reports the device bundle is not available.
+     */
+    async fetchDeviceBundle(accountId, deviceId) {
+        try {
+            const response = await this.requestWithRetry('GET', `/accounts/${encodeURIComponent(accountId)}/device-bundles/${encodeURIComponent(deviceId)}`);
+            return (await response.json());
+        }
+        catch (err) {
+            if (err instanceof RelayClientError && err.statusCode === 404) {
+                return null;
+            }
+            throw err;
+        }
+    }
     // ── E2EE Transport Integration ─────────────────────────────────────
     /**
      * Send an encrypted message via the relay.
@@ -281,6 +311,7 @@ export class RelayClient {
                 const headers = {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${this.token}`,
+                    Connection: 'close',
                 };
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMs);
@@ -391,6 +422,7 @@ export class RelayClient {
         const headers = {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.token}`,
+            Connection: 'close',
         };
         const response = await this.fetchFn(`${this.baseUrl}/messages`, {
             method: 'POST',

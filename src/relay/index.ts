@@ -17,6 +17,7 @@ import { createNativeTokenVerifier } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
 import { AccountStore } from './account-store.js';
 import { ContactStore } from './contact-store.js';
+import { generateSessionToken } from '../auth/native.js';
 
 /**
  * Create the production server options including all wired dependencies.
@@ -42,6 +43,12 @@ export function createProductionServerOptions(): RelayServerOptions {
     );
   }
   const tokenVerifier = createNativeTokenVerifier(signingKey);
+  const sessionTokenIssuer = (accountId: string, deviceId: string) =>
+    generateSessionToken({
+      accountId,
+      deviceId,
+      signingKey,
+    });
 
   // Wire the in-memory message store for async messaging routes.
   // This ensures /messages, /inbox, and /messages/:id routes are active
@@ -70,6 +77,7 @@ export function createProductionServerOptions(): RelayServerOptions {
 
   return {
     tokenVerifier,
+    sessionTokenIssuer,
     participantStore,
     messageStore,
     accountStore,

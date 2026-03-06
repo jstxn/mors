@@ -32,6 +32,8 @@ export interface RelayMessage {
   in_reply_to: string | null;
   /** Sender account ID (from auth principal). */
   sender_id: string;
+  /** Sender device ID (from auth principal), if known. */
+  sender_device_id: string | null;
   /** Sender display name (informational). */
   sender_login: string;
   /** Recipient account ID. */
@@ -54,6 +56,8 @@ export interface RelayMessage {
 
 /** Options for sending a message via relay. */
 export interface RelaySendOptions {
+  /** Sender device ID derived from the authenticated principal. */
+  senderDeviceId?: string;
   /** Recipient account ID. */
   recipientId: string;
   /** Message body (markdown). */
@@ -122,6 +126,8 @@ export interface RelayStreamEvent {
   in_reply_to: string | null;
   /** Sender account ID. */
   sender_id: string;
+  /** Sender device ID, if known. */
+  sender_device_id: string | null;
   /** Recipient account ID. */
   recipient_id: string;
   /** ISO-8601 timestamp of when the event occurred. */
@@ -238,7 +244,7 @@ export class RelayMessageStore {
    * @returns A RelaySendResult with the message and whether it was newly created.
    */
   send(senderId: string, senderLogin: string, options: RelaySendOptions): RelaySendResult {
-    const { recipientId, body, subject, inReplyTo, dedupeKey } = options;
+    const { recipientId, body, subject, inReplyTo, dedupeKey, senderDeviceId } = options;
 
     // Check dedupe index first — if this key was already used by this sender,
     // verify context compatibility before returning the canonical message.
@@ -293,6 +299,7 @@ export class RelayMessageStore {
       thread_id: threadId,
       in_reply_to: inReplyTo ?? null,
       sender_id: senderId,
+      sender_device_id: senderDeviceId ?? null,
       sender_login: senderLogin,
       recipient_id: recipientId,
       body,
@@ -574,6 +581,7 @@ export class RelayMessageStore {
       thread_id: message.thread_id,
       in_reply_to: message.in_reply_to,
       sender_id: message.sender_id,
+      sender_device_id: message.sender_device_id,
       recipient_id: message.recipient_id,
       timestamp: new Date().toISOString(),
     };

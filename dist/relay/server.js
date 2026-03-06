@@ -15,6 +15,7 @@
  *
  * Uses Node.js built-in http module (no external framework dependency).
  */
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { isPublicRoute, extractAndVerify, extractBearerToken, send401, send403, parseConversationRoute, } from './auth-middleware.js';
 import { RelayMessageStore, RelayMessageNotFoundError, RelayUnauthorizedError, } from './message-store.js';
@@ -70,6 +71,9 @@ function parseMessageRoute(url, method) {
         return { messageId: getMatch[1], action: 'get' };
     return null;
 }
+function generateHostedAccountId() {
+    return randomBytes(16).toString('hex');
+}
 /**
  * Write an SSE event to a response stream.
  *
@@ -97,6 +101,21 @@ function sendJson(res, statusCode, body) {
         'Content-Length': Buffer.byteLength(json),
     });
     res.end(json);
+}
+function serializeDeviceBundle(bundle) {
+    return {
+        account_id: bundle.accountId,
+        device_id: bundle.deviceId,
+        fingerprint: bundle.fingerprint,
+        x25519_public_key: bundle.x25519PublicKey,
+        ed25519_public_key: bundle.ed25519PublicKey,
+        created_at: bundle.createdAt,
+        published_at: bundle.publishedAt,
+    };
+}
+function getPrimaryPublishedDeviceBundle(accountStore, accountId) {
+    const bundles = accountStore.listPublishedDeviceBundles(accountId);
+    return bundles.length > 0 ? bundles[0] : null;
 }
 // ── A2A Agent Card constants ─────────────────────────────────────────
 /** Protocol version declared in Agent Card interfaces. */
@@ -237,6 +256,7 @@ function handleAgentCard(url, res, config, accountStore) {
 export function createRelayServer(config, options) {
     const logger = options?.logger ?? console.log;
     const tokenVerifier = options?.tokenVerifier;
+    const sessionTokenIssuer = options?.sessionTokenIssuer;
     const participantStore = options?.participantStore;
     const onConversationAccess = options?.onConversationAccess;
     const messageStore = options?.messageStore;
@@ -259,6 +279,85 @@ export function createRelayServer(config, options) {
         if (isPublicRoute(url)) {
             // Parse the path (strip query string) to dispatch to the right handler
             const pathOnly = url.split('?')[0];
+            // Route: POST /auth/signup (hosted self-serve account creation)
+            if (pathOnly === '/auth/signup') {
+                if (method !== 'POST') {
+                    sendJson(res, 405, { error: 'method_not_allowed', allowed: ['POST'] });
+                    return;
+                }
+                if (!accountStore || !sessionTokenIssuer) {
+                    sendJson(res, 503, {
+                        error: 'signup_unavailable',
+                        detail: 'Hosted signup is not configured on this relay.',
+                    });
+                    return;
+                }
+                const body = await readJsonBody(req);
+                if (!body) {
+                    sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+                    return;
+                }
+                const handle = body['handle'];
+                const displayName = body['display_name'];
+                const deviceId = body['device_id'];
+                if (typeof handle !== 'string' || handle.trim().length === 0) {
+                    sendJson(res, 400, {
+                        error: 'validation_error',
+                        detail: 'handle is required and must be a non-empty string.',
+                    });
+                    return;
+                }
+                if (typeof displayName !== 'string' || displayName.trim().length === 0) {
+                    sendJson(res, 400, {
+                        error: 'validation_error',
+                        detail: 'display_name is required and must be a non-empty string.',
+                    });
+                    return;
+                }
+                if (typeof deviceId !== 'string' || deviceId.trim().length === 0) {
+                    sendJson(res, 400, {
+                        error: 'validation_error',
+                        detail: 'device_id is required and must be a non-empty string.',
+                    });
+                    return;
+                }
+                try {
+                    const accountId = generateHostedAccountId();
+                    const trimmedDeviceId = deviceId.trim();
+                    const profile = accountStore.register({
+                        accountId,
+                        handle,
+                        displayName: displayName.trim(),
+                    });
+                    accountStore.registerDevice(accountId, trimmedDeviceId);
+                    const accessToken = sessionTokenIssuer(accountId, trimmedDeviceId);
+                    sendJson(res, 201, {
+                        access_token: accessToken,
+                        token_type: 'bearer',
+                        account_id: profile.accountId,
+                        handle: profile.handle,
+                        display_name: profile.displayName,
+                        device_id: trimmedDeviceId,
+                        created_at: profile.createdAt,
+                    });
+                    return;
+                }
+                catch (error) {
+                    if (error instanceof InvalidHandleError) {
+                        sendJson(res, 400, { error: 'invalid_handle', detail: error.message });
+                        return;
+                    }
+                    if (error instanceof DuplicateHandleError) {
+                        sendJson(res, 409, { error: 'duplicate_handle', detail: error.message });
+                        return;
+                    }
+                    if (error instanceof ImmutableHandleError) {
+                        sendJson(res, 409, { error: 'immutable_handle', detail: error.message });
+                        return;
+                    }
+                    throw error;
+                }
+            }
             // Route: GET /.well-known/agent-card.json (A2A Agent Card discovery)
             // Public endpoint for agent discovery per A2A protocol.
             // Covers: VAL-A2A-001, VAL-A2A-002, VAL-A2A-003, VAL-A2A-004, VAL-A2A-005
@@ -567,6 +666,83 @@ export function createRelayServer(config, options) {
             });
             return;
         }
+        // Route: PUT /accounts/me/device-bundle (publish public device bundle metadata)
+        if (url === '/accounts/me/device-bundle' && method === 'PUT' && accountStore) {
+            const body = await readJsonBody(req);
+            if (!body) {
+                sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+                return;
+            }
+            const deviceId = body['device_id'];
+            const fingerprint = body['fingerprint'];
+            const x25519PublicKey = body['x25519_public_key'];
+            const ed25519PublicKey = body['ed25519_public_key'];
+            const createdAt = body['created_at'];
+            if (typeof deviceId !== 'string' || deviceId.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'device_id is required and must be a non-empty string.',
+                });
+                return;
+            }
+            if (deviceId !== principal.deviceId) {
+                send403(res, 'Device identity mismatch. device_id must match the authenticated device.');
+                return;
+            }
+            if (typeof fingerprint !== 'string' || fingerprint.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'fingerprint is required and must be a non-empty string.',
+                });
+                return;
+            }
+            if (typeof x25519PublicKey !== 'string' || x25519PublicKey.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'x25519_public_key is required and must be a non-empty string.',
+                });
+                return;
+            }
+            if (typeof ed25519PublicKey !== 'string' || ed25519PublicKey.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'ed25519_public_key is required and must be a non-empty string.',
+                });
+                return;
+            }
+            if (typeof createdAt !== 'string' || createdAt.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'created_at is required and must be a non-empty string.',
+                });
+                return;
+            }
+            const published = accountStore.publishDeviceBundle(principal.accountId, {
+                deviceId: principal.deviceId,
+                fingerprint: fingerprint.trim(),
+                x25519PublicKey: x25519PublicKey.trim().toLowerCase(),
+                ed25519PublicKey: ed25519PublicKey.trim().toLowerCase(),
+                createdAt: createdAt.trim(),
+            });
+            sendJson(res, 200, serializeDeviceBundle(published));
+            return;
+        }
+        const deviceBundleMatch = url.match(/^\/accounts\/([^/]+)\/device-bundles\/([^/]+)$/);
+        if (deviceBundleMatch && method === 'GET' && accountStore) {
+            const [, accountIdRaw, deviceIdRaw] = deviceBundleMatch;
+            const accountId = decodeURIComponent(accountIdRaw);
+            const deviceId = decodeURIComponent(deviceIdRaw);
+            const bundle = accountStore.getPublishedDeviceBundle(accountId, deviceId);
+            if (!bundle) {
+                sendJson(res, 404, {
+                    error: 'not_found',
+                    detail: `No published device bundle found for account "${accountId}" and device "${deviceId}".`,
+                });
+                return;
+            }
+            sendJson(res, 200, serializeDeviceBundle(bundle));
+            return;
+        }
         // ── Contact / first-contact policy routes (require contactStore) ──
         // These routes manage the first-contact autonomy policy:
         // - POST /contacts/status — get contact approval status
@@ -598,6 +774,53 @@ export function createRelayServer(config, options) {
             });
             return;
         }
+        // Route: POST /contacts/add (resolve handle and add contact)
+        if (url === '/contacts/add' && method === 'POST' && contactStore && accountStore) {
+            const body = await readJsonBody(req);
+            if (!body) {
+                sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
+                return;
+            }
+            const handle = body['handle'];
+            if (typeof handle !== 'string' || handle.trim().length === 0) {
+                sendJson(res, 400, {
+                    error: 'validation_error',
+                    detail: 'handle is required and must be a non-empty string.',
+                });
+                return;
+            }
+            const normalizedHandle = normalizeHandle(handle);
+            const profile = accountStore.getByHandle(normalizedHandle);
+            if (!profile) {
+                sendJson(res, 404, {
+                    error: 'not_found',
+                    detail: `No account exists for handle "${normalizedHandle}".`,
+                });
+                return;
+            }
+            if (profile.accountId === principal.accountId) {
+                sendJson(res, 409, {
+                    error: 'self_contact',
+                    detail: 'You cannot add your own handle as a contact.',
+                });
+                return;
+            }
+            contactStore.approveContact(principal.accountId, profile.accountId);
+            const deviceBundle = getPrimaryPublishedDeviceBundle(accountStore, profile.accountId);
+            sendJson(res, 200, {
+                owner_account_id: principal.accountId,
+                contact: {
+                    account_id: profile.accountId,
+                    handle: profile.handle,
+                    display_name: profile.displayName,
+                    created_at: profile.createdAt,
+                    status: 'approved',
+                    autonomy_allowed: true,
+                    ...(deviceBundle ? { device_bundle: serializeDeviceBundle(deviceBundle) } : {}),
+                },
+            });
+            return;
+        }
         // Route: POST /contacts/approve (approve a contact for autonomous actions)
         if (url === '/contacts/approve' && method === 'POST' && contactStore) {
             const body = await readJsonBody(req);
@@ -622,12 +845,59 @@ export function createRelayServer(config, options) {
             });
             return;
         }
+        // Route: GET /contacts (list all contacts with enriched profile metadata)
+        if (url === '/contacts' && method === 'GET' && contactStore && accountStore) {
+            const contacts = contactStore
+                .listContacts(principal.accountId)
+                .map((entry) => {
+                const profile = accountStore.getByAccountId(entry.contactAccountId);
+                if (!profile)
+                    return null;
+                const deviceBundle = getPrimaryPublishedDeviceBundle(accountStore, profile.accountId);
+                return {
+                    account_id: profile.accountId,
+                    handle: profile.handle,
+                    display_name: profile.displayName,
+                    created_at: profile.createdAt,
+                    status: entry.status,
+                    autonomy_allowed: entry.status === 'approved',
+                    ...(deviceBundle ? { device_bundle: serializeDeviceBundle(deviceBundle) } : {}),
+                };
+            })
+                .filter((entry) => entry !== null);
+            sendJson(res, 200, {
+                owner_account_id: principal.accountId,
+                count: contacts.length,
+                contacts,
+            });
+            return;
+        }
         // Route: GET /contacts/pending (list pending contacts)
         if (url === '/contacts/pending' && method === 'GET' && contactStore) {
             const pending = contactStore.listPendingContacts(principal.accountId);
+            const pendingContacts = accountStore
+                ? pending
+                    .map((accountId) => {
+                    const profile = accountStore.getByAccountId(accountId);
+                    if (!profile)
+                        return null;
+                    const deviceBundle = getPrimaryPublishedDeviceBundle(accountStore, profile.accountId);
+                    return {
+                        account_id: profile.accountId,
+                        handle: profile.handle,
+                        display_name: profile.displayName,
+                        created_at: profile.createdAt,
+                        status: 'pending',
+                        autonomy_allowed: false,
+                        ...(deviceBundle ? { device_bundle: serializeDeviceBundle(deviceBundle) } : {}),
+                    };
+                })
+                    .filter((entry) => entry !== null)
+                : [];
             sendJson(res, 200, {
                 owner_account_id: principal.accountId,
                 pending,
+                ...(pendingContacts.length > 0 ? { pending_contacts: pendingContacts } : {}),
                 count: pending.length,
             });
             return;
@@ -676,6 +946,7 @@ export function createRelayServer(config, options) {
                     subject: typeof subject === 'string' ? subject : undefined,
                     inReplyTo: typeof inReplyTo === 'string' ? inReplyTo : undefined,
                     dedupeKey: typeof dedupeKey === 'string' ? dedupeKey : undefined,
+                    senderDeviceId: principal.deviceId,
                 });
             }
             catch (err) {

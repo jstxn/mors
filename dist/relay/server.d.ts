@@ -22,6 +22,8 @@ import { AccountStore } from './account-store.js';
 import { ContactStore } from './contact-store.js';
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
+/** Issues relay-valid session tokens for hosted signup. */
+export type SessionTokenIssuer = (accountId: string, deviceId: string) => string;
 /** Options for creating the relay server. */
 export interface RelayServerOptions {
     /** Custom logger. Defaults to console.log. */
@@ -31,6 +33,11 @@ export interface RelayServerOptions {
      * routes return 401 (no fail-open path).
      */
     tokenVerifier?: TokenVerifier;
+    /**
+     * Session token issuer for hosted self-serve signup.
+     * When provided alongside accountStore, enables POST /auth/signup.
+     */
+    sessionTokenIssuer?: SessionTokenIssuer;
     /**
      * Participant store for object-level authorization on conversation routes.
      * Fail-closed: if not provided, conversation routes return 403.
