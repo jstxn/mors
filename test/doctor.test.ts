@@ -316,7 +316,7 @@ describe('VAL-LAUNCH-008: doctor command failure detection', () => {
     const relayCheck = parsed.checks.find((c: { name: string }) => c.name === 'relay_config');
     expect(relayCheck).toBeDefined();
     expect(relayCheck.status).toBe('pass');
-    expect(relayCheck.message).toContain('https://relay.mors.app');
+    expect(relayCheck.message).toContain('https://mors.fly.dev');
   });
 
   // ── Multiple failures ────────────────────────────────────────────

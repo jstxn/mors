@@ -1,4 +1,4 @@
-export declare const DEFAULT_HOSTED_RELAY_BASE_URL = "https://relay.mors.app";
+export declare const DEFAULT_HOSTED_RELAY_BASE_URL = "https://mors.fly.dev";
 export interface ClientSettings {
     relayMode?: 'hosted' | 'custom';
     relayBaseUrl?: string;

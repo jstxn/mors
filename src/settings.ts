@@ -4,7 +4,7 @@ import { join } from 'node:path';
 const DIR_MODE = 0o700;
 const SETTINGS_FILE = 'settings.json';
 
-export const DEFAULT_HOSTED_RELAY_BASE_URL = 'https://relay.mors.app';
+export const DEFAULT_HOSTED_RELAY_BASE_URL = 'https://mors.fly.dev';
 
 export interface ClientSettings {
   relayMode?: 'hosted' | 'custom';

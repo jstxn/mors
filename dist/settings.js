@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { join } from 'node:path';
 const DIR_MODE = 0o700;
 const SETTINGS_FILE = 'settings.json';
-export const DEFAULT_HOSTED_RELAY_BASE_URL = 'https://relay.mors.app';
+export const DEFAULT_HOSTED_RELAY_BASE_URL = 'https://mors.fly.dev';
 export function getSettingsPath(configDir) {
     return join(configDir, SETTINGS_FILE);
 }

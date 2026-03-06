@@ -119,7 +119,7 @@ describe('mors start', () => {
     const screen = buildStartScreen(
       {
         handle: 'alice',
-        relayBaseUrl: 'https://relay.mors.app',
+        relayBaseUrl: 'https://mors.fly.dev',
         status: 'Ready to message',
         contacts: [
           {
@@ -311,7 +311,7 @@ describe('mors start', () => {
 
       expect(error.toString()).toBe('');
       expect(process.exitCode ?? 0).toBe(0);
-      expect(settings).toContain('https://relay.mors.app');
+      expect(settings).toContain('https://mors.fly.dev');
       expect(session).toContain('"accountId": "acct-alice"');
       expect(profile).toContain('"handle": "alice"');
       expect(transcript).toContain('Signed in as @alice (Alice Agent).');
