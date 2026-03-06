@@ -26,7 +26,7 @@ import { generateSessionToken } from '../auth/native.js';
  *
  * @returns RelayServerOptions with tokenVerifier, participantStore, and messageStore.
  */
-export function createProductionServerOptions() {
+export function createProductionServerOptions(options) {
     // Wire production auth dependencies — fail-closed by design.
     // Token verification uses HMAC-signed native session tokens.
     // The signing key MUST be explicitly configured — an empty/missing key
@@ -47,16 +47,16 @@ export function createProductionServerOptions() {
     // Wire the in-memory message store for async messaging routes.
     // This ensures /messages, /inbox, and /messages/:id routes are active
     // in the production relay, not only in test-only server construction.
-    const messageStore = new RelayMessageStore();
+    const messageStore = options?.persistence?.messageStore ?? new RelayMessageStore();
     // Wire the in-memory account store for handle registration and profile management.
     // Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
-    const accountStore = new AccountStore();
+    const accountStore = options?.persistence?.accountStore ?? new AccountStore();
     // Wire the in-memory contact store for first-contact autonomy policy.
     // Ensures /contacts/* routes are active and messages are annotated with
     // first_contact / autonomy_allowed fields in the production relay.
     // Delivery always succeeds; autonomous actions are gated until approval.
     // Covers VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013.
-    const contactStore = new ContactStore();
+    const contactStore = options?.persistence?.contactStore ?? new ContactStore();
     // Participant store backed by the message store's conversation tracking.
     // When a message is sent, both sender and recipient are registered as
     // participants in the thread, enabling object-level authorization checks.
@@ -83,7 +83,9 @@ async function main() {
         console.error(`relay bootstrap failed: services not ready: ${failed.join(', ')}`);
         process.exit(1);
     }
-    const serverOptions = createProductionServerOptions();
+    const serverOptions = createProductionServerOptions({
+        persistence: bootstrap.persistence,
+    });
     const server = createRelayServer(config, serverOptions);
     // Graceful shutdown handler
     const shutdown = async (signal) => {

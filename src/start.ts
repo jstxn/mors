@@ -68,6 +68,15 @@ interface StartRuntime {
   addContact(relayBaseUrl: string, token: string, handle: string): Promise<HostedContact>;
   listPending(relayBaseUrl: string, token: string): Promise<HostedContact[]>;
   approveContact(relayBaseUrl: string, token: string, accountId: string): Promise<void>;
+  getHostedProfile?(
+    relayBaseUrl: string,
+    token: string
+  ): Promise<{ accountId: string; handle: string; displayName: string } | null>;
+  registerHostedProfile?(
+    relayBaseUrl: string,
+    token: string,
+    profile: { handle: string; displayName: string }
+  ): Promise<void>;
   listInbox(relayBaseUrl: string, token: string): Promise<RelayMessageResponse[]>;
   publishDeviceBundle?(
     relayBaseUrl: string,
@@ -139,6 +148,8 @@ const DEFAULT_RUNTIME: StartRuntime = {
   addContact: addHostedContact,
   listPending: listPendingContacts,
   approveContact: approveHostedContact,
+  getHostedProfile: fetchHostedProfile,
+  registerHostedProfile: registerHostedProfile,
   async listInbox(relayBaseUrl: string, token: string): Promise<RelayMessageResponse[]> {
     const response = await fetch(`${relayBaseUrl}/inbox`, {
       headers: {
@@ -371,6 +382,7 @@ async function ensureIdentityReady(
   const existingProfile = loadProfile(configDir);
 
   if (existingSession && existingProfile) {
+    await reconcileHostedProfile(configDir, relayBaseUrl, existingSession, existingProfile, runtime);
     writeLine(output, `Welcome back, @${existingProfile.handle}.`);
     return {
       configDir,
@@ -422,6 +434,159 @@ async function ensureIdentityReady(
     session,
     profile,
   };
+}
+
+async function reconcileHostedProfile(
+  configDir: string,
+  relayBaseUrl: string,
+  session: AuthSession,
+  profile: AccountProfileLocal,
+  runtime: StartRuntime
+): Promise<void> {
+  const getHostedProfile = runtime.getHostedProfile ?? fetchHostedProfile;
+  const registerProfile = runtime.registerHostedProfile ?? registerHostedProfile;
+
+  const remoteProfile = await getHostedProfile(relayBaseUrl, session.accessToken);
+  if (remoteProfile) {
+    return;
+  }
+
+  await registerProfile(relayBaseUrl, session.accessToken, {
+    handle: profile.handle,
+    displayName: profile.displayName,
+  });
+
+  saveProfile(configDir, {
+    ...profile,
+    createdAt: profile.createdAt,
+  });
+}
+
+async function fetchHostedProfile(
+  relayBaseUrl: string,
+  token: string
+): Promise<{ accountId: string; handle: string; displayName: string } | null> {
+  const response = await requestHostedJson('GET', relayBaseUrl, '/accounts/me', token);
+
+  if (response.statusCode === 404 && response.body['error'] === 'not_onboarded') {
+    return null;
+  }
+
+  if (response.statusCode === 401) {
+    throw new Error(
+      'Your hosted session has expired or been revoked. Run "mors logout" and then "mors start" to sign in again.'
+    );
+  }
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const detail =
+      typeof response.body['detail'] === 'string'
+        ? response.body['detail']
+        : `Hosted profile lookup failed with status ${response.statusCode}.`;
+    throw new Error(detail);
+  }
+
+  const accountId =
+    typeof response.body['account_id'] === 'string' ? response.body['account_id'] : undefined;
+  const handle = typeof response.body['handle'] === 'string' ? response.body['handle'] : undefined;
+  const displayName =
+    typeof response.body['display_name'] === 'string'
+      ? response.body['display_name']
+      : undefined;
+
+  if (!accountId || !handle || !displayName) {
+    throw new Error('Hosted profile lookup returned an incomplete response.');
+  }
+
+  return { accountId, handle, displayName };
+}
+
+async function registerHostedProfile(
+  relayBaseUrl: string,
+  token: string,
+  profile: { handle: string; displayName: string }
+): Promise<void> {
+  const response = await requestHostedJson('POST', relayBaseUrl, '/accounts/register', token, {
+    handle: profile.handle,
+    display_name: profile.displayName,
+  });
+
+  if (response.statusCode === 401) {
+    throw new Error(
+      'Your hosted session has expired or been revoked. Run "mors logout" and then "mors start" to sign in again.'
+    );
+  }
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    const detail =
+      typeof response.body['detail'] === 'string'
+        ? response.body['detail']
+        : `Hosted profile repair failed with status ${response.statusCode}.`;
+    throw new Error(detail);
+  }
+}
+
+async function requestHostedJson(
+  method: string,
+  relayBaseUrl: string,
+  pathname: string,
+  token: string,
+  body?: Record<string, unknown>
+): Promise<{ statusCode: number; body: Record<string, unknown> }> {
+  const { request: httpRequest } = await import('node:http');
+  const { request: httpsRequest } = await import('node:https');
+
+  const url = new URL(pathname, relayBaseUrl);
+  const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest;
+  const payload = body ? JSON.stringify(body) : undefined;
+
+  return new Promise((resolve, reject) => {
+    const req = doRequest(
+      url,
+      {
+        method,
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+          ...(payload
+            ? {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(payload),
+              }
+            : {}),
+          Connection: 'close',
+        },
+        timeout: 10_000,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const parsed = (() => {
+            try {
+              return JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+            } catch {
+              return {} as Record<string, unknown>;
+            }
+          })();
+          resolve({
+            statusCode: res.statusCode ?? 500,
+            body: parsed,
+          });
+        });
+      }
+    );
+
+    req.on('error', (err) => reject(err));
+    req.on('timeout', () => {
+      req.destroy(new Error(`Request timed out for ${method} ${url.pathname}`));
+    });
+
+    if (payload) {
+      req.write(payload);
+    }
+    req.end();
+  });
 }
 
 async function promptForHandle(prompt: Prompt, output: Writable): Promise<string> {

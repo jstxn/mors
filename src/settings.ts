@@ -63,3 +63,12 @@ export function resolveRelayBaseUrl(configDir: string): string {
 
   return loadClientSettings(configDir).relayBaseUrl ?? DEFAULT_HOSTED_RELAY_BASE_URL;
 }
+
+export function resolveConfiguredRelayBaseUrl(configDir: string): string | null {
+  const envRelay = process.env['MORS_RELAY_BASE_URL']?.trim();
+  if (envRelay) {
+    return envRelay;
+  }
+
+  return loadClientSettings(configDir).relayBaseUrl ?? null;
+}

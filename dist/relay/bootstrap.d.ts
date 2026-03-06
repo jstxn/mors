@@ -10,12 +10,15 @@
  * The bootstrap contract is intentionally stable so that callers do not
  * need to change when real persistence is added.
  */
+import { type RelayPersistenceContext } from './persistence.js';
 /** Logger function type matching relay server convention. */
 export type BootstrapLogger = (message: string) => void;
 /** Options for the bootstrap process. */
 export interface BootstrapOptions {
     /** Custom logger. Defaults to console.log. */
     logger?: BootstrapLogger;
+    /** Optional state file path for file-backed relay persistence. */
+    statePath?: string;
 }
 /** Status of an individual bootstrapped service. */
 export interface BootstrapServiceStatus {
@@ -30,6 +33,8 @@ export interface BootstrapResult {
     ready: boolean;
     /** Individual service initialization statuses. */
     services: BootstrapServiceStatus[];
+    /** File-backed persistence context when initialization succeeds. */
+    persistence?: RelayPersistenceContext;
 }
 /**
  * Bootstrap the relay service dependencies.

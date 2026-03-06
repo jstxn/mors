@@ -342,6 +342,134 @@ describe('CLI status token liveness (VAL-AUTH-006)', () => {
     expect(parsed.account_id).toBe('acct_12345');
   });
 
+  it('status --json verifies hosted sessions through the relay when no local signing key exists', async () => {
+    const session = makeSession({
+      accessToken: 'hosted-session-token',
+      accountId: 'acct_hosted',
+      deviceId: 'device-hosted-001',
+    });
+
+    const { server, port } = await startMockServer((req, res) => {
+      if (req.url === '/accounts/me') {
+        expect(req.headers['authorization']).toBe(`Bearer ${session.accessToken}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            account_id: session.accountId,
+            handle: 'hosted-user',
+            display_name: 'Hosted User',
+            created_at: new Date().toISOString(),
+          })
+        );
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ detail: 'not found' }));
+    });
+
+    try {
+      saveSession(tempDir, session);
+      rmSync(join(tempDir, '.signing-key'), { force: true });
+
+      const result = await runCliAsync(['status', '--json'], {
+        configDir: tempDir,
+        env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
+      });
+
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.status).toBe('authenticated');
+      expect(parsed.token_valid).toBe(true);
+      expect(parsed.account_id).toBe(session.accountId);
+      expect(parsed.device_id).toBe(session.deviceId);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('status --json gives hosted re-auth guidance when relay rejects a hosted session', async () => {
+    const { server, port } = await startMockServer((req, res) => {
+      if (req.url === '/accounts/me') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ detail: 'Invalid or expired token.' }));
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ detail: 'not found' }));
+    });
+
+    try {
+      saveSession(
+        tempDir,
+        makeSession({
+          accessToken: 'hosted-expired-token',
+          accountId: 'acct_hosted_expired',
+          deviceId: 'device-hosted-expired',
+        })
+      );
+      rmSync(join(tempDir, '.signing-key'), { force: true });
+
+      const result = await runCliAsync(['status', '--json'], {
+        configDir: tempDir,
+        env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.status).toBe('token_expired');
+      expect(parsed.token_valid).toBe(false);
+      expect(parsed.message).toContain('mors logout');
+      expect(parsed.message).toContain('mors start');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('status --json points hosted users to mors start when the relay lost their profile', async () => {
+    const { server, port } = await startMockServer((req, res) => {
+      if (req.url === '/accounts/me') {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'not_onboarded',
+            detail: 'Account has not completed onboarding.',
+          })
+        );
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ detail: 'not found' }));
+    });
+
+    try {
+      saveSession(
+        tempDir,
+        makeSession({
+          accessToken: 'hosted-profile-missing-token',
+          accountId: 'acct_hosted_missing',
+          deviceId: 'device-hosted-missing',
+        })
+      );
+      rmSync(join(tempDir, '.signing-key'), { force: true });
+
+      const result = await runCliAsync(['status', '--json'], {
+        configDir: tempDir,
+        env: { MORS_RELAY_BASE_URL: `http://127.0.0.1:${port}` },
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.status).toBe('verification_unavailable');
+      expect(parsed.message).toContain('mors start');
+      expect(parsed.message).not.toContain('mors onboard');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('status --offline --json skips liveness check and reports local session', () => {
     saveSession(tempDir, makeSession());
 

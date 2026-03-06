@@ -48,6 +48,10 @@ export class RelayUnauthorizedError extends Error {
  * Thread-safe for single-process use (Node.js event loop).
  */
 export class RelayMessageStore {
+    onMutation;
+    constructor(onMutation) {
+        this.onMutation = onMutation;
+    }
     /** All messages by ID. */
     messages = new Map();
     /** Messages by recipient_id for inbox queries. */
@@ -178,6 +182,7 @@ export class RelayMessageStore {
         // Emit stream event for the new message
         const eventType = inReplyTo ? 'reply_created' : 'message_created';
         this.emitStreamEvent(eventType, message);
+        this.onMutation?.();
         return { message, created: true };
     }
     /**
@@ -250,6 +255,7 @@ export class RelayMessageStore {
         message.updated_at = now;
         // Emit stream event for first read
         this.emitStreamEvent('message_read', message);
+        this.onMutation?.();
         return { message, firstRead: true };
     }
     /**
@@ -287,6 +293,7 @@ export class RelayMessageStore {
         message.updated_at = now;
         // Emit stream event for first ack
         this.emitStreamEvent('message_acked', message);
+        this.onMutation?.();
         return { message, firstAck: true };
     }
     /**
@@ -436,8 +443,8 @@ export class RelayMessageStore {
      * @param data - A `RelayMessageStoreSnapshot`, typically obtained via
      *   `JSON.parse(serialized)` after a restart/deploy.
      */
-    static fromSnapshot(data) {
-        const store = new RelayMessageStore();
+    static fromSnapshot(data, onMutation) {
+        const store = new RelayMessageStore(onMutation);
         // Restore messages (deep-copy each value)
         for (const [key, msg] of data.messages) {
             store.messages.set(key, { ...msg });
@@ -476,6 +483,7 @@ export class RelayMessageStore {
         this.streamListeners.clear();
         this.eventLog.length = 0;
         this.eventIdIndex.clear();
+        this.onMutation?.();
     }
 }
 //# sourceMappingURL=message-store.js.map

@@ -326,6 +326,72 @@ describe('mors start', () => {
     }
   });
 
+  it('repairs a missing hosted profile for returning users before entering the app', async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'mors-start-'));
+    const output = new MemoryWritable();
+    const error = new MemoryWritable();
+    const originalExitCode = process.exitCode;
+    const repairedProfiles: Array<{ handle: string; displayName: string }> = [];
+
+    markInitialized(configDir);
+    seedHostedSession(configDir, {
+      accountId: 'acct-returning',
+      deviceId: 'device-returning',
+      accessToken: 'token-returning',
+    });
+
+    try {
+      process.exitCode = undefined;
+
+      await runStartCommand([], {
+        configDir,
+        output,
+        error,
+        prompt: new ScriptedPrompt(['7']),
+        runtime: {
+          async signup() {
+            throw new Error('signup should not run for returning users');
+          },
+          async listContacts() {
+            return [];
+          },
+          async addContact() {
+            throw new Error('add contact should not run');
+          },
+          async listPending() {
+            return [];
+          },
+          async approveContact() {},
+          async getHostedProfile() {
+            return null;
+          },
+          async registerHostedProfile(_relayBaseUrl, _token, profile) {
+            repairedProfiles.push(profile);
+          },
+          async listInbox() {
+            return [];
+          },
+          async sendMessage() {
+            throw new Error('send should not run');
+          },
+        },
+      });
+
+      expect(error.toString()).toBe('');
+      expect(output.toString()).toContain('Welcome back, @seeded.');
+      expect(repairedProfiles).toEqual([
+        {
+          handle: 'seeded',
+          displayName: 'Seeded User',
+        },
+      ]);
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      process.exitCode = originalExitCode;
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   it('restores tty state when fullscreen startup fails during initial refresh', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'mors-start-'));
     const input = new FakeTtyInput();
@@ -347,6 +413,16 @@ describe('mors start', () => {
         runtime: {
           async signup() {
             throw new Error('signup should not be called');
+          },
+          async getHostedProfile() {
+            return {
+              accountId: 'acct-seeded',
+              handle: 'seeded',
+              displayName: 'Seeded User',
+            };
+          },
+          async registerHostedProfile() {
+            throw new Error('registerHostedProfile should not be called');
           },
           async listContacts() {
             throw new Error('contacts unavailable');

@@ -23,6 +23,10 @@ export interface ContactEntry {
     contactAccountId: string;
     status: ContactStatus;
 }
+/** JSON-serializable snapshot of contact approval state. */
+export interface ContactStoreSnapshot {
+    contacts: Array<[string, ContactEntry[]]>;
+}
 /**
  * In-memory contact store tracking first-contact approval per account.
  *
@@ -36,6 +40,8 @@ export interface ContactEntry {
  * Thread-safe for single-process use (JavaScript event loop).
  */
 export declare class ContactStore {
+    private readonly onMutation?;
+    constructor(onMutation?: (() => void) | undefined);
     /**
      * Map from owner account ID to their contact map.
      * Each contact map is: contactAccountId → ContactStatus.
@@ -121,5 +127,7 @@ export declare class ContactStore {
         firstContact: boolean;
         autonomyAllowed: boolean;
     };
+    snapshot(): ContactStoreSnapshot;
+    static fromSnapshot(data: ContactStoreSnapshot, onMutation?: () => void): ContactStore;
 }
 //# sourceMappingURL=contact-store.d.ts.map

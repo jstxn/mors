@@ -109,6 +109,10 @@ export function validateHandle(handle) {
  * - Device lists are account-scoped (no cross-account leakage)
  */
 export class AccountStore {
+    onMutation;
+    constructor(onMutation) {
+        this.onMutation = onMutation;
+    }
     /** Map from account ID to profile. */
     byAccountId = new Map();
     /** Map from lowercase handle to account ID (for uniqueness checks). */
@@ -159,6 +163,7 @@ export class AccountStore {
         };
         this.byAccountId.set(accountId, profile);
         this.handleToAccountId.set(normalizedHandle, accountId);
+        this.onMutation?.();
         return profile;
     }
     /**
@@ -217,6 +222,7 @@ export class AccountStore {
             deviceId,
             registeredAt: new Date().toISOString(),
         });
+        this.onMutation?.();
     }
     /**
      * List all registered device identities for an account.
@@ -260,6 +266,7 @@ export class AccountStore {
             publishedAt: new Date().toISOString(),
         };
         bundleMap.set(bundle.deviceId, published);
+        this.onMutation?.();
         return published;
     }
     /**
@@ -285,6 +292,33 @@ export class AccountStore {
         if (!bundleMap)
             return [];
         return Array.from(bundleMap.values());
+    }
+    snapshot() {
+        return {
+            profiles: Array.from(this.byAccountId.entries()).map(([accountId, profile]) => [
+                accountId,
+                { ...profile },
+            ]),
+            handleToAccountId: Array.from(this.handleToAccountId.entries()),
+            devicesByAccountId: Array.from(this.devicesByAccountId.entries()).map(([accountId, deviceMap]) => [accountId, Array.from(deviceMap.values()).map((d) => ({ ...d }))]),
+            deviceBundlesByAccountId: Array.from(this.deviceBundlesByAccountId.entries()).map(([accountId, bundleMap]) => [accountId, Array.from(bundleMap.values()).map((b) => ({ ...b }))]),
+        };
+    }
+    static fromSnapshot(data, onMutation) {
+        const store = new AccountStore(onMutation);
+        for (const [accountId, profile] of data.profiles) {
+            store.byAccountId.set(accountId, { ...profile });
+        }
+        for (const [handle, accountId] of data.handleToAccountId) {
+            store.handleToAccountId.set(handle, accountId);
+        }
+        for (const [accountId, devices] of data.devicesByAccountId) {
+            store.devicesByAccountId.set(accountId, new Map(devices.map((device) => [device.deviceId, { ...device }])));
+        }
+        for (const [accountId, bundles] of data.deviceBundlesByAccountId) {
+            store.deviceBundlesByAccountId.set(accountId, new Map(bundles.map((bundle) => [bundle.deviceId, { ...bundle }])));
+        }
+        return store;
     }
 }
 //# sourceMappingURL=account-store.js.map

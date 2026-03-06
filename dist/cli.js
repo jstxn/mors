@@ -28,7 +28,7 @@ import { RelayClient, RelayClientError } from './relay/client.js';
 import { connectRemoteWatch } from './remote-watch.js';
 import { runDeployPreflight, formatDeployIssues, formatDeployResultJson, redactSecrets, } from './deploy.js';
 import { validateHandle, normalizeHandle } from './relay/account-store.js';
-import { resolveRelayBaseUrl } from './settings.js';
+import { resolveConfiguredRelayBaseUrl, resolveRelayBaseUrl } from './settings.js';
 /** Commands that require initialization before use. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 /** Commands that are implemented. */
@@ -1821,7 +1821,7 @@ async function runOnboard(_args) {
     // to enforce the global unique-handle constraint end-to-end.
     // On relay rejection (duplicate/immutable), fail without local persistence.
     // On relay unreachable, persist locally as graceful degradation.
-    const relayBaseUrl = resolveRelayBaseUrl(configDir);
+    const relayBaseUrl = resolveConfiguredRelayBaseUrl(configDir);
     if (relayBaseUrl) {
         const relayResult = await relayRegisterHandle(relayBaseUrl, session.accessToken, {
             handle,
@@ -1890,26 +1890,82 @@ async function runStatus(_args) {
         reportAuthStatus(session, json);
         return;
     }
+    const envSigningKey = (process.env['MORS_RELAY_SIGNING_KEY'] ?? '').trim();
+    const localSigningKey = loadSigningKey(configDir);
+    if (!envSigningKey && !localSigningKey) {
+        const relayBaseUrl = resolveRelayBaseUrl(configDir);
+        try {
+            const principal = await verifyHostedSessionWithRelay(relayBaseUrl, session.accessToken, session.deviceId);
+            reportVerifiedStatus({
+                accountId: principal.accountId,
+                deviceId: principal.deviceId,
+                createdAt: session.createdAt,
+            }, json);
+            return;
+        }
+        catch (err) {
+            process.exitCode = 1;
+            if (err instanceof HostedStatusUnauthorizedError) {
+                const message = 'Your hosted session has expired or been revoked. ' +
+                    'Run "mors logout" and then "mors start" to sign in again.';
+                if (json) {
+                    console.log(JSON.stringify({
+                        status: 'token_expired',
+                        token_valid: false,
+                        message,
+                        account_id: session.accountId,
+                        device_id: session.deviceId,
+                    }));
+                }
+                else {
+                    console.error(`Error: ${message}`);
+                }
+                return;
+            }
+            if (err instanceof HostedStatusRelayProfileMissingError) {
+                const message = 'The relay no longer has your hosted profile for this session. ' +
+                    'Run "mors start" to repair your hosted profile and continue.';
+                if (json) {
+                    console.log(JSON.stringify({
+                        status: 'verification_unavailable',
+                        token_valid: false,
+                        message,
+                        account_id: session.accountId,
+                        device_id: session.deviceId,
+                    }));
+                }
+                else {
+                    console.error(`Error: ${message}`);
+                }
+                return;
+            }
+            const detail = err instanceof Error ? err.message : String(err);
+            const message = `Could not verify this session with relay ${relayBaseUrl}. ${detail} ` +
+                'Run "mors status --offline" to inspect the local session.';
+            if (json) {
+                console.log(JSON.stringify({
+                    status: 'verification_unavailable',
+                    token_valid: false,
+                    message,
+                    account_id: session.accountId,
+                    device_id: session.deviceId,
+                }));
+            }
+            else {
+                console.error(`Error: ${message}`);
+            }
+            return;
+        }
+    }
     // Verify token liveness (VAL-AUTH-006)
     // Using await ensures deterministic output and exit-code before process exit.
     try {
         const principal = await verifyTokenLiveness(session.accessToken, { configDir });
-        // Token is valid — report authenticated status with live data
-        if (json) {
-            console.log(JSON.stringify({
-                status: 'authenticated',
-                token_valid: true,
-                account_id: principal.accountId,
-                device_id: principal.deviceId,
-                created_at: session.createdAt,
-            }));
-        }
-        else {
-            console.log(`Authenticated (account: ${principal.accountId})`);
-            console.log(`Device: ${principal.deviceId}`);
-            console.log(`Session created: ${session.createdAt}`);
-            console.log('Token: valid');
-        }
+        reportVerifiedStatus({
+            accountId: principal.accountId,
+            deviceId: principal.deviceId,
+            createdAt: session.createdAt,
+        }, json);
     }
     catch (err) {
         process.exitCode = 1;
@@ -1955,6 +2011,95 @@ async function runStatus(_args) {
                 console.error(`Error: ${msg}`);
             }
         }
+    }
+}
+class HostedStatusUnauthorizedError extends Error {
+    constructor(detail) {
+        super(detail ?? 'Hosted relay rejected the current session.');
+        this.name = 'HostedStatusUnauthorizedError';
+    }
+}
+class HostedStatusRelayProfileMissingError extends Error {
+    constructor(detail) {
+        super(detail ?? 'Hosted relay does not have a profile for this account.');
+        this.name = 'HostedStatusRelayProfileMissingError';
+    }
+}
+async function verifyHostedSessionWithRelay(relayBaseUrl, token, fallbackDeviceId) {
+    const { request: httpRequest } = await import('node:http');
+    const { request: httpsRequest } = await import('node:https');
+    const url = new URL('/accounts/me', relayBaseUrl);
+    const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest;
+    return new Promise((resolve, reject) => {
+        const req = doRequest(url, {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+                Connection: 'close',
+            },
+            timeout: 10_000,
+        }, (res) => {
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+                const body = (() => {
+                    try {
+                        return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                    }
+                    catch {
+                        return {};
+                    }
+                })();
+                const statusCode = res.statusCode ?? 500;
+                if (statusCode === 401) {
+                    reject(new HostedStatusUnauthorizedError(typeof body['detail'] === 'string' ? body['detail'] : undefined));
+                    return;
+                }
+                if (statusCode === 404 && body['error'] === 'not_onboarded') {
+                    reject(new HostedStatusRelayProfileMissingError(typeof body['detail'] === 'string' ? body['detail'] : undefined));
+                    return;
+                }
+                if (statusCode < 200 || statusCode >= 300) {
+                    const detail = typeof body['detail'] === 'string'
+                        ? body['detail']
+                        : `Relay responded with status ${statusCode}.`;
+                    reject(new Error(detail));
+                    return;
+                }
+                const accountId = typeof body['account_id'] === 'string' ? body['account_id'] : undefined;
+                if (!accountId) {
+                    reject(new Error('Relay response did not include account_id.'));
+                    return;
+                }
+                resolve({
+                    accountId,
+                    deviceId: fallbackDeviceId,
+                });
+            });
+        });
+        req.on('error', (err) => reject(err));
+        req.on('timeout', () => {
+            req.destroy(new Error(`Request timed out for GET ${url.pathname}`));
+        });
+        req.end();
+    });
+}
+function reportVerifiedStatus(session, json) {
+    if (json) {
+        console.log(JSON.stringify({
+            status: 'authenticated',
+            token_valid: true,
+            account_id: session.accountId,
+            device_id: session.deviceId,
+            created_at: session.createdAt,
+        }));
+    }
+    else {
+        console.log(`Authenticated (account: ${session.accountId})`);
+        console.log(`Device: ${session.deviceId}`);
+        console.log(`Session created: ${session.createdAt}`);
+        console.log('Token: valid');
     }
 }
 /**

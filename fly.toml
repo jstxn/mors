@@ -14,6 +14,10 @@ primary_region = "iad"
 
 [env]
   PORT = "3100"
+  # File-backed relay state. For a durable Fly volume, point this at a mounted
+  # path like /data/mors-relay-state.json. Until a volume is attached, this
+  # still enables restart rehydration on the machine filesystem.
+  MORS_RELAY_STATE_PATH = "./.mors-relay-state.json"
 
 [http_service]
   internal_port = 3100

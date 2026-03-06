@@ -75,6 +75,13 @@ export interface PublishedDeviceBundle {
     /** ISO-8601 timestamp of relay publication. */
     publishedAt: string;
 }
+/** JSON-serializable snapshot of the account store state. */
+export interface AccountStoreSnapshot {
+    profiles: Array<[string, AccountProfile]>;
+    handleToAccountId: Array<[string, string]>;
+    devicesByAccountId: Array<[string, DeviceRegistration[]]>;
+    deviceBundlesByAccountId: Array<[string, PublishedDeviceBundle[]]>;
+}
 /**
  * Normalize a handle string by trimming whitespace and lowercasing.
  *
@@ -110,6 +117,8 @@ export declare function validateHandle(handle: string): string;
  * - Device lists are account-scoped (no cross-account leakage)
  */
 export declare class AccountStore {
+    private readonly onMutation?;
+    constructor(onMutation?: (() => void) | undefined);
     /** Map from account ID to profile. */
     private readonly byAccountId;
     /** Map from lowercase handle to account ID (for uniqueness checks). */
@@ -205,5 +214,7 @@ export declare class AccountStore {
      * @returns Published bundles for the account.
      */
     listPublishedDeviceBundles(accountId: string): PublishedDeviceBundle[];
+    snapshot(): AccountStoreSnapshot;
+    static fromSnapshot(data: AccountStoreSnapshot, onMutation?: () => void): AccountStore;
 }
 //# sourceMappingURL=account-store.d.ts.map

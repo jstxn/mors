@@ -790,6 +790,7 @@ describe('CLI mors onboard', () => {
         env: {
           ...process.env,
           MORS_CONFIG_DIR: configDir,
+          MORS_RELAY_BASE_URL: '',
           MORS_RELAY_SIGNING_KEY: signingKey,
           PATH: process.env['PATH'],
         },

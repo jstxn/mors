@@ -198,6 +198,8 @@ export class RelayUnauthorizedError extends Error {
  * Thread-safe for single-process use (Node.js event loop).
  */
 export class RelayMessageStore {
+  constructor(private readonly onMutation?: () => void) {}
+
   /** All messages by ID. */
   private messages = new Map<string, RelayMessage>();
   /** Messages by recipient_id for inbox queries. */
@@ -346,6 +348,7 @@ export class RelayMessageStore {
     // Emit stream event for the new message
     const eventType: RelayStreamEventType = inReplyTo ? 'reply_created' : 'message_created';
     this.emitStreamEvent(eventType, message);
+    this.onMutation?.();
 
     return { message, created: true };
   }
@@ -429,6 +432,7 @@ export class RelayMessageStore {
 
     // Emit stream event for first read
     this.emitStreamEvent('message_read', message);
+    this.onMutation?.();
 
     return { message, firstRead: true };
   }
@@ -472,6 +476,7 @@ export class RelayMessageStore {
 
     // Emit stream event for first ack
     this.emitStreamEvent('message_acked', message);
+    this.onMutation?.();
 
     return { message, firstAck: true };
   }
@@ -635,8 +640,11 @@ export class RelayMessageStore {
    * @param data - A `RelayMessageStoreSnapshot`, typically obtained via
    *   `JSON.parse(serialized)` after a restart/deploy.
    */
-  static fromSnapshot(data: RelayMessageStoreSnapshot): RelayMessageStore {
-    const store = new RelayMessageStore();
+  static fromSnapshot(
+    data: RelayMessageStoreSnapshot,
+    onMutation?: () => void
+  ): RelayMessageStore {
+    const store = new RelayMessageStore(onMutation);
 
     // Restore messages (deep-copy each value)
     for (const [key, msg] of data.messages) {
@@ -684,5 +692,6 @@ export class RelayMessageStore {
     this.streamListeners.clear();
     this.eventLog.length = 0;
     this.eventIdIndex.clear();
+    this.onMutation?.();
   }
 }

@@ -10,6 +10,7 @@
  * The bootstrap contract is intentionally stable so that callers do not
  * need to change when real persistence is added.
  */
+import { createRelayPersistenceContext, } from './persistence.js';
 /**
  * Bootstrap the relay service dependencies.
  *
@@ -24,7 +25,8 @@ export async function bootstrapRelay(options) {
     const logger = options?.logger ?? console.log;
     logger('relay bootstrap: initializing dependencies...');
     // Initialize persistence layer (placeholder — future milestones wire real stores)
-    const persistenceStatus = await initPersistence(logger);
+    const persistence = await initPersistence(logger, options?.statePath);
+    const persistenceStatus = persistence.status;
     const services = [persistenceStatus];
     const allReady = services.every((s) => s.ready);
     if (allReady) {
@@ -34,17 +36,23 @@ export async function bootstrapRelay(options) {
         const failed = services.filter((s) => !s.ready).map((s) => s.name);
         logger(`relay bootstrap: services not ready: ${failed.join(', ')}`);
     }
-    return { ready: allReady, services };
+    return { ready: allReady, services, persistence: persistence.context };
 }
-/**
- * Initialize the persistence layer.
- *
- * Currently a no-op scaffold that reports ready. When real persistence
- * is added (SQLite/Postgres message store, account store, etc.), this
- * function will perform schema migrations and connection setup.
- */
-async function initPersistence(logger) {
-    logger('relay bootstrap: persistence layer initialized (scaffold)');
-    return { name: 'persistence', ready: true };
+async function initPersistence(logger, statePath) {
+    try {
+        const context = createRelayPersistenceContext({ logger, statePath });
+        logger(`relay bootstrap: persistence layer initialized at ${context.statePath}`);
+        return {
+            status: { name: 'persistence', ready: true },
+            context,
+        };
+    }
+    catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        logger(`relay bootstrap: persistence layer failed: ${detail}`);
+        return {
+            status: { name: 'persistence', ready: false },
+        };
+    }
 }
 //# sourceMappingURL=bootstrap.js.map

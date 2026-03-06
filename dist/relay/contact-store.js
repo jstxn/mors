@@ -30,6 +30,10 @@
  * Thread-safe for single-process use (JavaScript event loop).
  */
 export class ContactStore {
+    onMutation;
+    constructor(onMutation) {
+        this.onMutation = onMutation;
+    }
     /**
      * Map from owner account ID to their contact map.
      * Each contact map is: contactAccountId → ContactStatus.
@@ -86,6 +90,7 @@ export class ContactStore {
         // Only set to pending if not already tracked (preserve approved state)
         if (!ownerContacts.has(contactAccountId)) {
             ownerContacts.set(contactAccountId, 'pending');
+            this.onMutation?.();
         }
     }
     /**
@@ -103,7 +108,11 @@ export class ContactStore {
             ownerContacts = new Map();
             this.contacts.set(ownerAccountId, ownerContacts);
         }
+        const alreadyApproved = ownerContacts.get(contactAccountId) === 'approved';
         ownerContacts.set(contactAccountId, 'approved');
+        if (!alreadyApproved) {
+            this.onMutation?.();
+        }
     }
     /**
      * List all contacts that are in pending state for an owner.
@@ -160,6 +169,24 @@ export class ContactStore {
             firstContact: status !== 'approved',
             autonomyAllowed: status === 'approved',
         };
+    }
+    snapshot() {
+        return {
+            contacts: Array.from(this.contacts.entries()).map(([ownerAccountId, contactMap]) => [
+                ownerAccountId,
+                Array.from(contactMap.entries()).map(([contactAccountId, status]) => ({
+                    contactAccountId,
+                    status,
+                })),
+            ]),
+        };
+    }
+    static fromSnapshot(data, onMutation) {
+        const store = new ContactStore(onMutation);
+        for (const [ownerAccountId, contacts] of data.contacts) {
+            store.contacts.set(ownerAccountId, new Map(contacts.map((entry) => [entry.contactAccountId, entry.status])));
+        }
+        return store;
     }
 }
 //# sourceMappingURL=contact-store.js.map

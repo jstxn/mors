@@ -10,6 +10,7 @@
  * production wiring includes messageStore and participant authorization.
  */
 import { type RelayServerOptions } from './server.js';
+import type { RelayPersistenceContext } from './persistence.js';
 /**
  * Create the production server options including all wired dependencies.
  *
@@ -19,5 +20,7 @@ import { type RelayServerOptions } from './server.js';
  *
  * @returns RelayServerOptions with tokenVerifier, participantStore, and messageStore.
  */
-export declare function createProductionServerOptions(): RelayServerOptions;
+export declare function createProductionServerOptions(options?: {
+    persistence?: RelayPersistenceContext;
+}): RelayServerOptions;
 //# sourceMappingURL=index.d.ts.map

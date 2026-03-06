@@ -158,6 +158,8 @@ export declare class RelayUnauthorizedError extends Error {
  * Thread-safe for single-process use (Node.js event loop).
  */
 export declare class RelayMessageStore {
+    private readonly onMutation?;
+    constructor(onMutation?: (() => void) | undefined);
     /** All messages by ID. */
     private messages;
     /** Messages by recipient_id for inbox queries. */
@@ -330,7 +332,7 @@ export declare class RelayMessageStore {
      * @param data - A `RelayMessageStoreSnapshot`, typically obtained via
      *   `JSON.parse(serialized)` after a restart/deploy.
      */
-    static fromSnapshot(data: RelayMessageStoreSnapshot): RelayMessageStore;
+    static fromSnapshot(data: RelayMessageStoreSnapshot, onMutation?: () => void): RelayMessageStore;
     /** Clear all stored data (for testing). */
     clear(): void;
 }

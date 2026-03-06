@@ -20,6 +20,15 @@ interface StartRuntime {
     addContact(relayBaseUrl: string, token: string, handle: string): Promise<HostedContact>;
     listPending(relayBaseUrl: string, token: string): Promise<HostedContact[]>;
     approveContact(relayBaseUrl: string, token: string, accountId: string): Promise<void>;
+    getHostedProfile?(relayBaseUrl: string, token: string): Promise<{
+        accountId: string;
+        handle: string;
+        displayName: string;
+    } | null>;
+    registerHostedProfile?(relayBaseUrl: string, token: string, profile: {
+        handle: string;
+        displayName: string;
+    }): Promise<void>;
     listInbox(relayBaseUrl: string, token: string): Promise<RelayMessageResponse[]>;
     publishDeviceBundle?(relayBaseUrl: string, token: string, queueStorePath: string, bundle: PublishDeviceBundleOptions): Promise<void>;
     fetchDeviceBundle?(relayBaseUrl: string, token: string, queueStorePath: string, accountId: string, deviceId: string): Promise<RelayDeviceBundleResponse | null>;
