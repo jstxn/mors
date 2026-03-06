@@ -36,6 +36,7 @@ import {
 import { loadKey } from '../src/key-management.js';
 import { openEncryptedDb } from '../src/store.js';
 import { MorsError, SqlCipherUnavailableError, NotInitializedError } from '../src/errors.js';
+import { getDeviceKeysDir, isDeviceBootstrapped } from '../src/e2ee/device-keys.js';
 
 let testDir: string;
 
@@ -458,6 +459,20 @@ describe('VAL-INIT-007: concurrent init attempts converge safely', () => {
     expect(result2.fingerprint).toBe(result1.fingerprint);
     // Second should detect already initialized.
     expect(result2.alreadyInitialized).toBe(true);
+  });
+
+  it('re-running init repairs missing device keys from an older config', async () => {
+    const configDir = join(testDir, 'repair-device-keys');
+
+    await initCommand({ configDir });
+    const keysDir = getDeviceKeysDir(configDir);
+    rmSync(keysDir, { recursive: true, force: true });
+    expect(isDeviceBootstrapped(keysDir)).toBe(false);
+
+    const result = await initCommand({ configDir });
+
+    expect(result.alreadyInitialized).toBe(true);
+    expect(isDeviceBootstrapped(keysDir)).toBe(true);
   });
 
   it('parallel inits both succeed or one detects already initialized', async () => {

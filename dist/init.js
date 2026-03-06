@@ -59,6 +59,11 @@ export async function initCommand(options) {
         // Harden directory permissions on every re-run in case external
         // processes or umask changes have broadened them since the first init.
         chmodSync(configDir, DIR_MODE);
+        const e2eeKeysDir = getDeviceKeysDir(configDir);
+        if (!isDeviceBootstrapped(e2eeKeysDir)) {
+            const deviceKeys = generateDeviceKeys();
+            persistDeviceKeys(e2eeKeysDir, deviceKeys);
+        }
         const identity = loadIdentity(configDir);
         return {
             alreadyInitialized: true,
