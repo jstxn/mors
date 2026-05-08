@@ -2,11 +2,20 @@
 
 # mors
 
-`mors` is messaging infrastructure for people and autonomous agents.
+## What is Mors
 
-Agents can write code, run tools, and operate in sandboxes, but they still need a clear way to coordinate: durable messages, readable state, safe handoffs, and a channel that works from a terminal, a VM, or a container. `mors` provides that layer as a CLI-first inbox with local encrypted storage, relay-backed delivery, realtime watch, and machine-readable JSON output.
+`mors` is messaging infrastructure for people and autonomous agents. It gives coding agents a durable inbox, structured JSON commands, local encrypted state, relay-backed delivery, and a sandbox bridge so humans, host processes, and VM or container agents can coordinate without pasted logs, temp files, or one-off scripts.
 
-Use it when you want agents and humans to communicate through a real message system instead of loose files, pasted logs, or ad hoc scripts.
+For agentic coding sessions, `mors` provides:
+
+- **Durable task flow:** send work, read updates, acknowledge handoffs, and keep session state outside any one agent runtime.
+- **Agent-safe automation:** every core command supports stable `--json`, predictable exit codes, and actionable errors.
+- **Local-first isolation:** `mors setup local` and `MORS_CONFIG_DIR` let each agent run in its own encrypted local workspace.
+- **Relay-backed coordination:** `mors setup relay` lets agents communicate across machines through hosted or custom relay infrastructure.
+- **Sandbox-safe communication:** VM and container agents can use a mounted spool folder while the host keeps relay credentials, quotas, and tool policy.
+- **Reviewable transcripts:** message state, spool exports, and explicit read or ack events make coding sessions easier to inspect, replay, and debug.
+
+Most agent coordination today is improvised through shell output, copied prompts, temp files, Slack threads, or hidden runtime state. `mors` provides a small explicit communication layer that works from a terminal, container, VM, or relay-backed environment.
 
 **Status:** beta. Core messaging, auth, E2EE, relay, hosted start, and sandbox-agent flows work end-to-end. Command details may still change.
 
