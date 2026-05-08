@@ -1,5 +1,6 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { DEFAULT_HOSTED_RELAY_BASE_URL } from './settings.js';
 function requestJson(method, url, options) {
     const doRequest = url.protocol === 'https:' ? httpsRequest : httpRequest;
     const payload = options?.body ? JSON.stringify(options.body) : undefined;
@@ -35,7 +36,9 @@ function requestJson(method, url, options) {
                 });
             });
         });
-        req.on('error', reject);
+        req.on('error', (err) => {
+            reject(formatHostedRequestError(method, url, err));
+        });
         req.on('timeout', () => {
             req.destroy(new Error(`Request timed out for ${method} ${url.pathname}`));
         });
@@ -44,6 +47,32 @@ function requestJson(method, url, options) {
         }
         req.end();
     });
+}
+export function formatHostedRequestError(method, url, err) {
+    const error = err;
+    const code = typeof error?.code === 'string' ? error.code : '';
+    const message = typeof error?.message === 'string' ? error.message : String(err);
+    const origin = url.origin.replace(/\/$/, '');
+    const isHostedDefault = origin === DEFAULT_HOSTED_RELAY_BASE_URL;
+    if (code === 'EPROTO' ||
+        /tls|ssl|alert internal error|handshake/i.test(message)) {
+        if (isHostedDefault) {
+            return new Error(`Hosted relay is currently unavailable due to a TLS/SSL error at ${origin}. ` +
+                'This is a deployment issue, not a local setup issue. ' +
+                'Try again later, or point mors at a custom/local relay with MORS_RELAY_BASE_URL.');
+        }
+        return new Error(`Could not establish a secure connection to ${origin}. ` +
+            'Check the relay TLS/SSL configuration or choose a different relay URL.');
+    }
+    if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EHOSTUNREACH') {
+        return new Error(`Could not reach relay at ${origin}. ` +
+            'Check that the relay URL is correct and that the relay is running.');
+    }
+    if (code === 'ETIMEDOUT' || /timed out/i.test(message)) {
+        return new Error(`Timed out contacting relay at ${origin} for ${method} ${url.pathname}. ` +
+            'Check your network connection or try again later.');
+    }
+    return err instanceof Error ? err : new Error(message);
 }
 function requireSuccess(response, action) {
     if (response.statusCode >= 200 && response.statusCode < 300) {

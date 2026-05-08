@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
@@ -92,6 +92,28 @@ describe('relay persistence', () => {
       expect(inbox[0].state).toBe('acked');
       expect(inbox[0].sender_device_id).toBe('device-alice');
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not chmod an existing state directory when saving snapshots', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mors-relay-persist-mode-'));
+    const statePath = join(dir, 'relay-state.json');
+
+    try {
+      chmodSync(dir, 0o755);
+      const first = createRelayPersistenceContext({ statePath });
+
+      first.accountStore.register({
+        accountId: 'acct-alice',
+        handle: 'alice',
+        displayName: 'Alice',
+      });
+
+      expect(statSync(dir).mode & 0o777).toBe(0o755);
+      expect(statSync(statePath).mode & 0o777).toBe(0o600);
+    } finally {
+      chmodSync(dir, 0o755);
       rmSync(dir, { recursive: true, force: true });
     }
   });

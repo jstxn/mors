@@ -98,7 +98,7 @@ export class RelayClient {
      * across retries, queue flushes, and reconnects.
      */
     async send(options) {
-        const dedupeKey = generateDedupeKey();
+        const dedupeKey = options.dedupeKey ?? generateDedupeKey();
         const payload = {
             recipientId: options.recipientId,
             body: options.body,
@@ -175,6 +175,26 @@ export class RelayClient {
         return {
             message: body['message'],
             firstAck: body['first_ack'],
+        };
+    }
+    /**
+     * Get one relay message by ID.
+     */
+    async get(messageId) {
+        const response = await this.requestWithRetry('GET', `/messages/${encodeURIComponent(messageId)}`);
+        const body = (await response.json());
+        return body['message'];
+    }
+    /**
+     * List inbox messages for the authenticated relay account.
+     */
+    async inbox(options = {}) {
+        const unreadParam = options.unreadOnly ? '?unread=true' : '';
+        const response = await this.requestWithRetry('GET', `/inbox${unreadParam}`);
+        const body = (await response.json());
+        return {
+            count: body['count'],
+            messages: body['messages'],
         };
     }
     /**

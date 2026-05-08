@@ -1,3 +1,5 @@
 node_modules/
 *.tsbuildinfo
 .env
+.mors/
+.mors-relay-state.json

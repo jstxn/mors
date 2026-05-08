@@ -151,6 +151,18 @@ export interface AckResult {
   firstAck: boolean;
 }
 
+/** Options for listing relay inbox messages. */
+export interface InboxOptions {
+  /** If true, only return unread messages. */
+  unreadOnly?: boolean;
+}
+
+/** Result of a relay inbox listing. */
+export interface InboxResult {
+  count: number;
+  messages: RelayMessageResponse[];
+}
+
 /** Options for sending an encrypted message via relay. */
 export interface EncryptedSendOptions {
   /** Recipient GitHub user ID. */
@@ -266,8 +278,9 @@ export class RelayClient {
     body: string;
     subject?: string;
     inReplyTo?: string;
+    dedupeKey?: string;
   }): Promise<SendResult> {
-    const dedupeKey = generateDedupeKey();
+    const dedupeKey = options.dedupeKey ?? generateDedupeKey();
     const payload: SendPayload = {
       recipientId: options.recipientId,
       body: options.body,
@@ -352,6 +365,31 @@ export class RelayClient {
     return {
       message: body['message'] as RelayMessageResponse,
       firstAck: body['first_ack'] as boolean,
+    };
+  }
+
+  /**
+   * Get one relay message by ID.
+   */
+  async get(messageId: string): Promise<RelayMessageResponse> {
+    const response = await this.requestWithRetry(
+      'GET',
+      `/messages/${encodeURIComponent(messageId)}`
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+    return body['message'] as RelayMessageResponse;
+  }
+
+  /**
+   * List inbox messages for the authenticated relay account.
+   */
+  async inbox(options: InboxOptions = {}): Promise<InboxResult> {
+    const unreadParam = options.unreadOnly ? '?unread=true' : '';
+    const response = await this.requestWithRetry('GET', `/inbox${unreadParam}`);
+    const body = (await response.json()) as Record<string, unknown>;
+    return {
+      count: body['count'] as number,
+      messages: body['messages'] as RelayMessageResponse[],
     };
   }
 

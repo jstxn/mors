@@ -55,6 +55,7 @@ describe('CLI help UX regressions', () => {
     ['login', '--help'],
     ['start', '--help'],
     ['send', '--help'],
+    ['spool', '--help'],
     ['onboard', '--help'],
     ['status', '--help'],
     ['setup-shell', '--help'],

@@ -130,6 +130,16 @@ export interface AckResult {
     message: RelayMessageResponse;
     firstAck: boolean;
 }
+/** Options for listing relay inbox messages. */
+export interface InboxOptions {
+    /** If true, only return unread messages. */
+    unreadOnly?: boolean;
+}
+/** Result of a relay inbox listing. */
+export interface InboxResult {
+    count: number;
+    messages: RelayMessageResponse[];
+}
 /** Options for sending an encrypted message via relay. */
 export interface EncryptedSendOptions {
     /** Recipient GitHub user ID. */
@@ -201,6 +211,7 @@ export declare class RelayClient {
         body: string;
         subject?: string;
         inReplyTo?: string;
+        dedupeKey?: string;
     }): Promise<SendResult>;
     /**
      * Flush the offline queue by sending all queued entries to the relay.
@@ -220,6 +231,14 @@ export declare class RelayClient {
      * Ack a message by ID with transient failure retry.
      */
     ack(messageId: string): Promise<AckResult>;
+    /**
+     * Get one relay message by ID.
+     */
+    get(messageId: string): Promise<RelayMessageResponse>;
+    /**
+     * List inbox messages for the authenticated relay account.
+     */
+    inbox(options?: InboxOptions): Promise<InboxResult>;
     /**
      * Publish the current device's public key bundle to the relay.
      */

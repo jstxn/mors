@@ -77,8 +77,7 @@ export function saveRelayPersistenceSnapshot(
   snapshot: RelayPersistenceSnapshot
 ): void {
   const dir = dirname(statePath);
-  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
-  chmodSync(dir, STATE_DIR_MODE);
+  mkdirCreatedDirectoryOwnerOnly(dir);
 
   const tempPath = `${statePath}.tmp`;
   const data = JSON.stringify(snapshot, null, 2) + '\n';
@@ -87,6 +86,14 @@ export function saveRelayPersistenceSnapshot(
   chmodSync(tempPath, STATE_FILE_MODE);
   renameSync(tempPath, statePath);
   chmodSync(statePath, STATE_FILE_MODE);
+}
+
+function mkdirCreatedDirectoryOwnerOnly(dir: string): void {
+  const existed = existsSync(dir);
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  if (!existed) {
+    chmodSync(dir, STATE_DIR_MODE);
+  }
 }
 
 export function createRelayPersistenceContext(

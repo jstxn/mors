@@ -20,6 +20,7 @@ export interface HostedContact {
     first_contact?: boolean;
     device_bundle?: HostedDeviceBundle;
 }
+export declare function formatHostedRequestError(method: string, url: URL, err: unknown): Error;
 export declare function hostedSignup(relayBaseUrl: string, options: {
     handle: string;
     displayName: string;

@@ -64,6 +64,27 @@ node dist/index.js read "$MSG_ID" --json
 node dist/index.js ack "$MSG_ID" --json
 ```
 
+### Agent spool bridge (sandbox or VM boundary)
+
+Use `mors spool` when an isolated agent should communicate through files instead of holding relay credentials directly. The host owns the bridge process and relay session; the agent writes JSON commands into its own outbox.
+
+```bash
+node dist/index.js spool init --root /tmp/mors-spool --agent worker-a --json
+node dist/index.js spool bridge --root /tmp/mors-spool --agent worker-a --once --json
+```
+
+Spool layout:
+
+```text
+/tmp/mors-spool/agents/worker-a/
+  outbox/{tmp,new,cur}
+  inbox/{tmp,new,cur}
+  control/{tmp,new,cur}
+  failed/{tmp,new,cur}
+```
+
+Messages are published by writing complete JSON into `outbox/tmp` and renaming into `outbox/new`. Control files for `read` and `ack` use `control/new`. The bridge rejects sender authority fields in spool files and derives sender identity from the authenticated host session.
+
 ### Validate your setup
 
 Run the built-in quickstart to verify the full local lifecycle in one command:

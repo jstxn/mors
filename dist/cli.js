@@ -11,6 +11,7 @@ import { sendMessage, listInbox, readMessage, ackMessage, replyMessage, listThre
 import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { runStartCommand } from './start.js';
+import { runSpoolCommand } from './spool/cli.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
 import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
 import { getDeviceKeysDir, isDeviceBootstrapped } from './e2ee/device-keys.js';
@@ -95,6 +96,14 @@ export function run(args) {
     }
     if (command === 'start') {
         runStartCommand(commandArgs).catch((err) => {
+            process.exitCode = 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${msg}`);
+        });
+        return;
+    }
+    if (command === 'spool') {
+        runSpoolCommand(commandArgs).catch((err) => {
             process.exitCode = 1;
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`Error: ${msg}`);
@@ -3082,6 +3091,7 @@ Commands:
   ack          Acknowledge a message
   thread       View thread messages in causal order
   watch        Watch for new messages
+  spool        Maildir-style agent communication spool
   deploy       Deploy relay to Fly.io
   setup-shell  Configure shell PATH for mors
 
@@ -3133,6 +3143,10 @@ Watch:
   --json                 Output JSON (one event per line)
   --remote               Watch via relay SSE stream (requires auth + MORS_RELAY_BASE_URL)
   --poll-interval <ms>   Polling interval in ms (default: 500, min: 10; local only)
+
+Spool:
+  mors spool init --root <path> --agent <agent-id> [--json]
+  mors spool bridge --root <path> --agent <agent-id> [--once] [--json]
 
 Login:
   mors login --invite-token <token> [--json]
