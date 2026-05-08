@@ -17,6 +17,7 @@ export interface SpoolBridgeResult {
     deferred: number;
     policy_rejected: number;
     quota_rejected: number;
+    tools_run: number;
 }
 export interface SpoolBridgeOptions {
     spool: MaildirSpool;

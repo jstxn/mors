@@ -3,6 +3,7 @@ import { connectRemoteWatch } from '../remote-watch.js';
 import { MaildirEntryError, MaildirQuotaError, MaildirSpool } from './maildir.js';
 import { DEFAULT_SPOOL_POLICY, SpoolPolicyError, validateSpoolCommandPolicy, } from './policy.js';
 import {} from './state.js';
+import { runSpoolTool } from './tool-runner.js';
 import { SPOOL_COMMAND_KINDS, SPOOL_SCHEMA, } from './types.js';
 export class SpoolValidationError extends Error {
     constructor(message) {
@@ -29,6 +30,25 @@ export async function processSpoolOnce(spool, client, options = {}) {
                     await client.ack(parsed.message_id);
                     spool.moveToCur(entry);
                     result.acked++;
+                }
+                else if (parsed.kind === 'tool_request' && parsed.tool) {
+                    const runner = policy.tools.runners?.[parsed.tool.name];
+                    if (runner) {
+                        const toolResult = await runSpoolTool(parsed, runner);
+                        spool.writeJson('inbox', toolRunResultToSpoolCommand(spool.agentId, parsed, toolResult));
+                        spool.moveToCur(entry);
+                        result.tools_run++;
+                    }
+                    else {
+                        const sendResult = await client.send(commandToSendOptions(parsed));
+                        spool.moveToCur(entry);
+                        if (sendResult.queued) {
+                            result.queued++;
+                        }
+                        else {
+                            result.sent++;
+                        }
+                    }
                 }
                 else {
                     const sendResult = await client.send(commandToSendOptions(parsed));
@@ -201,6 +221,27 @@ function encodeCommandBody(command) {
         ...(command.trace_id ? { trace_id: command.trace_id } : {}),
     });
 }
+function toolRunResultToSpoolCommand(agentId, request, result) {
+    return {
+        schema: SPOOL_SCHEMA,
+        kind: 'tool_result',
+        recipient_id: agentId,
+        body: {
+            format: 'application/json',
+            content: JSON.stringify(result, null, 2),
+        },
+        subject: `Tool result: ${result.tool_name}`,
+        in_reply_to: request.in_reply_to ?? null,
+        trace_id: request.trace_id,
+        tool: {
+            name: result.tool_name,
+            args: {
+                request: request.tool?.args ?? {},
+                result,
+            },
+        },
+    };
+}
 async function materializeWatchEvent(spool, client, event, options) {
     if (!client.get)
         return;
@@ -310,6 +351,7 @@ function emptyResult() {
         deferred: 0,
         policy_rejected: 0,
         quota_rejected: 0,
+        tools_run: 0,
     };
 }
 //# sourceMappingURL=bridge.js.map

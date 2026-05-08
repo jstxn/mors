@@ -19,6 +19,7 @@ export const DEFAULT_SPOOL_POLICY = {
         allowRequests: false,
         allowedNames: [],
         maxArgsBytes: 64 * 1024,
+        runners: {},
     },
 };
 export function loadSpoolPolicy(path) {
@@ -90,6 +91,7 @@ function parseToolPolicy(value) {
         return {};
     const record = requireRecord(value, 'tools');
     const allowedNamesRaw = record['allowed_names'];
+    const runnersRaw = record['runners'];
     let allowedNames;
     if (allowedNamesRaw !== undefined) {
         if (!Array.isArray(allowedNamesRaw)) {
@@ -106,7 +108,53 @@ function parseToolPolicy(value) {
         allowRequests: optionalBoolean(record['allow_requests'], 'tools.allow_requests'),
         allowedNames,
         maxArgsBytes: optionalPositiveInteger(record['max_args_bytes'], 'tools.max_args_bytes'),
+        runners: parseToolRunners(runnersRaw),
     };
+}
+function parseToolRunners(value) {
+    if (value === undefined)
+        return undefined;
+    const record = requireRecord(value, 'tools.runners');
+    const runners = {};
+    for (const [name, rawRunner] of Object.entries(record)) {
+        if (typeof name !== 'string' || name.trim().length === 0) {
+            throw new SpoolPolicyError('tools.runners keys must be non-empty tool names.');
+        }
+        const runner = requireRecord(rawRunner, `tools.runners.${name}`);
+        const command = runner['command'];
+        if (typeof command !== 'string' || command.trim().length === 0) {
+            throw new SpoolPolicyError(`tools.runners.${name}.command must be a non-empty string.`);
+        }
+        runners[name] = {
+            command,
+            args: parseStringArray(runner['args'], `tools.runners.${name}.args`),
+            cwd: optionalString(runner['cwd'], `tools.runners.${name}.cwd`),
+            timeoutMs: optionalPositiveInteger(runner['timeout_ms'], `tools.runners.${name}.timeout_ms`),
+            maxOutputBytes: optionalPositiveInteger(runner['max_output_bytes'], `tools.runners.${name}.max_output_bytes`),
+        };
+    }
+    return runners;
+}
+function parseStringArray(value, field) {
+    if (value === undefined)
+        return undefined;
+    if (!Array.isArray(value)) {
+        throw new SpoolPolicyError(`${field} must be an array of strings when provided.`);
+    }
+    return value.map((entry) => {
+        if (typeof entry !== 'string') {
+            throw new SpoolPolicyError(`${field} entries must be strings.`);
+        }
+        return entry;
+    });
+}
+function optionalString(value, field) {
+    if (value === undefined)
+        return undefined;
+    if (typeof value !== 'string' || value.trim().length === 0) {
+        throw new SpoolPolicyError(`${field} must be a non-empty string when provided.`);
+    }
+    return value;
 }
 function requireRecord(value, label) {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {

@@ -540,7 +540,7 @@ function readSpoolEntry(spool, entry) {
     }
 }
 function resultSummary(result) {
-    return `Processed ${result.processed} spool ${result.processed === 1 ? 'entry' : 'entries'}; sent=${result.sent}, queued=${result.queued}, read=${result.read}, acked=${result.acked}, materialized=${result.materialized}, failed=${result.failed}, deferred=${result.deferred}, policy_rejected=${result.policy_rejected}, quota_rejected=${result.quota_rejected}`;
+    return `Processed ${result.processed} spool ${result.processed === 1 ? 'entry' : 'entries'}; sent=${result.sent}, queued=${result.queued}, read=${result.read}, acked=${result.acked}, materialized=${result.materialized}, failed=${result.failed}, deferred=${result.deferred}, policy_rejected=${result.policy_rejected}, quota_rejected=${result.quota_rejected}, tools_run=${result.tools_run}`;
 }
 function printBridgeResult(summary) {
     console.log(summary);

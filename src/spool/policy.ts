@@ -15,6 +15,15 @@ export interface SpoolToolPolicy {
   allowRequests?: boolean;
   allowedNames?: string[];
   maxArgsBytes?: number;
+  runners?: Record<string, SpoolToolRunnerPolicy>;
+}
+
+export interface SpoolToolRunnerPolicy {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
 }
 
 export interface SpoolPolicy {
@@ -43,6 +52,7 @@ export const DEFAULT_SPOOL_POLICY: SpoolPolicy = {
     allowRequests: false,
     allowedNames: [],
     maxArgsBytes: 64 * 1024,
+    runners: {},
   },
 };
 
@@ -135,6 +145,7 @@ function parseToolPolicy(value: unknown): SpoolToolPolicy {
   if (value === undefined) return {};
   const record = requireRecord(value, 'tools');
   const allowedNamesRaw = record['allowed_names'];
+  const runnersRaw = record['runners'];
   let allowedNames: string[] | undefined;
 
   if (allowedNamesRaw !== undefined) {
@@ -153,7 +164,59 @@ function parseToolPolicy(value: unknown): SpoolToolPolicy {
     allowRequests: optionalBoolean(record['allow_requests'], 'tools.allow_requests'),
     allowedNames,
     maxArgsBytes: optionalPositiveInteger(record['max_args_bytes'], 'tools.max_args_bytes'),
+    runners: parseToolRunners(runnersRaw),
   };
+}
+
+function parseToolRunners(value: unknown): Record<string, SpoolToolRunnerPolicy> | undefined {
+  if (value === undefined) return undefined;
+  const record = requireRecord(value, 'tools.runners');
+  const runners: Record<string, SpoolToolRunnerPolicy> = {};
+
+  for (const [name, rawRunner] of Object.entries(record)) {
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      throw new SpoolPolicyError('tools.runners keys must be non-empty tool names.');
+    }
+    const runner = requireRecord(rawRunner, `tools.runners.${name}`);
+    const command = runner['command'];
+    if (typeof command !== 'string' || command.trim().length === 0) {
+      throw new SpoolPolicyError(`tools.runners.${name}.command must be a non-empty string.`);
+    }
+
+    runners[name] = {
+      command,
+      args: parseStringArray(runner['args'], `tools.runners.${name}.args`),
+      cwd: optionalString(runner['cwd'], `tools.runners.${name}.cwd`),
+      timeoutMs: optionalPositiveInteger(runner['timeout_ms'], `tools.runners.${name}.timeout_ms`),
+      maxOutputBytes: optionalPositiveInteger(
+        runner['max_output_bytes'],
+        `tools.runners.${name}.max_output_bytes`
+      ),
+    };
+  }
+
+  return runners;
+}
+
+function parseStringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    throw new SpoolPolicyError(`${field} must be an array of strings when provided.`);
+  }
+  return value.map((entry) => {
+    if (typeof entry !== 'string') {
+      throw new SpoolPolicyError(`${field} entries must be strings.`);
+    }
+    return entry;
+  });
+}
+
+function optionalString(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new SpoolPolicyError(`${field} must be a non-empty string when provided.`);
+  }
+  return value;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

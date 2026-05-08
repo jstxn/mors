@@ -8,6 +8,7 @@ import {
   type SpoolPolicy,
 } from './policy.js';
 import { type SpoolBridgeStateStore } from './state.js';
+import { runSpoolTool, type SpoolToolRunResult } from './tool-runner.js';
 import {
   SPOOL_COMMAND_KINDS,
   SPOOL_SCHEMA,
@@ -37,6 +38,7 @@ export interface SpoolBridgeResult {
   deferred: number;
   policy_rejected: number;
   quota_rejected: number;
+  tools_run: number;
 }
 
 export interface SpoolBridgeOptions {
@@ -82,6 +84,22 @@ export async function processSpoolOnce(
           await client.ack(parsed.message_id);
           spool.moveToCur(entry);
           result.acked++;
+        } else if (parsed.kind === 'tool_request' && parsed.tool) {
+          const runner = policy.tools.runners?.[parsed.tool.name];
+          if (runner) {
+            const toolResult = await runSpoolTool(parsed, runner);
+            spool.writeJson('inbox', toolRunResultToSpoolCommand(spool.agentId, parsed, toolResult));
+            spool.moveToCur(entry);
+            result.tools_run++;
+          } else {
+            const sendResult = await client.send(commandToSendOptions(parsed as SpoolSendCommand));
+            spool.moveToCur(entry);
+            if (sendResult.queued) {
+              result.queued++;
+            } else {
+              result.sent++;
+            }
+          }
         } else {
           const sendResult = await client.send(commandToSendOptions(parsed as SpoolSendCommand));
           spool.moveToCur(entry);
@@ -268,6 +286,32 @@ function encodeCommandBody(command: SpoolSendCommand): string {
   });
 }
 
+function toolRunResultToSpoolCommand(
+  agentId: string,
+  request: SpoolSendCommand,
+  result: SpoolToolRunResult
+): SpoolSendCommand {
+  return {
+    schema: SPOOL_SCHEMA,
+    kind: 'tool_result',
+    recipient_id: agentId,
+    body: {
+      format: 'application/json',
+      content: JSON.stringify(result, null, 2),
+    },
+    subject: `Tool result: ${result.tool_name}`,
+    in_reply_to: request.in_reply_to ?? null,
+    trace_id: request.trace_id,
+    tool: {
+      name: result.tool_name,
+      args: {
+        request: request.tool?.args ?? {},
+        result,
+      },
+    },
+  };
+}
+
 async function materializeWatchEvent(
   spool: MaildirSpool,
   client: SpoolRelayClient,
@@ -402,5 +446,6 @@ function emptyResult(): SpoolBridgeResult {
     deferred: 0,
     policy_rejected: 0,
     quota_rejected: 0,
+    tools_run: 0,
   };
 }

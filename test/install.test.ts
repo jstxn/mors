@@ -21,6 +21,7 @@ describe('distribution metadata', () => {
     expect(Array.isArray(pkg.files)).toBe(true);
     expect(pkg.files).toContain('dist');
     expect(pkg.files).toContain('docs');
+    expect(pkg.files).toContain('Dockerfile.sandbox');
   });
 
   it('package has prepare script that compiles TypeScript', () => {
@@ -79,6 +80,7 @@ describe('npm pack includes correct files', () => {
     expect(files.some((f: string) => f === 'dist/index.js')).toBe(true);
     expect(files.some((f: string) => f === 'dist/cli.js')).toBe(true);
     expect(files.some((f: string) => f === 'docs/sandbox-agents.md')).toBe(true);
+    expect(files.some((f: string) => f === 'Dockerfile.sandbox')).toBe(true);
 
     // Must NOT include source or test files
     expect(files.some((f: string) => f.startsWith('src/'))).toBe(false);
@@ -145,6 +147,38 @@ describe('homebrew formula', () => {
     const content = readFileSync(formulaPath, 'utf8');
     // The formula URL should reference the current package version
     expect(content).toContain(`mors-${pkg.version}.tgz`);
+  });
+});
+
+describe('sandbox reference image', () => {
+  const dockerfilePath = join(ROOT, 'Dockerfile.sandbox');
+
+  it('Dockerfile.sandbox exists for VM/container agent reference builds', () => {
+    expect(existsSync(dockerfilePath)).toBe(true);
+  });
+
+  it('sandbox image runs as a non-root agent user with a mounted spool volume', () => {
+    const content = readFileSync(dockerfilePath, 'utf8');
+
+    expect(content).toContain('FROM node:20');
+    expect(content).toContain('sqlcipher');
+    expect(content).toContain('USER mors-agent');
+    expect(content).toContain('MORS_CONFIG_DIR=/home/mors-agent/.mors');
+    expect(content).toContain('VOLUME ["/mnt/mors-spool"]');
+    expect(content).toContain('ENTRYPOINT ["node", "/opt/mors/dist/index.js"]');
+  });
+
+  it('sandbox image does not bake relay credentials or host policy into env', () => {
+    const content = readFileSync(dockerfilePath, 'utf8');
+
+    expect(content).not.toMatch(/MORS_RELAY_(ACCESS_TOKEN|SIGNING_KEY|BASE_URL)=/);
+    expect(content).not.toMatch(/COPY\s+.*policy/i);
+  });
+
+  it('sandbox image can copy committed dist output from the Docker build context', () => {
+    const dockerignore = readFileSync(join(ROOT, '.dockerignore'), 'utf8');
+
+    expect(dockerignore).not.toMatch(/^dist\/?$/m);
   });
 });
 

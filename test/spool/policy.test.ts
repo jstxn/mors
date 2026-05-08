@@ -35,6 +35,15 @@ describe('spool policy', () => {
       tools: {
         allow_requests: true,
         allowed_names: ['run-tests'],
+        runners: {
+          'run-tests': {
+            command: 'node',
+            args: ['scripts/run-tests.js'],
+            cwd: '/workspace',
+            timeout_ms: 120000,
+            max_output_bytes: 1024,
+          },
+        },
       },
     });
 
@@ -43,6 +52,13 @@ describe('spool policy', () => {
     expect(policy.tools.allowRequests).toBe(true);
     expect(policy.tools.allowedNames).toEqual(['run-tests']);
     expect(policy.tools.maxArgsBytes).toBe(DEFAULT_SPOOL_POLICY.tools.maxArgsBytes);
+    expect(policy.tools.runners?.['run-tests']).toMatchObject({
+      command: 'node',
+      args: ['scripts/run-tests.js'],
+      cwd: '/workspace',
+      timeoutMs: 120000,
+      maxOutputBytes: 1024,
+    });
   });
 
   it('blocks oversized tool arguments even when tool requests are allowed', () => {

@@ -19,6 +19,7 @@ export {
   SpoolBridgeStateStore,
   defaultSpoolBridgeStatePath,
 } from './state.js';
+export { runSpoolTool } from './tool-runner.js';
 export {
   SpoolValidationError,
   parseSpoolCommand,
@@ -50,6 +51,12 @@ export type {
   SpoolSendCommand,
   SpoolToolRequest,
 } from './types.js';
-export type { SpoolPolicy, SpoolQuotaPolicy, SpoolToolPolicy } from './policy.js';
+export type {
+  SpoolPolicy,
+  SpoolQuotaPolicy,
+  SpoolToolPolicy,
+  SpoolToolRunnerPolicy,
+} from './policy.js';
 export type { SpoolBridgeState } from './state.js';
+export type { SpoolToolRunResult } from './tool-runner.js';
 export { SPOOL_COMMAND_KINDS, SPOOL_SCHEMA } from './types.js';

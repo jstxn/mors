@@ -11,6 +11,14 @@ export interface SpoolToolPolicy {
     allowRequests?: boolean;
     allowedNames?: string[];
     maxArgsBytes?: number;
+    runners?: Record<string, SpoolToolRunnerPolicy>;
+}
+export interface SpoolToolRunnerPolicy {
+    command: string;
+    args?: string[];
+    cwd?: string;
+    timeoutMs?: number;
+    maxOutputBytes?: number;
 }
 export interface SpoolPolicy {
     schema: typeof SPOOL_POLICY_SCHEMA;

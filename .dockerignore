@@ -6,8 +6,7 @@ node_modules
 .env.local
 .env.*.local
 
-# Build artifacts (rebuilt in Docker build stage)
-dist
+# TypeScript build metadata
 *.tsbuildinfo
 
 # Test files (not needed in production image)

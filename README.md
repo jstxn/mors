@@ -111,10 +111,19 @@ Sparse policy files keep secure defaults. Tool requests are denied unless the ho
   "tools": {
     "allow_requests": true,
     "allowed_names": ["run-tests"],
-    "max_args_bytes": 65536
+    "max_args_bytes": 65536,
+    "runners": {
+      "run-tests": {
+        "command": "npm",
+        "args": ["run", "test", "--", "--maxConcurrency=7"],
+        "cwd": "/workspace"
+      }
+    }
   }
 }
 ```
+
+Tool runners are host-owned and execute without a shell. Sandbox-provided tool args are passed through environment JSON rather than interpolated into a command line.
 
 Trusted VM agents can receive scoped direct relay tokens, but the safer default is still the file bridge:
 
@@ -122,7 +131,7 @@ Trusted VM agents can receive scoped direct relay tokens, but the safer default 
 node dist/index.js sandbox token --agent worker-a --scopes messages:read,messages:write,events:read --json
 ```
 
-See **[docs/sandbox-agents.md](./docs/sandbox-agents.md)** for the full shared-folder contract, policy file format, reference image guidance, transcript export, bridge state, and security notes.
+See **[docs/sandbox-agents.md](./docs/sandbox-agents.md)** for the full shared-folder contract, policy file format, host-side tool runner, reference image guidance, transcript export, bridge state, and security notes.
 
 ### Validate your setup
 

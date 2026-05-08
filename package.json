@@ -8,7 +8,8 @@
   },
   "files": [
     "dist",
-    "docs"
+    "docs",
+    "Dockerfile.sandbox"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

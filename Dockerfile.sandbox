@@ -1,0 +1,36 @@
+# Reference image for sandboxed mors agents.
+#
+# The image contains the mors CLI and local database prerequisites, but it does
+# not bake relay credentials or host policy into the container. Mount a
+# host-owned spool at /mnt/mors-spool and let the host run `mors spool bridge`.
+
+FROM node:20-bookworm-slim
+
+WORKDIR /opt/mors
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    g++ \
+    make \
+    python3 \
+    sqlcipher \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY dist/ dist/
+COPY docs/ docs/
+
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin mors-agent \
+  && mkdir -p /mnt/mors-spool /home/mors-agent/.mors \
+  && chown -R mors-agent:mors-agent /mnt/mors-spool /home/mors-agent/.mors
+
+USER mors-agent
+
+ENV MORS_CONFIG_DIR=/home/mors-agent/.mors
+VOLUME ["/mnt/mors-spool"]
+
+ENTRYPOINT ["node", "/opt/mors/dist/index.js"]
+CMD ["sandbox", "--help"]

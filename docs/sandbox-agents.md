@@ -55,12 +55,23 @@ Policies are host-owned JSON files. Omitted quota fields keep secure defaults.
   "tools": {
     "allow_requests": true,
     "allowed_names": ["run-tests"],
-    "max_args_bytes": 65536
+    "max_args_bytes": 65536,
+    "runners": {
+      "run-tests": {
+        "command": "npm",
+        "args": ["run", "test", "--", "--maxConcurrency=7"],
+        "cwd": "/workspace",
+        "timeout_ms": 120000,
+        "max_output_bytes": 65536
+      }
+    }
   }
 }
 ```
 
 Default tool posture is deny. Tool requests are only accepted when the host explicitly sets `tools.allow_requests` and, for production, names the allowed tools. Tool execution should stay host-side so the sandbox never gains more authority than the host policy grants.
+
+Runner commands are host-owned and executed without a shell. The sandbox-provided tool arguments are not interpolated into the command line; they are passed as JSON in `MORS_TOOL_ARGS_JSON`, along with `MORS_TOOL_NAME`, `MORS_TOOL_BODY`, and `MORS_TOOL_TRACE_ID`. The bridge writes a local `tool_result` entry back to `inbox/new` and moves the request to `outbox/cur`.
 
 ## Command Shapes
 
@@ -154,13 +165,20 @@ A production sandbox image should include:
 
 For containerized agents, mount only the intended spool root and keep host relay config outside the container. For VM agents, mount the spool folder with owner-only permissions when the hypervisor supports it.
 
+This repository includes `Dockerfile.sandbox` as the reference container build. Build it after `npm run build` so the committed `dist/` matches source:
+
+```bash
+docker build -f Dockerfile.sandbox -t mors-sandbox-agent:local .
+docker run --rm -v /var/lib/mors-spool:/mnt/mors-spool mors-sandbox-agent:local sandbox doctor --root /mnt/mors-spool --agent worker-a --json
+```
+
 ## Security Notes
 
 - The spool is plaintext on local disk. Use VM disk encryption or an encrypted host volume when messages are sensitive.
 - End-to-end encryption still applies to relay delivery, but the spool boundary is a local host trust boundary.
 - Sender authority is derived from the host bridge session, not from spool JSON fields.
 - Quotas protect the host from unbounded file growth and oversized commands.
-- Tool requests are data only. A future host tool runner must keep policy checks before execution.
+- Tool requests execute only when a host-owned runner is named in policy; no arbitrary shell text is accepted from the sandbox.
 
 ## Verification Checklist
 

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { MaildirSpool } from '../../src/spool/maildir.js';
-import { processSpoolOnce } from '../../src/spool/bridge.js';
+import { processSpoolOnce, runSpoolBridge } from '../../src/spool/bridge.js';
 import { DEFAULT_SPOOL_POLICY, mergeSpoolPolicy } from '../../src/spool/policy.js';
 import { SpoolBridgeStateStore } from '../../src/spool/state.js';
 import { SPOOL_SCHEMA, type SpoolRelayClient } from '../../src/spool/types.js';
@@ -232,6 +232,111 @@ describe('spool bridge', () => {
     expect(store.inbox('acct_bob')[0].body).toContain('run-tests');
   });
 
+  it('executes host-side tool requests when policy defines a runner', async () => {
+    aliceSpool.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'tool_request',
+      recipient_id: 'acct_host',
+      body: 'run tests locally',
+      tool: { name: 'run-tests', args: { target: 'unit' } },
+      trace_id: 'trc_tool_runner',
+    });
+
+    const result = await processSpoolOnce(aliceSpool, aliceClient, {
+      policy: mergeSpoolPolicy(DEFAULT_SPOOL_POLICY, {
+        tools: {
+          allowRequests: true,
+          allowedNames: ['run-tests'],
+          runners: {
+            'run-tests': {
+              command: process.execPath,
+              args: [
+                '-e',
+                'const args = JSON.parse(process.env.MORS_TOOL_ARGS_JSON); console.log(`target=${args.target}`);',
+              ],
+            },
+          },
+        },
+      }),
+    });
+
+    expect(result.tools_run).toBe(1);
+    expect(result.sent).toBe(0);
+    expect(store.inbox('acct_host')).toEqual([]);
+    expect(aliceSpool.listNew('outbox')).toEqual([]);
+    expect(readdirSync(aliceSpool.mailboxDir('outbox', 'cur'))).toHaveLength(1);
+
+    const [toolResultEntry] = aliceSpool.listNew('inbox');
+    const toolResult = aliceSpool.readJson(toolResultEntry) as {
+      kind: string;
+      recipient_id: string;
+      tool: { args: { result: { ok: boolean; stdout: string; exit_code: number } } };
+    };
+    expect(toolResult.kind).toBe('tool_result');
+    expect(toolResult.recipient_id).toBe('alice');
+    expect(toolResult.tool.args.result).toMatchObject({
+      ok: true,
+      exit_code: 0,
+      stdout: 'target=unit\n',
+    });
+  });
+
+  it('drains a high-volume outbox batch without duplicating relay messages', async () => {
+    for (let i = 0; i < 150; i++) {
+      aliceSpool.writeJson('outbox', {
+        schema: SPOOL_SCHEMA,
+        kind: 'message',
+        recipient_id: 'acct_bob',
+        body: `batch ${i}`,
+        dedupe_key: `dup_batch_${i}`,
+      });
+    }
+
+    const result = await processSpoolOnce(aliceSpool, aliceClient);
+
+    expect(result.sent).toBe(150);
+    expect(aliceSpool.listNew('outbox')).toEqual([]);
+    expect(readdirSync(aliceSpool.mailboxDir('outbox', 'cur'))).toHaveLength(150);
+    expect(store.inbox('acct_bob')).toHaveLength(150);
+    expect(new Set(store.inbox('acct_bob').map((message) => message.body)).size).toBe(150);
+  });
+
+  it('continuous bridge loop processes entries written after startup', async () => {
+    const handle = runSpoolBridge({
+      spool: aliceSpool,
+      client: aliceClient,
+      pollIntervalMs: 100,
+    });
+
+    try {
+      aliceSpool.writeJson('outbox', {
+        schema: SPOOL_SCHEMA,
+        kind: 'message',
+        recipient_id: 'acct_bob',
+        body: 'continuous one',
+        dedupe_key: 'dup_continuous_one',
+      });
+      aliceSpool.writeJson('outbox', {
+        schema: SPOOL_SCHEMA,
+        kind: 'message',
+        recipient_id: 'acct_bob',
+        body: 'continuous two',
+        dedupe_key: 'dup_continuous_two',
+      });
+
+      await waitUntil(() => store.inbox('acct_bob').length === 2);
+    } finally {
+      handle.stop();
+      await handle.done;
+    }
+
+    expect(aliceSpool.listNew('outbox')).toEqual([]);
+    expect(store.inbox('acct_bob').map((message) => message.body).sort()).toEqual([
+      'continuous one',
+      'continuous two',
+    ]);
+  });
+
   it('persists bridge state after one processing pass', async () => {
     aliceSpool.writeJson('outbox', {
       schema: SPOOL_SCHEMA,
@@ -295,3 +400,12 @@ describe('spool bridge', () => {
     expect(store.get(root.id)?.state).toBe('acked');
   });
 });
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Timed out waiting for condition.');
+}
