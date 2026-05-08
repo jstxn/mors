@@ -1,57 +1,97 @@
 # mors
 
-> **Beta** -- This project is under active development. Core messaging, auth, E2EE, and relay features work end-to-end, but APIs and CLI interfaces may change. Contributions, feedback, and bug reports are welcome. Open an issue or submit a PR at [github.com/jstxn/mors](https://github.com/jstxn/mors).
+`mors` is messaging infrastructure for people and autonomous agents.
 
-`mors` is a CLI-first messaging system with local encrypted storage, relay-backed delivery, mors-native auth, and realtime watch.
+Agents can write code, run tools, and operate in sandboxes, but they still need a clear way to coordinate: durable messages, readable state, safe handoffs, and a channel that works from a terminal, a VM, or a container. `mors` provides that layer as a CLI-first inbox with local encrypted storage, relay-backed delivery, realtime watch, and machine-readable JSON output.
 
-Start here for the fastest first success: **[ONBOARDING.md](./ONBOARDING.md)**
+Use it when you want agents and humans to communicate through a real message system instead of loose files, pasted logs, or ad hoc scripts.
 
-## Current behavior
+**Status:** beta. Core messaging, auth, E2EE, relay, hosted start, and sandbox-agent flows work end-to-end. Command details may still change.
 
-- **Hosted app path**: `mors start` now defaults to the hosted relay flow. Users run `mors init`, then `mors start`, choose a handle, and begin messaging without manual relay setup.
-- **Legacy native auth remains available**: `mors login` still supports invite-token bootstrap for admin/test flows.
-- **Bootstrap prerequisites**: `mors init` sets up local identity + device keys. Hosted `mors start` reuses those keys and publishes the public bundle automatically.
-- **Identity model**: handles are globally unique and immutable once created.
-- **First-contact autonomy model**: message delivery is always allowed (email-like inbox delivery), while autonomous actions remain gated until contact approval.
+## Why Use mors
+
+- **Agent-friendly by default:** every core command can return stable `--json`, with exit code `0` for success and non-zero for actionable failure.
+- **Local-first:** prove the full `init -> send -> inbox -> read -> ack` lifecycle without OAuth, cloud setup, or relay infrastructure.
+- **Human usable:** `mors start` gives an interactive terminal app for hosted messaging.
+- **Sandbox aware:** VM and container agents can use a mounted spool folder while the host keeps relay credentials and tool authority.
+- **Security minded:** local storage is encrypted, relay delivery supports E2EE, and sandbox tool execution is host-policy gated.
+- **Composable:** works as a CLI, a scriptable transport, a relay service, and an A2A Agent Card discovery surface.
+
+## What It Is Good For
+
+- Human-to-agent messaging from a terminal.
+- Multi-agent coordination where each worker needs a durable inbox.
+- Sandbox and VM agents that should not receive broad host credentials.
+- CI or coding agents that need structured messages and predictable JSON.
+- Local-first prototypes that can grow into relay-backed messaging.
+
+## Start Here
+
+For the fastest guided path, use [ONBOARDING.md](./ONBOARDING.md).
+
+For architecture, trust boundaries, command modes, and deployment notes, read [docs/technical-overview.md](./docs/technical-overview.md).
+
+For sandbox and VM integration, read [docs/sandbox-agents.md](./docs/sandbox-agents.md).
 
 ## Requirements
 
-- Node.js >= 20 + npm
-- Python 3 (native module build support)
-- SQLCipher (`brew install sqlcipher` on macOS)
+- Node.js >= 20 and npm
+- Python 3 for native module builds
+- SQLCipher, for example `brew install sqlcipher` on macOS
 
----
+## Quick Demo
+
+From a source checkout:
+
+```bash
+npm install
+npm run build
+export MORS_CONFIG_DIR=/tmp/mors-demo
+
+node dist/index.js setup local --json
+node dist/index.js send --to demo-recipient --body "hello from mors" --json
+node dist/index.js inbox --json
+node dist/index.js quickstart --json
+node dist/index.js doctor --json
+```
+
+That proves local identity, encrypted storage, message creation, inbox listing, and setup diagnostics.
 
 ## For Agents
 
-Autonomous agents can install and run `mors` without shell RC edits or interactive prompts. Use `npx`, a direct `node dist/index.js` invocation, or a global npm install — no `setup-shell` required.
+Agents should use isolated config folders, non-interactive commands, and `--json`. They do not need `setup-shell`.
 
-### Quick start (npx — zero install)
+### Install Or Run
+
+Run without installing:
 
 ```bash
 npx github:jstxn/mors --version
 ```
 
-### Self-serve install + run
+Install globally from GitHub:
 
 ```bash
 npm install -g github:jstxn/mors
+mors --version
 ```
 
-### Direct invocation (from source checkout)
+Run from a source checkout:
 
 ```bash
 node dist/index.js --version
 ```
 
-### Agent lifecycle (local, no relay)
+### Local Agent Lifecycle
 
-Use `MORS_CONFIG_DIR` to isolate each agent's data in its own directory. All commands accept `--json` for deterministic machine-parseable output. Exit code `0` means success; non-zero means failure with an actionable error message.
+Use `MORS_CONFIG_DIR` so each agent session has its own data. Exit code `0` means success. Any non-zero exit is a failure with an actionable message.
 
 ```bash
 export MORS_CONFIG_DIR=/tmp/mors-agent-session
-node dist/index.js init --json
+
+node dist/index.js setup local --json
 node dist/index.js send --to peer-agent --body "hello from agent" --json
+
 MSG_ID=$(node dist/index.js inbox --json | node -e '
   let s=""; process.stdin.on("data",d=>s+=d);
   process.stdin.on("end",()=>{
@@ -60,13 +100,16 @@ MSG_ID=$(node dist/index.js inbox --json | node -e '
     process.stdout.write(j.messages[0].id);
   });
 ')
+
 node dist/index.js read "$MSG_ID" --json
 node dist/index.js ack "$MSG_ID" --json
 ```
 
-### Agent spool bridge (sandbox or VM boundary)
+### Sandboxed Or VM Agents
 
-Use `mors sandbox` and `mors spool` when an isolated agent should communicate through files instead of holding relay credentials directly. The host owns the bridge process, relay session, quota policy, and tool policy; the sandbox only needs a mounted folder.
+Use the spool bridge when an isolated agent should not hold relay credentials. The host owns relay auth, quota policy, and tool policy. The sandbox only sees a mounted folder.
+
+Inside the sandbox:
 
 ```bash
 node dist/index.js sandbox init --root /tmp/mors-spool --agent worker-a --json
@@ -76,19 +119,7 @@ node dist/index.js spool wait --root /tmp/mors-spool --agent worker-a --timeout-
 node dist/index.js spool export --root /tmp/mors-spool --agent worker-a --json
 ```
 
-Spool layout:
-
-```text
-/tmp/mors-spool/agents/worker-a/
-  outbox/{tmp,new,cur}
-  inbox/{tmp,new,cur}
-  control/{tmp,new,cur}
-  failed/{tmp,new,cur}
-```
-
-Messages are published by writing complete JSON into `outbox/tmp` and renaming into `outbox/new`. Control files for `read` and `ack` use `control/new`. The bridge rejects sender authority fields in spool files and derives sender identity from the authenticated host session.
-
-Host bridge example:
+On the host:
 
 ```bash
 node dist/index.js spool bridge \
@@ -98,75 +129,50 @@ node dist/index.js spool bridge \
   --json
 ```
 
-Sparse policy files keep secure defaults. Tool requests are denied unless the host explicitly allows them:
+Tool requests are denied by default. Host-side tool runners must be named in policy, run without a shell, and receive sandbox arguments through environment JSON instead of command-line interpolation.
 
-```json
-{
-  "schema": "mors.spool.policy.v1",
-  "quotas": {
-    "max_entry_bytes": 1048576,
-    "max_pending_entries": 1000,
-    "max_pending_bytes": 67108864
-  },
-  "tools": {
-    "allow_requests": true,
-    "allowed_names": ["run-tests"],
-    "max_args_bytes": 65536,
-    "runners": {
-      "run-tests": {
-        "command": "npm",
-        "args": ["run", "test", "--", "--maxConcurrency=7"],
-        "cwd": "/workspace"
-      }
-    }
-  }
-}
-```
-
-Tool runners are host-owned and execute without a shell. Sandbox-provided tool args are passed through environment JSON rather than interpolated into a command line.
-
-Trusted VM agents can receive scoped direct relay tokens, but the safer default is still the file bridge:
+Use the included reference image after building the project:
 
 ```bash
-node dist/index.js sandbox token --agent worker-a --scopes messages:read,messages:write,events:read --json
+docker build -f Dockerfile.sandbox -t mors-sandbox-agent:local .
 ```
 
-See **[docs/sandbox-agents.md](./docs/sandbox-agents.md)** for the full shared-folder contract, policy file format, host-side tool runner, reference image guidance, transcript export, bridge state, and security notes.
+More detail lives in [docs/sandbox-agents.md](./docs/sandbox-agents.md).
 
-### Validate your setup
+### Relay-backed Agents
 
-Run the built-in quickstart to verify the full local lifecycle in one command:
+Use relay setup when the agent needs to communicate outside the local machine:
+
+```bash
+node dist/index.js setup relay --json
+node dist/index.js setup relay --handle worker-a --display-name "Worker A" --json
+```
+
+Use `--relay-url <url>` for a custom relay.
+
+### Agent Health Checks
 
 ```bash
 node dist/index.js quickstart --json
-```
-
-If something is wrong, use doctor to diagnose prerequisites and get copy/paste remediation commands:
-
-```bash
 node dist/index.js doctor --json
 ```
 
-### Error handling for agents
-
-Every `--json` error response includes `{ "status": "error", "error": "<type>", "message": "<actionable guidance>" }`. Common remediation patterns:
+### Common Agent Errors
 
 | Error | Meaning | Next command |
 |---|---|---|
-| `not_initialized` | Config dir not set up | `mors init --json` |
-| `not_authenticated` | Session missing/expired | `mors login --invite-token <token> --json` |
-| `missing_prerequisites` | Login prereqs incomplete | See `missing` array for specifics |
-| `sqlcipher_unavailable` | SQLCipher not installed | `brew install sqlcipher && npm rebuild` |
-
----
+| `not_initialized` | Config dir is not set up | `mors init --json` |
+| `not_authenticated` | Session is missing or expired | `mors login --invite-token <token> --json` |
+| `missing_prerequisites` | Login prerequisites are incomplete | Check the `missing` array |
+| `sqlcipher_unavailable` | SQLCipher is not installed | `brew install sqlcipher && npm rebuild` |
 
 ## For Humans
 
-Interactive users who want shell integration and a guided experience.
+If you want a guided terminal experience, install `mors`, initialize your local identity, then run `mors start`.
 
 ### Install
 
-#### npm global (GitHub)
+npm from GitHub:
 
 ```bash
 npm install -g github:jstxn/mors
@@ -174,83 +180,55 @@ mors --version
 mors setup-shell
 ```
 
-#### Homebrew formula path (tap-ready formula)
+Homebrew formula from this checkout:
 
 ```bash
 brew install --formula ./Formula/mors.rb
 mors --version
 ```
 
-### Local setup (from source)
+From source:
 
 ```bash
 npm install
 npm run build
-cp .env.example .env
 node dist/index.js --help
 ```
 
-### Validate your setup
+### Start Messaging
 
-Run quickstart to verify local lifecycle health, or doctor to check prerequisites:
+```bash
+mors setup relay
+mors start
+```
+
+`mors setup relay` initializes local state, configures the hosted relay by default, and checks relay reachability. `mors start` then helps you choose a handle, publishes your public device bundle, and opens the messaging app in your terminal.
+
+For local-only messaging:
+
+```bash
+mors setup local
+```
+
+Use `MORS_CONFIG_DIR` when you want a separate local profile:
+
+```bash
+MORS_CONFIG_DIR=/tmp/mors-demo mors start
+```
+
+### Check Your Setup
 
 ```bash
 mors quickstart
 mors doctor
 ```
 
-### Hosted messaging flow
+### Scriptable CLI Flow
 
-Use `MORS_CONFIG_DIR` if you want to keep data in a custom folder (for example: `MORS_CONFIG_DIR=/tmp/mors-demo mors inbox`).
+The lower-level commands are useful for tests, admin flows, and automation:
 
 ```bash
-# 1) Initialize local identity + device keys
 mors init
-
-# 2) Launch the hosted app experience
-mors start
-```
-
-What `mors start` does:
-
-- connects to the hosted relay by default
-- creates your profile with `handle + display name`
-- publishes your public device bundle automatically
-- lets you add people or agents by handle
-- opens inbox and message flows from one terminal app
-
-### Messaging people and agents
-
-Once you are in `mors start`:
-
-1. Add a contact by handle, like `@research-agent` or `@alice`
-2. Select that contact
-3. Send a message from the composer
-4. Open inbox items directly in the app
-
-Remote messages are encrypted automatically after the first trusted bundle exchange through the relay device directory. In practice that means normal users do not run manual key-exchange commands for the hosted flow.
-
-### Hosted default vs custom relay
-
-`mors start` uses the hosted relay by default. For self-hosting or local development you can still point the app at a custom relay:
-
-```bash
-mors start
-# choose "Custom relay URL" in the app
-```
-
-Or pin it from the shell:
-
-```bash
-export MORS_RELAY_BASE_URL=http://127.0.0.1:3100
-mors start
-```
-
-### Legacy low-level CLI flow
-
-The lower-level command flow still exists for scripting, testing, and admin scenarios:
-
-```bash
 mors login --invite-token mors-invite-0123456789abcdef0123456789abcdef
 mors onboard --handle agent_alice --display-name "Alice Agent"
 mors send --to agent-b --body "hello"
@@ -260,26 +238,18 @@ mors ack <message-id>
 mors watch
 ```
 
----
-
 ## A2A Agent Card Discovery
 
-The mors relay serves [A2A-compliant](https://a2a-protocol.org) Agent Cards so external systems can discover mors agents using the standard Agent2Agent protocol. No authentication is required for discovery.
+The relay serves A2A Agent Cards so other systems can discover mors agents.
 
 ```bash
-# Per-handle Agent Card (dynamic, reflects live account metadata)
 curl -s http://localhost:3100/.well-known/agent-card.json?handle=agent_alice
-
-# Relay-level fallback card (no handle param)
 curl -s http://localhost:3100/.well-known/agent-card.json
-
-# Unknown handle returns 404 with actionable message
-curl -s http://localhost:3100/.well-known/agent-card.json?handle=nonexistent
 ```
 
----
+See [docs/technical-overview.md](./docs/technical-overview.md) for protocol and deployment details.
 
-## Validation
+## Development
 
 ```bash
 npm run lint

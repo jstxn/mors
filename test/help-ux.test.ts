@@ -53,6 +53,7 @@ describe('CLI help UX regressions', () => {
   const helpCommands: string[][] = [
     ['key-exchange', '--help'],
     ['login', '--help'],
+    ['setup', '--help'],
     ['start', '--help'],
     ['send', '--help'],
     ['spool', '--help'],

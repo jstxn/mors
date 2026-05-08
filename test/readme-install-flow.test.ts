@@ -368,6 +368,7 @@ describe('VAL-LAUNCH-009: README command accuracy', () => {
     expect(result.exitCode).toBe(0);
     // All commands documented in README should appear in --help
     const helpOutput = result.stdout;
+    expect(helpOutput).toContain('setup');
     expect(helpOutput).toContain('init');
     expect(helpOutput).toContain('send');
     expect(helpOutput).toContain('inbox');

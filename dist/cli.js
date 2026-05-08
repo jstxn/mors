@@ -10,6 +10,7 @@ import { openEncryptedDb, verifySqlCipherAvailable } from './store.js';
 import { sendMessage, listInbox, readMessage, ackMessage, replyMessage, listThread, } from './message.js';
 import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
+import { runSetupCommand } from './setup.js';
 import { runStartCommand } from './start.js';
 import { runSandboxCommand, runSpoolCommand } from './spool/cli.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
@@ -92,6 +93,14 @@ export function run(args) {
     }
     if (command === 'setup-shell') {
         runSetupShellCommand(commandArgs);
+        return;
+    }
+    if (command === 'setup') {
+        runSetupCommand(commandArgs).catch((err) => {
+            process.exitCode = 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${msg}`);
+        });
         return;
     }
     if (command === 'start') {
@@ -3077,12 +3086,13 @@ Prerequisites:
 }
 // ── Usage ────────────────────────────────────────────────────────────
 function printUsage() {
-    console.log(`mors — agent-first encrypted CLI messaging
+    console.log(`mors - agent-first encrypted CLI messaging
 
 Usage:
   mors <command> [options]
 
 Commands:
+  setup       Prepare local-only or relay-backed mors usage
   quickstart   Run local lifecycle check (init → send → inbox → read → ack)
   doctor       Check prerequisites and configuration health
   init         Initialize identity and encrypted store
@@ -3187,6 +3197,16 @@ Status:
 Start:
   mors start
   Interactive relay-backed app for signup, contacts, inbox, and messaging
+
+Setup:
+  mors setup local [--json] [--config-dir <path>]
+  mors setup relay [--json] [--config-dir <path>] [--relay-url <url>]
+  mors setup relay --handle <handle> --display-name <name> [--json]
+  local                 Prepare local-only messaging
+  relay                 Prepare external relay-backed messaging
+  --relay-url <url>     Use a custom relay instead of the hosted default
+  --skip-relay-check    Skip the relay health check
+  --json                Output JSON
 
 Onboard:
   mors onboard --handle <handle> --display-name <name> [--json]
