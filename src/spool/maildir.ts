@@ -22,6 +22,7 @@ import {
   type SpoolMaterializedMessage,
 } from './types.js';
 import type { RelayMessageResponse } from '../relay/client.js';
+import type { SpoolQuotaPolicy } from './policy.js';
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -42,14 +43,57 @@ export class MaildirEntryError extends Error {
   }
 }
 
+export class MaildirQuotaError extends MaildirSpoolError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaildirQuotaError';
+  }
+}
+
 export interface MaildirSpoolOptions {
   root: string;
   agentId: string;
   maxEntryBytes?: number;
+  quotas?: SpoolQuotaPolicy;
 }
 
 export interface WriteJsonOptions {
   name?: string;
+}
+
+export interface MaildirEntrySummary {
+  mailbox: SpoolMailbox;
+  zone: MaildirZone;
+  name: string;
+  path: string;
+  bytes: number;
+  isFile: boolean;
+  modifiedAt: string;
+}
+
+export interface MaildirMailboxStats {
+  entries: number;
+  bytes: number;
+  newEntries: number;
+  newBytes: number;
+  curEntries: number;
+  failedEntries?: number;
+}
+
+export interface MaildirSpoolStats {
+  root: string;
+  agent_id: string;
+  agent_root: string;
+  exists: boolean;
+  total_entries: number;
+  total_bytes: number;
+  pending_entries: number;
+  pending_bytes: number;
+  inbox_entries: number;
+  failed_entries: number;
+  oldest_pending_at: string | null;
+  mailboxes: Record<SpoolMailbox, MaildirMailboxStats>;
+  quotas: SpoolQuotaPolicy;
 }
 
 export class MaildirSpool {
@@ -57,6 +101,7 @@ export class MaildirSpool {
   readonly agentId: string;
   readonly agentRoot: string;
   readonly maxEntryBytes: number;
+  readonly quotas: SpoolQuotaPolicy;
 
   constructor(options: MaildirSpoolOptions) {
     if (!options.root.trim()) {
@@ -70,7 +115,11 @@ export class MaildirSpool {
     this.root = options.root;
     this.agentId = options.agentId;
     this.agentRoot = join(options.root, 'agents', options.agentId);
-    this.maxEntryBytes = options.maxEntryBytes ?? 1024 * 1024;
+    this.quotas = {
+      ...(options.quotas ?? {}),
+      ...(options.maxEntryBytes ? { maxEntryBytes: options.maxEntryBytes } : {}),
+    };
+    this.maxEntryBytes = this.quotas.maxEntryBytes ?? 1024 * 1024;
   }
 
   init(): void {
@@ -90,18 +139,22 @@ export class MaildirSpool {
   }
 
   listNew(mailbox: SpoolMailbox): MaildirEntry[] {
-    const dir = this.mailboxDir(mailbox, 'new');
-    if (!existsSync(dir)) return [];
+    return this.listEntries(mailbox, 'new');
+  }
 
-    return readdirSync(dir)
+  listEntries(mailbox: SpoolMailbox, zone: MaildirZone): MaildirEntry[] {
+    const targetDir = this.mailboxDir(mailbox, zone);
+    if (!existsSync(targetDir)) return [];
+
+    return readdirSync(targetDir)
       .sort()
       .map((name) => {
         assertMaildirName(name);
-        return { mailbox, zone: 'new', name, path: join(dir, name) };
+        return { mailbox, zone, name, path: join(targetDir, name) };
       });
   }
 
-  readJson(entry: MaildirEntry): unknown {
+  readText(entry: MaildirEntry): string {
     const stat = lstatSync(entry.path);
     if (!stat.isFile()) {
       throw new MaildirEntryError(`Spool entry is not a regular file: ${entry.name}`);
@@ -111,8 +164,11 @@ export class MaildirSpool {
         `Spool entry exceeds max size (${this.maxEntryBytes} bytes): ${entry.name}`
       );
     }
+    return readFileSync(entry.path, 'utf8');
+  }
 
-    const raw = readFileSync(entry.path, 'utf8');
+  readJson(entry: MaildirEntry): unknown {
+    const raw = this.readText(entry);
     try {
       return JSON.parse(raw);
     } catch {
@@ -128,6 +184,7 @@ export class MaildirSpool {
     const tmpPath = join(this.mailboxDir(mailbox, 'tmp'), name);
     const newPath = join(this.mailboxDir(mailbox, 'new'), name);
     const data = JSON.stringify(value, null, 2) + '\n';
+    this.assertCanAddEntry(mailbox, Buffer.byteLength(data, 'utf8'));
 
     const fd = openSync(tmpPath, 'wx', FILE_MODE);
     try {
@@ -149,6 +206,7 @@ export class MaildirSpool {
   }
 
   moveToFailed(entry: MaildirEntry, reason: string): MaildirEntry {
+    this.assertCanAddEntry('failed', 0);
     const failedName = `${entry.mailbox}-${entry.name}`;
     assertMaildirName(failedName);
 
@@ -196,6 +254,133 @@ export class MaildirSpool {
       existsSync(join(this.mailboxDir(mailbox, 'cur'), name))
     );
   }
+
+  inspect(): MaildirSpoolStats {
+    const mailboxStats = emptyMailboxStats();
+    const summaries: MaildirEntrySummary[] = [];
+
+    if (existsSync(this.agentRoot)) {
+      for (const mailbox of MAILBOXES) {
+        for (const zone of MAILDIR_ZONES) {
+          summaries.push(...this.summarizeEntries(mailbox, zone));
+        }
+      }
+    }
+
+    let oldestPendingAt: string | null = null;
+    for (const summary of summaries) {
+      const stats = mailboxStats[summary.mailbox];
+      stats.entries++;
+      stats.bytes += summary.bytes;
+      if (summary.zone === 'new') {
+        stats.newEntries++;
+        stats.newBytes += summary.bytes;
+      }
+      if (summary.zone === 'cur') {
+        stats.curEntries++;
+      }
+      if (summary.mailbox === 'failed' && !isFailedErrorMetadata(summary.name)) {
+        stats.failedEntries = (stats.failedEntries ?? 0) + 1;
+      }
+      if (
+        (summary.mailbox === 'outbox' || summary.mailbox === 'control') &&
+        summary.zone === 'new' &&
+        (oldestPendingAt === null || summary.modifiedAt < oldestPendingAt)
+      ) {
+        oldestPendingAt = summary.modifiedAt;
+      }
+    }
+
+    const pendingEntries = mailboxStats.outbox.newEntries + mailboxStats.control.newEntries;
+    const pendingBytes = mailboxStats.outbox.newBytes + mailboxStats.control.newBytes;
+
+    return {
+      root: this.root,
+      agent_id: this.agentId,
+      agent_root: this.agentRoot,
+      exists: existsSync(this.agentRoot),
+      total_entries: summaries.length,
+      total_bytes: summaries.reduce((sum, entry) => sum + entry.bytes, 0),
+      pending_entries: pendingEntries,
+      pending_bytes: pendingBytes,
+      inbox_entries: mailboxStats.inbox.entries,
+      failed_entries: mailboxStats.failed.failedEntries ?? 0,
+      oldest_pending_at: oldestPendingAt,
+      mailboxes: mailboxStats,
+      quotas: this.quotas,
+    };
+  }
+
+  private summarizeEntries(mailbox: SpoolMailbox, zone: MaildirZone): MaildirEntrySummary[] {
+    const dir = this.mailboxDir(mailbox, zone);
+    if (!existsSync(dir)) return [];
+
+    return readdirSync(dir)
+      .sort()
+      .map((name) => {
+        assertMaildirName(name);
+        const path = join(dir, name);
+        const stat = lstatSync(path);
+        return {
+          mailbox,
+          zone,
+          name,
+          path,
+          bytes: stat.size,
+          isFile: stat.isFile(),
+          modifiedAt: stat.mtime.toISOString(),
+        };
+      });
+  }
+
+  private assertCanAddEntry(mailbox: SpoolMailbox, bytes: number): void {
+    if (bytes > this.maxEntryBytes) {
+      throw new MaildirQuotaError(
+        `Spool entry exceeds max size (${this.maxEntryBytes} bytes): ${bytes} bytes.`
+      );
+    }
+
+    const stats = this.inspect();
+    if (
+      (mailbox === 'outbox' || mailbox === 'control') &&
+      this.quotas.maxPendingEntries !== undefined &&
+      stats.pending_entries + 1 > this.quotas.maxPendingEntries
+    ) {
+      throw new MaildirQuotaError(
+        `Spool pending entry quota exceeded (${this.quotas.maxPendingEntries}).`
+      );
+    }
+
+    if (
+      (mailbox === 'outbox' || mailbox === 'control') &&
+      this.quotas.maxPendingBytes !== undefined &&
+      stats.pending_bytes + bytes > this.quotas.maxPendingBytes
+    ) {
+      throw new MaildirQuotaError(
+        `Spool pending byte quota exceeded (${this.quotas.maxPendingBytes} bytes).`
+      );
+    }
+
+    if (
+      mailbox === 'inbox' &&
+      this.quotas.maxInboxEntries !== undefined &&
+      stats.inbox_entries + 1 > this.quotas.maxInboxEntries
+    ) {
+      throw new MaildirQuotaError(
+        `Spool inbox entry quota exceeded (${this.quotas.maxInboxEntries}).`
+      );
+    }
+
+    if (
+      mailbox === 'failed' &&
+      this.quotas.maxFailedEntries !== undefined &&
+      stats.failed_entries + 1 > this.quotas.maxFailedEntries
+    ) {
+      throw new MaildirQuotaError(
+        `Spool failed entry quota exceeded (${this.quotas.maxFailedEntries}).`
+      );
+    }
+  }
 }
 
 export function assertMaildirName(name: string, label = 'Maildir entry name'): void {
@@ -224,4 +409,24 @@ function mkdirOwnerOnly(path: string): void {
   if (!existed) {
     chmodSync(path, DIR_MODE);
   }
+}
+
+function emptyMailboxStats(): Record<SpoolMailbox, MaildirMailboxStats> {
+  return {
+    outbox: { entries: 0, bytes: 0, newEntries: 0, newBytes: 0, curEntries: 0 },
+    inbox: { entries: 0, bytes: 0, newEntries: 0, newBytes: 0, curEntries: 0 },
+    control: { entries: 0, bytes: 0, newEntries: 0, newBytes: 0, curEntries: 0 },
+    failed: {
+      entries: 0,
+      bytes: 0,
+      newEntries: 0,
+      newBytes: 0,
+      curEntries: 0,
+      failedEntries: 0,
+    },
+  };
+}
+
+function isFailedErrorMetadata(name: string): boolean {
+  return name.endsWith('.error.json');
 }

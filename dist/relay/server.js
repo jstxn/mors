@@ -17,7 +17,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { isPublicRoute, extractAndVerify, extractBearerToken, send401, send403, parseConversationRoute, } from './auth-middleware.js';
+import { isPublicRoute, extractAndVerify, extractBearerToken, requireScope, send401, send403, parseConversationRoute, } from './auth-middleware.js';
 import { RelayMessageStore, RelayMessageNotFoundError, RelayUnauthorizedError, } from './message-store.js';
 import { AccountStore, DuplicateHandleError, ImmutableHandleError, InvalidHandleError, normalizeHandle, } from './account-store.js';
 import { ContactStore } from './contact-store.js';
@@ -409,6 +409,8 @@ export function createRelayServer(config, options) {
                 sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
                 return;
             }
+            if (!requireScope(res, principal, 'events:read'))
+                return;
             // Auto-register device identity on SSE connection (VAL-AUTH-009).
             // SSE connections return early before the general auto-registration path,
             // so we must register the device explicitly here to ensure watch-only
@@ -586,6 +588,8 @@ export function createRelayServer(config, options) {
         // Route: POST /accounts/register (register handle + profile)
         // Enforces globally unique, immutable handles (VAL-AUTH-008, VAL-AUTH-012).
         if (url === '/accounts/register' && method === 'POST' && accountStore) {
+            if (!requireScope(res, principal, 'accounts:write'))
+                return;
             const body = await readJsonBody(req);
             if (!body) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
@@ -638,6 +642,8 @@ export function createRelayServer(config, options) {
         }
         // Route: GET /accounts/me (get own profile)
         if (url === '/accounts/me' && method === 'GET' && accountStore) {
+            if (!requireScope(res, principal, 'accounts:read'))
+                return;
             const profile = accountStore.getByAccountId(principal.accountId);
             if (!profile) {
                 sendJson(res, 404, {
@@ -656,6 +662,8 @@ export function createRelayServer(config, options) {
         }
         // Route: GET /accounts/me/devices (list registered device identities, VAL-AUTH-009)
         if (url === '/accounts/me/devices' && method === 'GET' && accountStore) {
+            if (!requireScope(res, principal, 'accounts:read'))
+                return;
             const devices = accountStore.listDevices(principal.accountId);
             sendJson(res, 200, {
                 account_id: principal.accountId,
@@ -668,6 +676,8 @@ export function createRelayServer(config, options) {
         }
         // Route: PUT /accounts/me/device-bundle (publish public device bundle metadata)
         if (url === '/accounts/me/device-bundle' && method === 'PUT' && accountStore) {
+            if (!requireScope(res, principal, 'accounts:write'))
+                return;
             const body = await readJsonBody(req);
             if (!body) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
@@ -729,6 +739,8 @@ export function createRelayServer(config, options) {
         }
         const deviceBundleMatch = url.match(/^\/accounts\/([^/]+)\/device-bundles\/([^/]+)$/);
         if (deviceBundleMatch && method === 'GET' && accountStore) {
+            if (!requireScope(res, principal, 'accounts:read'))
+                return;
             const [, accountIdRaw, deviceIdRaw] = deviceBundleMatch;
             const accountId = decodeURIComponent(accountIdRaw);
             const deviceId = decodeURIComponent(deviceIdRaw);
@@ -752,6 +764,8 @@ export function createRelayServer(config, options) {
         // Covers: VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013
         // Route: POST /contacts/status (check contact approval status)
         if (url === '/contacts/status' && method === 'POST' && contactStore) {
+            if (!requireScope(res, principal, 'contacts:read'))
+                return;
             const body = await readJsonBody(req);
             if (!body) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
@@ -776,6 +790,8 @@ export function createRelayServer(config, options) {
         }
         // Route: POST /contacts/add (resolve handle and add contact)
         if (url === '/contacts/add' && method === 'POST' && contactStore && accountStore) {
+            if (!requireScope(res, principal, 'contacts:write'))
+                return;
             const body = await readJsonBody(req);
             if (!body) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
@@ -823,6 +839,8 @@ export function createRelayServer(config, options) {
         }
         // Route: POST /contacts/approve (approve a contact for autonomous actions)
         if (url === '/contacts/approve' && method === 'POST' && contactStore) {
+            if (!requireScope(res, principal, 'contacts:write'))
+                return;
             const body = await readJsonBody(req);
             if (!body) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
@@ -847,6 +865,8 @@ export function createRelayServer(config, options) {
         }
         // Route: GET /contacts (list all contacts with enriched profile metadata)
         if (url === '/contacts' && method === 'GET' && contactStore && accountStore) {
+            if (!requireScope(res, principal, 'contacts:read'))
+                return;
             const contacts = contactStore
                 .listContacts(principal.accountId)
                 .map((entry) => {
@@ -874,6 +894,8 @@ export function createRelayServer(config, options) {
         }
         // Route: GET /contacts/pending (list pending contacts)
         if (url === '/contacts/pending' && method === 'GET' && contactStore) {
+            if (!requireScope(res, principal, 'contacts:read'))
+                return;
             const pending = contactStore.listPendingContacts(principal.accountId);
             const pendingContacts = accountStore
                 ? pending
@@ -905,6 +927,8 @@ export function createRelayServer(config, options) {
         // ── Messaging routes (require messageStore) ─────────────────────
         // Route: POST /messages (send a message)
         if (url === '/messages' && method === 'POST' && messageStore) {
+            if (!requireScope(res, principal, 'messages:write'))
+                return;
             const body = await readJsonBody(req);
             if (!body) {
                 sendJson(res, 400, { error: 'invalid_body', detail: 'Request body must be valid JSON.' });
@@ -994,6 +1018,8 @@ export function createRelayServer(config, options) {
         }
         // Route: GET /inbox (list inbox for authenticated user)
         if ((url === '/inbox' || url.startsWith('/inbox?')) && method === 'GET' && messageStore) {
+            if (!requireScope(res, principal, 'messages:read'))
+                return;
             const urlObj = new URL(url, `http://localhost`);
             const unreadOnly = urlObj.searchParams.get('unread') === 'true';
             const messages = messageStore.inbox(principal.accountId, { unreadOnly });
@@ -1021,6 +1047,8 @@ export function createRelayServer(config, options) {
                         sendJson(res, 405, { error: 'method_not_allowed', allowed: ['POST'] });
                         return;
                     }
+                    if (!requireScope(res, principal, 'messages:state'))
+                        return;
                     try {
                         const result = messageStore.read(messageId, principal.accountId);
                         sendJson(res, 200, { message: result.message, first_read: result.firstRead });
@@ -1043,6 +1071,8 @@ export function createRelayServer(config, options) {
                         sendJson(res, 405, { error: 'method_not_allowed', allowed: ['POST'] });
                         return;
                     }
+                    if (!requireScope(res, principal, 'messages:state'))
+                        return;
                     try {
                         const result = messageStore.ack(messageId, principal.accountId);
                         sendJson(res, 200, { message: result.message, first_ack: result.firstAck });
@@ -1065,6 +1095,8 @@ export function createRelayServer(config, options) {
                         sendJson(res, 405, { error: 'method_not_allowed', allowed: ['GET'] });
                         return;
                     }
+                    if (!requireScope(res, principal, 'messages:read'))
+                        return;
                     const message = messageStore.get(messageId);
                     if (!message) {
                         sendJson(res, 404, { error: 'not_found', detail: `Message not found: ${messageId}` });
@@ -1083,6 +1115,8 @@ export function createRelayServer(config, options) {
         // Route: /conversations/:conversationId/... (auth + participant required)
         const convRoute = parseConversationRoute(url);
         if (convRoute) {
+            if (!requireScope(res, principal, 'messages:read'))
+                return;
             // Object-level authorization: fail-closed when participant store is absent.
             // If no participant store is configured, deny access (never fall through to 200).
             if (!participantStore) {

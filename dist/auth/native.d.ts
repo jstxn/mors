@@ -49,6 +49,8 @@ export interface SessionTokenOptions {
     deviceId: string;
     /** Secret key for HMAC signing. */
     signingKey: string;
+    /** Optional relay scopes for restricted sandbox or VM direct-access tokens. */
+    scopes?: string[];
 }
 /** Parsed and verified session token payload. */
 export interface SessionTokenPayload {
@@ -60,6 +62,8 @@ export interface SessionTokenPayload {
     issuedAt: string;
     /** Token ID (unique per token). */
     tokenId: string;
+    /** Optional relay scopes. Absence means a full session token. */
+    scopes?: string[];
 }
 /**
  * Validate an invite token.

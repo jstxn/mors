@@ -16,6 +16,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig } from '../../src/relay/config.js';
 import type { TokenVerifier, AuthPrincipal } from '../../src/relay/auth-middleware.js';
+import { RelayMessageStore } from '../../src/relay/message-store.js';
 import { getTestPort } from '../helpers/test-port.js';
 
 /** Helper to make HTTP requests to the relay server. */
@@ -34,12 +35,16 @@ async function fetchRelay(
  * Maps access tokens to principal identities.
  */
 function createStubVerifier(
-  tokenMap: Record<string, { accountId: string; deviceId: string }>
+  tokenMap: Record<string, { accountId: string; deviceId: string; scopes?: string[] }>
 ): TokenVerifier {
   return async (token: string) => {
     const user = tokenMap[token];
     if (!user) return null;
-    return { accountId: user.accountId, deviceId: user.deviceId };
+    return {
+      accountId: user.accountId,
+      deviceId: user.deviceId,
+      ...(user.scopes ? { scopes: user.scopes } : {}),
+    };
   };
 }
 
@@ -350,6 +355,96 @@ describe('relay auth guards', () => {
       const p = capturedPrincipal as unknown as AuthPrincipal;
       expect(p.accountId).toBe('acct_200');
       expect(p.deviceId).toBe('device-bob');
+    });
+  });
+
+  describe('scoped relay tokens', () => {
+    it('rejects a read-only token on write routes before mutating message state', async () => {
+      let port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const messageStore = new RelayMessageStore();
+      const verifier = createStubVerifier({
+        'read-only-token': {
+          accountId: 'acct_agent',
+          deviceId: 'sandbox-worker-a',
+          scopes: ['messages:read'],
+        },
+      });
+      server = createRelayServer(config, {
+        tokenVerifier: verifier,
+        messageStore,
+      });
+      await server.start();
+      port = server.port;
+
+      const { status, body } = await fetchRelay(port, '/messages', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer read-only-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipient_id: 'acct_host', body: 'attempted write' }),
+      });
+
+      expect(status).toBe(403);
+      expect(JSON.parse(body)).toMatchObject({ error: 'forbidden' });
+      expect(messageStore.inbox('acct_host')).toHaveLength(0);
+    });
+
+    it('allows a read-only token on read routes', async () => {
+      let port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const messageStore = new RelayMessageStore();
+      const verifier = createStubVerifier({
+        'read-only-token': {
+          accountId: 'acct_agent',
+          deviceId: 'sandbox-worker-a',
+          scopes: ['messages:read'],
+        },
+      });
+      server = createRelayServer(config, {
+        tokenVerifier: verifier,
+        messageStore,
+      });
+      await server.start();
+      port = server.port;
+
+      const { status, body } = await fetchRelay(port, '/inbox', {
+        headers: { Authorization: 'Bearer read-only-token' },
+      });
+
+      expect(status).toBe(200);
+      expect(JSON.parse(body)).toMatchObject({ count: 0, messages: [] });
+    });
+
+    it('preserves unrestricted behavior for tokens without explicit scopes', async () => {
+      let port = getTestPort();
+      const config = loadRelayConfig({ MORS_RELAY_PORT: String(port) });
+      const messageStore = new RelayMessageStore();
+      const verifier = createStubVerifier({
+        'full-token': {
+          accountId: 'acct_agent',
+          deviceId: 'device-full',
+        },
+      });
+      server = createRelayServer(config, {
+        tokenVerifier: verifier,
+        messageStore,
+      });
+      await server.start();
+      port = server.port;
+
+      const { status } = await fetchRelay(port, '/messages', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer full-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipient_id: 'acct_host', body: 'allowed write' }),
+      });
+
+      expect(status).toBe(201);
+      expect(messageStore.inbox('acct_host')).toHaveLength(1);
     });
   });
 

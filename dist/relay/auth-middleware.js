@@ -17,6 +17,16 @@
  * - VAL-AUTH-003: Missing/invalid/expired credentials return 401
  * - VAL-AUTH-004: Non-participant access returns 403 without mutation
  */
+export const RELAY_SCOPES = [
+    'messages:read',
+    'messages:write',
+    'messages:state',
+    'events:read',
+    'accounts:read',
+    'accounts:write',
+    'contacts:read',
+    'contacts:write',
+];
 // ── Token structure inspection ────────────────────────────────────────
 /**
  * Check whether a token has the structure of a well-formed mors session token.
@@ -150,6 +160,17 @@ export function send403(res, detail) {
     });
     res.end(json);
 }
+export function principalHasScope(principal, scope) {
+    if (principal.scopes === undefined)
+        return true;
+    return principal.scopes.includes(scope);
+}
+export function requireScope(res, principal, scope) {
+    if (principalHasScope(principal, scope))
+        return true;
+    send403(res, `Token scope "${scope}" is required for this relay action.`);
+    return false;
+}
 /**
  * Parse a URL to extract conversation route parameters.
  *
@@ -195,6 +216,7 @@ export function createNativeTokenVerifier(signingKey) {
             return {
                 accountId: payload.accountId,
                 deviceId: payload.deviceId,
+                ...(payload.scopes ? { scopes: payload.scopes } : {}),
             };
         }
         catch {

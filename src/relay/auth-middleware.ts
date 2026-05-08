@@ -28,6 +28,8 @@ export interface AuthPrincipal {
   accountId: string;
   /** Device ID from the session token. */
   deviceId: string;
+  /** Optional relay scopes. Undefined means an unrestricted full session. */
+  scopes?: string[];
 }
 
 /**
@@ -55,6 +57,19 @@ export interface ParticipantStore {
 export type AuthResult =
   | { authenticated: true; principal: AuthPrincipal }
   | { authenticated: false; error: string; detail: string };
+
+export const RELAY_SCOPES = [
+  'messages:read',
+  'messages:write',
+  'messages:state',
+  'events:read',
+  'accounts:read',
+  'accounts:write',
+  'contacts:read',
+  'contacts:write',
+] as const;
+
+export type RelayScope = (typeof RELAY_SCOPES)[number];
 
 // ── Token structure inspection ────────────────────────────────────────
 
@@ -210,6 +225,21 @@ export function send403(res: ServerResponse, detail: string): void {
   res.end(json);
 }
 
+export function principalHasScope(principal: AuthPrincipal, scope: RelayScope): boolean {
+  if (principal.scopes === undefined) return true;
+  return principal.scopes.includes(scope);
+}
+
+export function requireScope(
+  res: ServerResponse,
+  principal: AuthPrincipal,
+  scope: RelayScope
+): boolean {
+  if (principalHasScope(principal, scope)) return true;
+  send403(res, `Token scope "${scope}" is required for this relay action.`);
+  return false;
+}
+
 // ── Conversation route parsing ──────────────────────────────────────
 
 /** Parsed conversation route. */
@@ -267,6 +297,7 @@ export function createNativeTokenVerifier(signingKey: string): TokenVerifier {
       return {
         accountId: payload.accountId,
         deviceId: payload.deviceId,
+        ...(payload.scopes ? { scopes: payload.scopes } : {}),
       };
     } catch {
       return null;

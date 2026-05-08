@@ -11,7 +11,7 @@ import { sendMessage, listInbox, readMessage, ackMessage, replyMessage, listThre
 import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { runStartCommand } from './start.js';
-import { runSpoolCommand } from './spool/cli.js';
+import { runSandboxCommand, runSpoolCommand } from './spool/cli.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
 import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
 import { getDeviceKeysDir, isDeviceBootstrapped } from './e2ee/device-keys.js';
@@ -104,6 +104,14 @@ export function run(args) {
     }
     if (command === 'spool') {
         runSpoolCommand(commandArgs).catch((err) => {
+            process.exitCode = 1;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`Error: ${msg}`);
+        });
+        return;
+    }
+    if (command === 'sandbox') {
+        runSandboxCommand(commandArgs).catch((err) => {
             process.exitCode = 1;
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`Error: ${msg}`);
@@ -3092,6 +3100,7 @@ Commands:
   thread       View thread messages in causal order
   watch        Watch for new messages
   spool        Maildir-style agent communication spool
+  sandbox      VM and sandbox agent helper commands
   deploy       Deploy relay to Fly.io
   setup-shell  Configure shell PATH for mors
 
@@ -3146,7 +3155,18 @@ Watch:
 
 Spool:
   mors spool init --root <path> --agent <agent-id> [--json]
-  mors spool bridge --root <path> --agent <agent-id> [--once] [--json]
+  mors spool doctor --root <path> --agent <agent-id> [--json]
+  mors spool write --root <path> --agent <agent-id> --kind message --to <id> --body <text> [--json]
+  mors spool tail --root <path> --agent <agent-id> [--mailbox inbox] [--json]
+  mors spool wait --root <path> --agent <agent-id> [--timeout-ms 30000] [--json]
+  mors spool export --root <path> --agent <agent-id> [--output <file>] [--json]
+  mors spool bridge --root <path> --agent <agent-id> [--once] [--policy <file>] [--json]
+
+Sandbox:
+  mors sandbox init --root <path> --agent <agent-id> [--json]
+  mors sandbox doctor --root <path> --agent <agent-id> [--json]
+  mors sandbox status --root <path> --agent <agent-id> [--json]
+  mors sandbox token --agent <agent-id> [--scopes <csv>] [--json]
 
 Login:
   mors login --invite-token <token> [--json]

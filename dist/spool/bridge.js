@@ -1,6 +1,8 @@
 import { RelayClientError } from '../relay/client.js';
 import { connectRemoteWatch } from '../remote-watch.js';
-import { MaildirEntryError, MaildirSpool } from './maildir.js';
+import { MaildirEntryError, MaildirQuotaError, MaildirSpool } from './maildir.js';
+import { DEFAULT_SPOOL_POLICY, SpoolPolicyError, validateSpoolCommandPolicy, } from './policy.js';
+import {} from './state.js';
 import { SPOOL_COMMAND_KINDS, SPOOL_SCHEMA, } from './types.js';
 export class SpoolValidationError extends Error {
     constructor(message) {
@@ -11,43 +13,58 @@ export class SpoolValidationError extends Error {
 export async function processSpoolOnce(spool, client, options = {}) {
     spool.init();
     const result = emptyResult();
-    for (const entry of [...spool.listNew('outbox'), ...spool.listNew('control')]) {
-        result.processed++;
-        try {
-            const parsed = parseSpoolCommand(spool.readJson(entry));
-            if (parsed.kind === 'read') {
-                await client.read(parsed.message_id);
-                spool.moveToCur(entry);
-                result.read++;
-            }
-            else if (parsed.kind === 'ack') {
-                await client.ack(parsed.message_id);
-                spool.moveToCur(entry);
-                result.acked++;
-            }
-            else {
-                const sendResult = await client.send(commandToSendOptions(parsed));
-                spool.moveToCur(entry);
-                if (sendResult.queued) {
-                    result.queued++;
+    const policy = options.policy ?? DEFAULT_SPOOL_POLICY;
+    try {
+        for (const entry of [...spool.listNew('outbox'), ...spool.listNew('control')]) {
+            result.processed++;
+            try {
+                const parsed = parseSpoolCommand(spool.readJson(entry));
+                validateSpoolCommandPolicy(parsed, policy);
+                if (parsed.kind === 'read') {
+                    await client.read(parsed.message_id);
+                    spool.moveToCur(entry);
+                    result.read++;
+                }
+                else if (parsed.kind === 'ack') {
+                    await client.ack(parsed.message_id);
+                    spool.moveToCur(entry);
+                    result.acked++;
                 }
                 else {
-                    result.sent++;
+                    const sendResult = await client.send(commandToSendOptions(parsed));
+                    spool.moveToCur(entry);
+                    if (sendResult.queued) {
+                        result.queued++;
+                    }
+                    else {
+                        result.sent++;
+                    }
+                }
+            }
+            catch (err) {
+                if (isPermanentFailure(err)) {
+                    spool.moveToFailed(entry, err instanceof Error ? err.message : String(err));
+                    result.failed++;
+                    if (err instanceof SpoolPolicyError)
+                        result.policy_rejected++;
+                    if (err instanceof MaildirQuotaError)
+                        result.quota_rejected++;
+                }
+                else {
+                    result.deferred++;
                 }
             }
         }
-        catch (err) {
-            if (isPermanentFailure(err)) {
-                spool.moveToFailed(entry, err instanceof Error ? err.message : String(err));
-                result.failed++;
-            }
-            else {
-                result.deferred++;
-            }
-        }
+        result.materialized += await reconcileInbox(spool, client, options);
+        options.stateStore?.recordResult(result, {
+            nextRetryAt: result.deferred > 0 ? new Date(Date.now() + 1000).toISOString() : undefined,
+        });
+        return result;
     }
-    result.materialized += await reconcileInbox(spool, client, options);
-    return result;
+    catch (err) {
+        options.stateStore?.recordError(err);
+        throw err;
+    }
 }
 export async function reconcileInbox(spool, client, options = {}) {
     if (!client.inbox)
@@ -93,6 +110,9 @@ export function runSpoolBridge(options) {
             await processSpoolOnce(spool, client, options);
         }
         catch (err) {
+            options.stateStore?.recordError(err, {
+                nextRetryAt: new Date(Date.now() + pollIntervalMs).toISOString(),
+            });
             logger?.(`spool bridge iteration failed: ${err instanceof Error ? err.message : String(err)}`);
         }
         if (!stopped) {
@@ -195,6 +215,9 @@ async function materializeWatchEvent(spool, client, event, options) {
         if (entry) {
             options.onInboxMessage?.(message, entry);
         }
+        if (event.id) {
+            options.stateStore?.recordEventCursor(event.id);
+        }
     }
     catch (err) {
         options.logger?.(`spool bridge failed to materialize ${messageId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -267,7 +290,10 @@ function optionalPrefixedString(value, field, prefix) {
     return text;
 }
 function isPermanentFailure(err) {
-    if (err instanceof SpoolValidationError || err instanceof MaildirEntryError) {
+    if (err instanceof SpoolValidationError ||
+        err instanceof SpoolPolicyError ||
+        err instanceof MaildirEntryError ||
+        err instanceof MaildirQuotaError) {
         return true;
     }
     return err instanceof RelayClientError && err.statusCode >= 400 && err.statusCode < 500;
@@ -282,6 +308,8 @@ function emptyResult() {
         materialized: 0,
         failed: 0,
         deferred: 0,
+        policy_rejected: 0,
+        quota_rejected: 0,
     };
 }
 //# sourceMappingURL=bridge.js.map

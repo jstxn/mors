@@ -24,6 +24,8 @@ export interface AuthPrincipal {
     accountId: string;
     /** Device ID from the session token. */
     deviceId: string;
+    /** Optional relay scopes. Undefined means an unrestricted full session. */
+    scopes?: string[];
 }
 /**
  * Token verifier function.
@@ -53,6 +55,8 @@ export type AuthResult = {
     error: string;
     detail: string;
 };
+export declare const RELAY_SCOPES: readonly ["messages:read", "messages:write", "messages:state", "events:read", "accounts:read", "accounts:write", "contacts:read", "contacts:write"];
+export type RelayScope = (typeof RELAY_SCOPES)[number];
 /**
  * Check whether a given URL path is a public route (no auth required).
  *
@@ -84,6 +88,8 @@ export declare function send401(res: ServerResponse, detail: string): void;
  * Send a 403 Forbidden JSON response.
  */
 export declare function send403(res: ServerResponse, detail: string): void;
+export declare function principalHasScope(principal: AuthPrincipal, scope: RelayScope): boolean;
+export declare function requireScope(res: ServerResponse, principal: AuthPrincipal, scope: RelayScope): boolean;
 /** Parsed conversation route. */
 export interface ConversationRoute {
     conversationId: string;

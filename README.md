@@ -66,11 +66,14 @@ node dist/index.js ack "$MSG_ID" --json
 
 ### Agent spool bridge (sandbox or VM boundary)
 
-Use `mors spool` when an isolated agent should communicate through files instead of holding relay credentials directly. The host owns the bridge process and relay session; the agent writes JSON commands into its own outbox.
+Use `mors sandbox` and `mors spool` when an isolated agent should communicate through files instead of holding relay credentials directly. The host owns the bridge process, relay session, quota policy, and tool policy; the sandbox only needs a mounted folder.
 
 ```bash
-node dist/index.js spool init --root /tmp/mors-spool --agent worker-a --json
-node dist/index.js spool bridge --root /tmp/mors-spool --agent worker-a --once --json
+node dist/index.js sandbox init --root /tmp/mors-spool --agent worker-a --json
+node dist/index.js sandbox doctor --root /tmp/mors-spool --agent worker-a --json
+node dist/index.js spool write --root /tmp/mors-spool --agent worker-a --to acct_host --body "ready" --json
+node dist/index.js spool wait --root /tmp/mors-spool --agent worker-a --timeout-ms 30000 --json
+node dist/index.js spool export --root /tmp/mors-spool --agent worker-a --json
 ```
 
 Spool layout:
@@ -84,6 +87,42 @@ Spool layout:
 ```
 
 Messages are published by writing complete JSON into `outbox/tmp` and renaming into `outbox/new`. Control files for `read` and `ack` use `control/new`. The bridge rejects sender authority fields in spool files and derives sender identity from the authenticated host session.
+
+Host bridge example:
+
+```bash
+node dist/index.js spool bridge \
+  --root /tmp/mors-spool \
+  --agent worker-a \
+  --policy ./worker-a.policy.json \
+  --json
+```
+
+Sparse policy files keep secure defaults. Tool requests are denied unless the host explicitly allows them:
+
+```json
+{
+  "schema": "mors.spool.policy.v1",
+  "quotas": {
+    "max_entry_bytes": 1048576,
+    "max_pending_entries": 1000,
+    "max_pending_bytes": 67108864
+  },
+  "tools": {
+    "allow_requests": true,
+    "allowed_names": ["run-tests"],
+    "max_args_bytes": 65536
+  }
+}
+```
+
+Trusted VM agents can receive scoped direct relay tokens, but the safer default is still the file bridge:
+
+```bash
+node dist/index.js sandbox token --agent worker-a --scopes messages:read,messages:write,events:read --json
+```
+
+See **[docs/sandbox-agents.md](./docs/sandbox-agents.md)** for the full shared-folder contract, policy file format, reference image guidance, transcript export, bridge state, and security notes.
 
 ### Validate your setup
 

@@ -5,6 +5,8 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { MaildirSpool } from '../../src/spool/maildir.js';
 import { processSpoolOnce } from '../../src/spool/bridge.js';
+import { DEFAULT_SPOOL_POLICY, mergeSpoolPolicy } from '../../src/spool/policy.js';
+import { SpoolBridgeStateStore } from '../../src/spool/state.js';
 import { SPOOL_SCHEMA, type SpoolRelayClient } from '../../src/spool/types.js';
 import { RelayMessageStore } from '../../src/relay/message-store.js';
 import type {
@@ -192,6 +194,62 @@ describe('spool bridge', () => {
     expect(bobSpool.listNew('inbox').map((entry) => entry.name)).toEqual([
       `${sent.message.id}.json`,
     ]);
+  });
+
+  it('rejects tool requests unless the host policy explicitly allows them', async () => {
+    aliceSpool.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'tool_request',
+      recipient_id: 'acct_bob',
+      body: 'run tests',
+      tool: { name: 'run-tests', args: { target: 'unit' } },
+    });
+
+    const result = await processSpoolOnce(aliceSpool, aliceClient);
+
+    expect(result.failed).toBe(1);
+    expect(result.policy_rejected).toBe(1);
+    expect(store.inbox('acct_bob')).toEqual([]);
+  });
+
+  it('allows tool requests when the host policy names the tool', async () => {
+    aliceSpool.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'tool_request',
+      recipient_id: 'acct_bob',
+      body: 'run tests',
+      tool: { name: 'run-tests', args: { target: 'unit' } },
+    });
+
+    const result = await processSpoolOnce(aliceSpool, aliceClient, {
+      policy: mergeSpoolPolicy(DEFAULT_SPOOL_POLICY, {
+        tools: { allowRequests: true, allowedNames: ['run-tests'] },
+      }),
+    });
+
+    expect(result.sent).toBe(1);
+    expect(result.policy_rejected).toBe(0);
+    expect(store.inbox('acct_bob')[0].body).toContain('run-tests');
+  });
+
+  it('persists bridge state after one processing pass', async () => {
+    aliceSpool.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'message',
+      recipient_id: 'acct_bob',
+      body: 'stateful bridge pass',
+    });
+    const stateStore = new SpoolBridgeStateStore({
+      path: join(tempRoot, 'alice-bridge-state.json'),
+      agentId: 'alice',
+    });
+
+    await processSpoolOnce(aliceSpool, aliceClient, { stateStore });
+
+    const state = stateStore.load();
+    expect(state?.schema).toBe('mors.spool.bridge-state.v1');
+    expect(state?.last_result?.sent).toBe(1);
+    expect(state?.consecutive_failures).toBe(0);
   });
 
   it('runs a two-agent tempdir lifecycle through send, reply, materialize, and ack', async () => {

@@ -20,6 +20,7 @@ describe('distribution metadata', () => {
     expect(pkg.files).toBeDefined();
     expect(Array.isArray(pkg.files)).toBe(true);
     expect(pkg.files).toContain('dist');
+    expect(pkg.files).toContain('docs');
   });
 
   it('package has prepare script that compiles TypeScript', () => {
@@ -77,6 +78,7 @@ describe('npm pack includes correct files', () => {
     expect(files.some((f: string) => f.startsWith('dist/'))).toBe(true);
     expect(files.some((f: string) => f === 'dist/index.js')).toBe(true);
     expect(files.some((f: string) => f === 'dist/cli.js')).toBe(true);
+    expect(files.some((f: string) => f === 'docs/sandbox-agents.md')).toBe(true);
 
     // Must NOT include source or test files
     expect(files.some((f: string) => f.startsWith('src/'))).toBe(false);

@@ -98,6 +98,8 @@ export interface SessionTokenOptions {
   deviceId: string;
   /** Secret key for HMAC signing. */
   signingKey: string;
+  /** Optional relay scopes for restricted sandbox or VM direct-access tokens. */
+  scopes?: string[];
 }
 
 /** Parsed and verified session token payload. */
@@ -110,6 +112,8 @@ export interface SessionTokenPayload {
   issuedAt: string;
   /** Token ID (unique per token). */
   tokenId: string;
+  /** Optional relay scopes. Absence means a full session token. */
+  scopes?: string[];
 }
 
 // ── Invite token validation ──────────────────────────────────────────
@@ -203,6 +207,7 @@ export function generateSessionToken(options: SessionTokenOptions): string {
     deviceId: options.deviceId,
     issuedAt: new Date().toISOString(),
     tokenId: randomUUID(),
+    ...(options.scopes ? { scopes: options.scopes } : {}),
   };
 
   const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -260,11 +265,16 @@ export function verifySessionToken(token: string, signingKey: string): SessionTo
       return null;
     }
 
+    const scopes = Array.isArray(payload['scopes'])
+      ? payload['scopes'].filter((scope): scope is string => typeof scope === 'string')
+      : undefined;
+
     return {
       accountId: payload['accountId'] as string,
       deviceId: payload['deviceId'] as string,
       issuedAt: payload['issuedAt'] as string,
       tokenId: payload['tokenId'] as string,
+      ...(scopes ? { scopes } : {}),
     };
   } catch {
     return null;

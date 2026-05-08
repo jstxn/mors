@@ -1,0 +1,186 @@
+import { readFileSync } from 'node:fs';
+import type { SpoolCommand } from './types.js';
+
+export const SPOOL_POLICY_SCHEMA = 'mors.spool.policy.v1';
+
+export interface SpoolQuotaPolicy {
+  maxEntryBytes?: number;
+  maxPendingEntries?: number;
+  maxPendingBytes?: number;
+  maxInboxEntries?: number;
+  maxFailedEntries?: number;
+}
+
+export interface SpoolToolPolicy {
+  allowRequests?: boolean;
+  allowedNames?: string[];
+  maxArgsBytes?: number;
+}
+
+export interface SpoolPolicy {
+  schema: typeof SPOOL_POLICY_SCHEMA;
+  quotas: SpoolQuotaPolicy;
+  tools: SpoolToolPolicy;
+}
+
+export class SpoolPolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SpoolPolicyError';
+  }
+}
+
+export const DEFAULT_SPOOL_POLICY: SpoolPolicy = {
+  schema: SPOOL_POLICY_SCHEMA,
+  quotas: {
+    maxEntryBytes: 1024 * 1024,
+    maxPendingEntries: 1000,
+    maxPendingBytes: 64 * 1024 * 1024,
+    maxInboxEntries: 10000,
+    maxFailedEntries: 1000,
+  },
+  tools: {
+    allowRequests: false,
+    allowedNames: [],
+    maxArgsBytes: 64 * 1024,
+  },
+};
+
+export function loadSpoolPolicy(path: string): SpoolPolicy {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new SpoolPolicyError(`Could not load spool policy ${path}: ${detail}`);
+  }
+
+  return normalizeSpoolPolicy(parsed);
+}
+
+export function mergeSpoolPolicy(
+  base: SpoolPolicy = DEFAULT_SPOOL_POLICY,
+  overrides: Partial<SpoolPolicy> = {}
+): SpoolPolicy {
+  return {
+    schema: SPOOL_POLICY_SCHEMA,
+    quotas: {
+      ...base.quotas,
+      ...withoutUndefined(overrides.quotas ?? {}),
+    },
+    tools: {
+      ...base.tools,
+      ...withoutUndefined(overrides.tools ?? {}),
+    },
+  };
+}
+
+export function normalizeSpoolPolicy(value: unknown): SpoolPolicy {
+  const record = requireRecord(value, 'Spool policy');
+  if (record['schema'] !== SPOOL_POLICY_SCHEMA) {
+    throw new SpoolPolicyError(`Spool policy schema must be ${SPOOL_POLICY_SCHEMA}.`);
+  }
+
+  const quotas = parseQuotaPolicy(record['quotas']);
+  const tools = parseToolPolicy(record['tools']);
+  return mergeSpoolPolicy(DEFAULT_SPOOL_POLICY, { quotas, tools });
+}
+
+export function validateSpoolCommandPolicy(command: SpoolCommand, policy: SpoolPolicy): void {
+  if (command.kind !== 'tool_request') return;
+
+  if (!policy.tools.allowRequests) {
+    throw new SpoolPolicyError(
+      'Tool requests are disabled by spool policy. Add an explicit allowed tool policy on the host to enable them.'
+    );
+  }
+
+  if (!command.tool) {
+    throw new SpoolPolicyError('tool_request entries must include a tool object.');
+  }
+
+  const allowedNames = policy.tools.allowedNames ?? [];
+  if (allowedNames.length > 0 && !allowedNames.includes(command.tool.name)) {
+    throw new SpoolPolicyError(`Tool "${command.tool.name}" is not allowed by spool policy.`);
+  }
+
+  const argsBytes = Buffer.byteLength(JSON.stringify(command.tool.args ?? {}), 'utf8');
+  const maxArgsBytes = policy.tools.maxArgsBytes ?? DEFAULT_SPOOL_POLICY.tools.maxArgsBytes;
+  if (maxArgsBytes !== undefined && argsBytes > maxArgsBytes) {
+    throw new SpoolPolicyError(
+      `Tool args exceed max size (${maxArgsBytes} bytes): ${argsBytes} bytes.`
+    );
+  }
+}
+
+function parseQuotaPolicy(value: unknown): SpoolQuotaPolicy {
+  if (value === undefined) return {};
+  const record = requireRecord(value, 'quotas');
+  return {
+    maxEntryBytes: optionalPositiveInteger(record['max_entry_bytes'], 'quotas.max_entry_bytes'),
+    maxPendingEntries: optionalPositiveInteger(
+      record['max_pending_entries'],
+      'quotas.max_pending_entries'
+    ),
+    maxPendingBytes: optionalPositiveInteger(record['max_pending_bytes'], 'quotas.max_pending_bytes'),
+    maxInboxEntries: optionalPositiveInteger(record['max_inbox_entries'], 'quotas.max_inbox_entries'),
+    maxFailedEntries: optionalPositiveInteger(
+      record['max_failed_entries'],
+      'quotas.max_failed_entries'
+    ),
+  };
+}
+
+function parseToolPolicy(value: unknown): SpoolToolPolicy {
+  if (value === undefined) return {};
+  const record = requireRecord(value, 'tools');
+  const allowedNamesRaw = record['allowed_names'];
+  let allowedNames: string[] | undefined;
+
+  if (allowedNamesRaw !== undefined) {
+    if (!Array.isArray(allowedNamesRaw)) {
+      throw new SpoolPolicyError('tools.allowed_names must be an array of strings.');
+    }
+    allowedNames = allowedNamesRaw.map((name) => {
+      if (typeof name !== 'string' || name.trim().length === 0) {
+        throw new SpoolPolicyError('tools.allowed_names entries must be non-empty strings.');
+      }
+      return name;
+    });
+  }
+
+  return {
+    allowRequests: optionalBoolean(record['allow_requests'], 'tools.allow_requests'),
+    allowedNames,
+    maxArgsBytes: optionalPositiveInteger(record['max_args_bytes'], 'tools.max_args_bytes'),
+  };
+}
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new SpoolPolicyError(`${label} must be a JSON object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function optionalPositiveInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new SpoolPolicyError(`${field} must be a positive integer when provided.`);
+  }
+  return value;
+}
+
+function optionalBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new SpoolPolicyError(`${field} must be a boolean when provided.`);
+  }
+  return value;
+}
+
+function withoutUndefined<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined)
+  ) as Partial<T>;
+}

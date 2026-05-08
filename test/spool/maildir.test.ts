@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync } fr
 import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { MaildirSpool } from '../../src/spool/maildir.js';
+import { MaildirQuotaError, MaildirSpool } from '../../src/spool/maildir.js';
 import { SPOOL_SCHEMA } from '../../src/spool/types.js';
 import type { RelayMessageResponse } from '../../src/relay/client.js';
 
@@ -128,5 +128,60 @@ describe('MaildirSpool', () => {
 
     expect(statSync(tempRoot).mode & 0o777).toBe(0o755);
     expect(statSync(join(tempRoot, 'agents')).mode & 0o777).toBe(0o700);
+  });
+
+  it('reports spool stats and enforces pending entry quota', () => {
+    const limited = new MaildirSpool({
+      root: tempRoot,
+      agentId: 'limited-agent',
+      quotas: { maxPendingEntries: 1 },
+    });
+
+    limited.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'message',
+      recipient_id: 'acct_bob',
+      body: 'first',
+    });
+
+    expect(() =>
+      limited.writeJson('control', {
+        schema: SPOOL_SCHEMA,
+        kind: 'ack',
+        message_id: 'msg_test',
+      })
+    ).toThrow(MaildirQuotaError);
+
+    const stats = limited.inspect();
+    expect(stats.pending_entries).toBe(1);
+    expect(stats.mailboxes.outbox.newEntries).toBe(1);
+    expect(stats.quotas.maxPendingEntries).toBe(1);
+  });
+
+  it('enforces failed entry quota when moving bad entries to failed', () => {
+    const limited = new MaildirSpool({
+      root: tempRoot,
+      agentId: 'failed-limited-agent',
+      quotas: { maxFailedEntries: 1 },
+    });
+
+    const first = limited.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'message',
+      recipient_id: 'acct_bob',
+      body: 'first',
+    });
+    const second = limited.writeJson('outbox', {
+      schema: SPOOL_SCHEMA,
+      kind: 'message',
+      recipient_id: 'acct_bob',
+      body: 'second',
+    });
+
+    limited.moveToFailed(first, 'first failure');
+
+    expect(() => limited.moveToFailed(second, 'second failure')).toThrow(MaildirQuotaError);
+    expect(limited.inspect().failed_entries).toBe(1);
+    expect(limited.inspect().mailboxes.failed.entries).toBe(2);
   });
 });

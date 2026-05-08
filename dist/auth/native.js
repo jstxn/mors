@@ -143,6 +143,7 @@ export function generateSessionToken(options) {
         deviceId: options.deviceId,
         issuedAt: new Date().toISOString(),
         tokenId: randomUUID(),
+        ...(options.scopes ? { scopes: options.scopes } : {}),
     };
     const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = createHmac('sha256', options.signingKey).update(payloadStr).digest('hex');
@@ -192,11 +193,15 @@ export function verifySessionToken(token, signingKey) {
             typeof payload['tokenId'] !== 'string') {
             return null;
         }
+        const scopes = Array.isArray(payload['scopes'])
+            ? payload['scopes'].filter((scope) => typeof scope === 'string')
+            : undefined;
         return {
             accountId: payload['accountId'],
             deviceId: payload['deviceId'],
             issuedAt: payload['issuedAt'],
             tokenId: payload['tokenId'],
+            ...(scopes ? { scopes } : {}),
         };
     }
     catch {

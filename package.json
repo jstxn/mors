@@ -7,7 +7,8 @@
     "mors": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
