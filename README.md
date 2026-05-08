@@ -1,3 +1,5 @@
+![mors header](./docs/assets/mors-header.png)
+
 # mors
 
 `mors` is messaging infrastructure for people and autonomous agents.
