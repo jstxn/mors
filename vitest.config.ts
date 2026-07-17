@@ -5,6 +5,14 @@ export default defineConfig({
     globals: false,
     testTimeout: 10_000,
     globalSetup: ['test/global-setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/index.ts', 'src/**/types.ts', 'dist/**'],
+      // Thresholds are intentionally not enforced yet; raise these as coverage
+      // gaps (relay/server.ts, remote-watch.ts, contract/*) are closed.
+    },
     projects: [
       {
         extends: true,

@@ -24,14 +24,6 @@ export interface RelayConfig {
   host: string;
   /** Base URL for the relay service (used in responses/redirects). */
   baseUrl: string | undefined;
-  /** GitHub OAuth device-flow client ID. */
-  githubClientId: string | undefined;
-  /** GitHub OAuth scope. */
-  githubScope: string | undefined;
-  /** GitHub device code endpoint. */
-  githubDeviceEndpoint: string | undefined;
-  /** GitHub token exchange endpoint. */
-  githubTokenEndpoint: string | undefined;
   /** Auth token issuer identifier. */
   authTokenIssuer: string | undefined;
   /** Auth token audience identifier. */
@@ -50,30 +42,6 @@ const CONFIG_VARS = [
     field: 'baseUrl' as const,
     description:
       'Base URL for the relay service (e.g. https://relay.mors.dev). Used in API responses and redirects.',
-  },
-  {
-    key: 'GITHUB_DEVICE_CLIENT_ID',
-    field: 'githubClientId' as const,
-    description:
-      'GitHub OAuth App client ID for device-flow authentication. Create one at https://github.com/settings/applications/new.',
-  },
-  {
-    key: 'GITHUB_DEVICE_SCOPE',
-    field: 'githubScope' as const,
-    description:
-      'OAuth scope for GitHub device flow (e.g. "read:user"). Controls what permissions the CLI requests.',
-  },
-  {
-    key: 'GITHUB_DEVICE_ENDPOINT',
-    field: 'githubDeviceEndpoint' as const,
-    description:
-      'GitHub device code request endpoint (typically https://github.com/login/device/code).',
-  },
-  {
-    key: 'GITHUB_TOKEN_ENDPOINT',
-    field: 'githubTokenEndpoint' as const,
-    description:
-      'GitHub token exchange endpoint (typically https://github.com/login/oauth/access_token).',
   },
   {
     key: 'MORS_AUTH_TOKEN_ISSUER',
@@ -132,10 +100,6 @@ export function loadRelayConfig(
     port,
     host,
     baseUrl: values['baseUrl'],
-    githubClientId: values['githubClientId'],
-    githubScope: values['githubScope'],
-    githubDeviceEndpoint: values['githubDeviceEndpoint'],
-    githubTokenEndpoint: values['githubTokenEndpoint'],
     authTokenIssuer: values['authTokenIssuer'],
     authAudience: values['authAudience'],
     diagnostics,

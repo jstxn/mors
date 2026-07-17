@@ -1,7 +1,7 @@
 {
   "name": "mors",
   "version": "0.1.0",
-  "description": "Markdown-first encrypted local CLI messaging",
+  "description": "Agent-to-agent encrypted messaging: durable inboxes, structured JSON commands, E2EE relay, and a sandbox bridge for coordinating humans, host processes, and VM/container agents",
   "type": "module",
   "bin": {
     "mors": "./dist/index.js"
@@ -11,12 +11,34 @@
     "docs",
     "Dockerfile.sandbox"
   ],
+  "keywords": [
+    "agent",
+    "a2a",
+    "messaging",
+    "cli",
+    "e2ee",
+    "encryption",
+    "relay",
+    "sandbox",
+    "orchestration",
+    "agent-to-agent"
+  ],
+  "author": "jstxn <justen@jstxn.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jstxn/mors.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jstxn/mors/issues"
+  },
+  "homepage": "https://github.com/jstxn/mors#readme",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepare": "if test -x node_modules/.bin/tsc; then node_modules/.bin/tsc -p tsconfig.build.json; fi",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "relay:dev": "npx tsx src/relay/index.ts"
   },
   "engines": {
@@ -26,13 +48,14 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.3.2",
-    "eslint": "^10.0.2",
+    "@types/node": "^25.9.5",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.56.1",
-    "vitest": "^4.0.18"
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
-    "better-sqlite3-multiple-ciphers": "^11.10.0"
+    "better-sqlite3-multiple-ciphers": "^12.11.1"
   }
 }

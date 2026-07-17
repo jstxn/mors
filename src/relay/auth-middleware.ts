@@ -304,14 +304,3 @@ export function createNativeTokenVerifier(signingKey: string): TokenVerifier {
     }
   };
 }
-
-/**
- * @deprecated Use createNativeTokenVerifier instead. Kept for backward compatibility
- * during transition period only.
- */
-export function createGitHubTokenVerifier(_apiBaseUrl?: string): TokenVerifier {
-  // Return a verifier that always rejects — GitHub auth is no longer supported
-  return async (_token: string): Promise<AuthPrincipal | null> => {
-    return null;
-  };
-}

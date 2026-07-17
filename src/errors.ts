@@ -83,6 +83,44 @@ export class KeyExchangeNotCompleteError extends MorsError {
   }
 }
 
+/**
+ * Thrown when a relay-published peer device bundle fails integrity checks —
+ * e.g. its declared fingerprint is not an honest hash of its own public keys.
+ * Refusing such a bundle keeps out-of-band fingerprint verification meaningful.
+ */
+export class PeerBundleIntegrityError extends MorsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PeerBundleIntegrityError';
+  }
+}
+
+/**
+ * Thrown when a peer's published identity key differs from the key pinned on a
+ * previously established session (key-continuity guard). Rather than silently
+ * re-keying — which a malicious relay could exploit to swap in its own key
+ * mid-conversation — the session is refused until the change is explicitly
+ * confirmed after out-of-band fingerprint verification.
+ */
+export class PeerIdentityChangedError extends MorsError {
+  readonly peerDeviceId: string;
+  readonly pinnedFingerprint: string;
+  readonly presentedFingerprint: string;
+
+  constructor(peerDeviceId: string, pinnedFingerprint: string, presentedFingerprint: string) {
+    super(
+      `Peer identity key changed for device "${peerDeviceId}". ` +
+        `The pinned fingerprint is ${pinnedFingerprint} but the relay presented ${presentedFingerprint}. ` +
+        'Refusing to silently re-key. Verify the new fingerprint out of band, then re-establish ' +
+        'the session with an explicit key-change confirmation.'
+    );
+    this.name = 'PeerIdentityChangedError';
+    this.peerDeviceId = peerDeviceId;
+    this.pinnedFingerprint = pinnedFingerprint;
+    this.presentedFingerprint = presentedFingerprint;
+  }
+}
+
 /** Thrown when E2EE is attempted on a group or channel conversation (only 1:1/direct is supported). */
 export class GroupE2EEUnsupportedError extends MorsError {
   constructor(conversationType: string) {

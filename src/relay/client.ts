@@ -69,6 +69,8 @@ export interface SendPayload {
   recipientId: string;
   body: string;
   subject?: string;
+  /** Optional correlation id (trc_ prefixed) carried end-to-end for tracing. */
+  traceId?: string;
   inReplyTo?: string;
   dedupeKey: string;
 }
@@ -94,6 +96,8 @@ export interface RelayMessageResponse {
   recipient_id: string;
   body: string;
   subject: string | null;
+  /** Correlation id (trc_ prefixed) if the sender supplied one, else null. */
+  trace_id?: string | null;
   state: string;
   read_at: string | null;
   acked_at: string | null;
@@ -171,6 +175,8 @@ export interface EncryptedSendOptions {
   body: string;
   /** Optional subject line (not encrypted — metadata). */
   subject?: string;
+  /** Optional correlation id (trc_ prefixed) — metadata, not encrypted. */
+  traceId?: string;
   /** Parent message ID for replies. */
   inReplyTo?: string;
   /** Shared secret from key exchange (32 bytes). */
@@ -277,6 +283,7 @@ export class RelayClient {
     recipientId: string;
     body: string;
     subject?: string;
+    traceId?: string;
     inReplyTo?: string;
     dedupeKey?: string;
   }): Promise<SendResult> {
@@ -285,6 +292,7 @@ export class RelayClient {
       recipientId: options.recipientId,
       body: options.body,
       subject: options.subject,
+      traceId: options.traceId,
       inReplyTo: options.inReplyTo,
       dedupeKey,
     };
@@ -450,7 +458,7 @@ export class RelayClient {
    * @throws CipherError if the shared secret is invalid or encryption fails.
    */
   async sendEncrypted(options: EncryptedSendOptions): Promise<SendResult> {
-    const { recipientId, body, subject, inReplyTo, sharedSecret } = options;
+    const { recipientId, body, subject, traceId, inReplyTo, sharedSecret } = options;
 
     // Encrypt the plaintext body into an EncryptedPayload
     const encrypted = encryptMessage(sharedSecret, body);
@@ -463,6 +471,7 @@ export class RelayClient {
       recipientId,
       body: ciphertextBody,
       subject,
+      traceId,
       inReplyTo,
     });
   }
@@ -518,6 +527,7 @@ export class RelayClient {
       recipient_id: payload.recipientId,
       body: payload.body,
       subject: payload.subject,
+      trace_id: payload.traceId,
       in_reply_to: payload.inReplyTo,
       dedupe_key: payload.dedupeKey,
     });

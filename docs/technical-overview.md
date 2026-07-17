@@ -26,7 +26,11 @@ This document keeps the implementation and deployment details out of the main RE
 
 Local CLI usage is trusted to the local user account. The encrypted database protects at-rest data, but the running process can read decrypted content.
 
-Relay usage separates local identity from remote delivery. Authenticated relay actions depend on session tokens. E2EE protects message bodies across relay delivery once device keys are exchanged.
+Relay usage separates local identity from remote delivery. Authenticated relay actions depend on session tokens, which now carry an expiry (default 30 days) and are refused once lapsed, so a captured token cannot be replayed indefinitely. E2EE protects message bodies across relay delivery once device keys are exchanged.
+
+The relay is treated as untrusted for key distribution. Published peer device bundles are verified client-side: a bundle's fingerprint must be an honest hash of its own public keys, and once a peer's key is pinned (trust on first use) a later key change is refused rather than silently re-keyed — a relay cannot swap in its own key mid-conversation. Verify a peer's fingerprint out of band before trusting first contact. The interactive `mors start` send path never silently downgrades to plaintext: sends to a contact with no published keys are labeled as unencrypted.
+
+The relay also bounds abuse: request bodies are capped, unauthenticated public routes (signup, health, agent-card) are rate-limited per client, and the relay container runs as a non-root user.
 
 Sandbox spool usage is a local host trust boundary. The spool is plaintext on disk. Use VM disk encryption or an encrypted host volume for sensitive payloads. The sandbox should not receive relay credentials unless it is intentionally trusted.
 
@@ -58,6 +62,23 @@ node dist/index.js inbox --json
 node dist/index.js read <message-id> --json
 node dist/index.js ack <message-id> --json
 ```
+
+### Message Correlation For Orchestration
+
+Messages carry a `thread_id` and optional `in_reply_to` for causal linkage, plus an optional `trace_id` (`trc_`-prefixed) that is now carried end-to-end across the relay — local and remote. An orchestrator can tag a suggestion with a `trace_id` and match it on the worker's reply without scraping bodies:
+
+```bash
+# orchestrator sends a course-correction suggestion, tagged for correlation
+node dist/index.js send --remote --to acct_worker \
+  --body '{"kind":"course_correction","hint":"prefer the cheaper route"}' \
+  --trace-id trc_route_decision_1 --json
+
+# worker replies on the same thread, echoing the trace id
+node dist/index.js reply <parent-id> --remote --to acct_orchestrator \
+  --body '{"kind":"ack","applied":true}' --trace-id trc_route_decision_1 --json
+```
+
+Typed course-correction payloads follow the spool convention of a structured JSON body (a `kind` discriminator plus fields), correlated by `trace_id` and grouped by `thread_id`. Subject and `trace_id` are metadata (not encrypted); the body is E2EE when a session exists.
 
 `setup local` is a thin orchestrator over initialization and local health checks. It does not enable auth or relay state.
 

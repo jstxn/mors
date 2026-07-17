@@ -17,8 +17,26 @@
  * - VAL-AUTH-011: Invite-token + device-key bootstrap required
  */
 
-import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { MorsError } from '../errors.js';
+
+/** Default session-token lifetime: 30 days. */
+export const DEFAULT_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * Constant-time comparison of two hex-encoded signatures.
+ *
+ * Returns false for length mismatches or empty inputs, and otherwise compares
+ * in constant time via {@link timingSafeEqual} so verification does not leak
+ * signature bytes through timing.
+ */
+function signaturesMatch(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const aBuf = Buffer.from(a, 'hex');
+  const bBuf = Buffer.from(b, 'hex');
+  if (aBuf.length === 0 || aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
 
 // ── Error types ──────────────────────────────────────────────────────
 
@@ -100,6 +118,11 @@ export interface SessionTokenOptions {
   signingKey: string;
   /** Optional relay scopes for restricted sandbox or VM direct-access tokens. */
   scopes?: string[];
+  /**
+   * Token lifetime in seconds. Defaults to {@link DEFAULT_SESSION_TTL_SECONDS}.
+   * Values <= 0 fall back to the default; tokens always carry an expiry.
+   */
+  expiresInSeconds?: number;
 }
 
 /** Parsed and verified session token payload. */
@@ -110,6 +133,8 @@ export interface SessionTokenPayload {
   deviceId: string;
   /** Token issue timestamp (ISO-8601). */
   issuedAt: string;
+  /** Token expiry timestamp (ISO-8601). Absent only on legacy pre-expiry tokens. */
+  expiresAt?: string;
   /** Token ID (unique per token). */
   tokenId: string;
   /** Optional relay scopes. Absence means a full session token. */
@@ -202,10 +227,18 @@ export function generateInviteToken(): string {
  * @returns The signed session token string.
  */
 export function generateSessionToken(options: SessionTokenOptions): string {
+  const issuedAt = new Date();
+  const ttlSeconds =
+    options.expiresInSeconds !== undefined && options.expiresInSeconds > 0
+      ? options.expiresInSeconds
+      : DEFAULT_SESSION_TTL_SECONDS;
+  const expiresAt = new Date(issuedAt.getTime() + ttlSeconds * 1000);
+
   const payload: SessionTokenPayload = {
     accountId: options.accountId,
     deviceId: options.deviceId,
-    issuedAt: new Date().toISOString(),
+    issuedAt: issuedAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
     tokenId: randomUUID(),
     ...(options.scopes ? { scopes: options.scopes } : {}),
   };
@@ -225,7 +258,11 @@ export function generateSessionToken(options: SessionTokenOptions): string {
  * @param signingKey - The key used for HMAC verification.
  * @returns The verified token payload, or null if invalid.
  */
-export function verifySessionToken(token: string, signingKey: string): SessionTokenPayload | null {
+export function verifySessionToken(
+  token: string,
+  signingKey: string,
+  options: { now?: number } = {}
+): SessionTokenPayload | null {
   if (!token || typeof token !== 'string') return null;
 
   const parts = token.split('.');
@@ -234,22 +271,9 @@ export function verifySessionToken(token: string, signingKey: string): SessionTo
   const [, payloadStr, signature] = parts;
   if (!payloadStr || !signature) return null;
 
-  // Verify HMAC signature
+  // Verify HMAC signature in constant time to avoid leaking signature bytes.
   const expectedSignature = createHmac('sha256', signingKey).update(payloadStr).digest('hex');
-
-  // Constant-time comparison to prevent timing attacks
-  if (signature.length !== expectedSignature.length) return null;
-
-  const sigBuf = Buffer.from(signature, 'hex');
-  const expectedBuf = Buffer.from(expectedSignature, 'hex');
-
-  if (sigBuf.length !== expectedBuf.length) return null;
-
-  let equal = true;
-  for (let i = 0; i < sigBuf.length; i++) {
-    if (sigBuf[i] !== expectedBuf[i]) equal = false;
-  }
-  if (!equal) return null;
+  if (!signaturesMatch(signature, expectedSignature)) return null;
 
   // Decode payload
   try {
@@ -265,6 +289,15 @@ export function verifySessionToken(token: string, signingKey: string): SessionTo
       return null;
     }
 
+    // Enforce expiry when present. Tokens issued by generateSessionToken always
+    // carry expiresAt; a captured token stops being accepted once it lapses.
+    const expiresAt = typeof payload['expiresAt'] === 'string' ? payload['expiresAt'] : undefined;
+    if (expiresAt !== undefined) {
+      const expiresMs = Date.parse(expiresAt);
+      const now = options.now ?? Date.now();
+      if (!Number.isFinite(expiresMs) || now >= expiresMs) return null;
+    }
+
     const scopes = Array.isArray(payload['scopes'])
       ? payload['scopes'].filter((scope): scope is string => typeof scope === 'string')
       : undefined;
@@ -274,6 +307,7 @@ export function verifySessionToken(token: string, signingKey: string): SessionTo
       deviceId: payload['deviceId'] as string,
       issuedAt: payload['issuedAt'] as string,
       tokenId: payload['tokenId'] as string,
+      ...(expiresAt ? { expiresAt } : {}),
       ...(scopes ? { scopes } : {}),
     };
   } catch {
@@ -324,18 +358,8 @@ export function isSigningKeyMismatch(token: string, signingKey: string): boolean
   // Payload is structurally valid. Now check if the signature mismatches.
   const expectedSignature = createHmac('sha256', signingKey).update(payloadStr).digest('hex');
 
-  // If signature matches, this is NOT a mismatch (token is actually valid)
-  if (signature.length === expectedSignature.length) {
-    const sigBuf = Buffer.from(signature, 'hex');
-    const expectedBuf = Buffer.from(expectedSignature, 'hex');
-    if (sigBuf.length === expectedBuf.length) {
-      let equal = true;
-      for (let i = 0; i < sigBuf.length; i++) {
-        if (sigBuf[i] !== expectedBuf[i]) equal = false;
-      }
-      if (equal) return false; // Token is actually valid — not a mismatch
-    }
-  }
+  // If the signature matches, this is NOT a mismatch (token is actually valid).
+  if (signaturesMatch(signature, expectedSignature)) return false;
 
   // Structurally valid payload but wrong signature → signing-key mismatch
   return true;

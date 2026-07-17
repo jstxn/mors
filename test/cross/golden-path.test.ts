@@ -65,10 +65,6 @@ function testConfig(): RelayConfig {
     port: 0,
     host: '127.0.0.1',
     baseUrl: undefined,
-    githubClientId: undefined,
-    githubScope: undefined,
-    githubDeviceEndpoint: undefined,
-    githubTokenEndpoint: undefined,
     authTokenIssuer: undefined,
     authAudience: undefined,
     diagnostics: [],
@@ -499,6 +495,28 @@ describe('cross-area golden-path hardening', () => {
       expect(aliceReply).toBeDefined();
       expect(aliceReply?.['state']).toBe('acked');
       expect(aliceReply?.['thread_id']).toBe(threadId);
+    });
+
+    it('propagates trace_id across the wire for orchestrator correlation', async () => {
+      // Orchestrator (Alice) tags a suggestion with a correlation id.
+      const sendResp = await relayFetch(server.port, '/messages', {
+        method: 'POST',
+        token: 'token-alice',
+        body: {
+          recipient_id: BOB_PRINCIPAL.accountId,
+          body: 'route suggestion',
+          trace_id: 'trc_wire_corr_1',
+        },
+      });
+      expect(sendResp.status).toBe(201);
+      expect((sendResp.body as Record<string, unknown>)['trace_id']).toBe('trc_wire_corr_1');
+
+      // The worker (Bob) sees the same correlation id in the inbox.
+      const inboxResp = await relayFetch(server.port, '/inbox', { token: 'token-bob' });
+      const messages = (inboxResp.body as Record<string, unknown>)['messages'] as Array<
+        Record<string, unknown>
+      >;
+      expect(messages[0]?.['trace_id']).toBe('trc_wire_corr_1');
     });
 
     it('golden path with SSE stream shows consistent events for full lifecycle', async () => {

@@ -34,7 +34,7 @@ class ScriptedPrompt {
 class MemoryWritable extends Writable {
   private readonly chunks: string[] = [];
 
-  _write(
+  override _write(
     chunk: string | Buffer,
     _encoding: BufferEncoding,
     callback: (error?: Error | null) => void
@@ -43,7 +43,7 @@ class MemoryWritable extends Writable {
     callback();
   }
 
-  toString(): string {
+  override toString(): string {
     return this.chunks.join('');
   }
 }
@@ -316,7 +316,9 @@ describe('mors start', () => {
       expect(profile).toContain('"handle": "alice"');
       expect(transcript).toContain('Signed in as @alice (Alice Agent).');
       expect(transcript).toContain('Added @bob (approved).');
-      expect(transcript).toContain('Message sent to @bob.');
+      expect(transcript).toContain(
+        'Message sent to @bob WITHOUT encryption — no published device keys for this contact.'
+      );
       expect(transcript).toContain('Inbox:');
       expect(transcript).toContain('hello from bob');
       expect(sendCalls).toEqual([{ recipientId: 'acct-bob', body: 'hello bob' }]);

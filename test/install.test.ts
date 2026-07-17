@@ -138,15 +138,18 @@ describe('homebrew formula', () => {
     expect(content).toMatch(/mors/);
   });
 
-  it('formula references npm registry tarball URL', () => {
+  it('formula installs from the project GitHub source, not the foreign npm package', () => {
     const content = readFileSync(formulaPath, 'utf8');
-    expect(content).toMatch(/registry\.npmjs\.org\/mors\/-\/mors-/);
+    // The npm name "mors" belongs to an unrelated project; the formula must
+    // fetch from jstxn/mors on GitHub, never from the npm registry.
+    expect(content).toMatch(/github\.com\/jstxn\/mors/);
+    expect(content).not.toMatch(/registry\.npmjs\.org\/mors/);
   });
 
   it('formula version aligns with package.json', () => {
     const content = readFileSync(formulaPath, 'utf8');
-    // The formula URL should reference the current package version
-    expect(content).toContain(`mors-${pkg.version}.tgz`);
+    // The formula URL should reference the current package version tag
+    expect(content).toContain(`v${pkg.version}.tar.gz`);
   });
 });
 
