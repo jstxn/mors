@@ -57,6 +57,8 @@ export interface SendPayload {
     recipientId: string;
     body: string;
     subject?: string;
+    /** Optional correlation id (trc_ prefixed) carried end-to-end for tracing. */
+    traceId?: string;
     inReplyTo?: string;
     dedupeKey: string;
 }
@@ -80,6 +82,8 @@ export interface RelayMessageResponse {
     recipient_id: string;
     body: string;
     subject: string | null;
+    /** Correlation id (trc_ prefixed) if the sender supplied one, else null. */
+    trace_id?: string | null;
     state: string;
     read_at: string | null;
     acked_at: string | null;
@@ -148,6 +152,8 @@ export interface EncryptedSendOptions {
     body: string;
     /** Optional subject line (not encrypted — metadata). */
     subject?: string;
+    /** Optional correlation id (trc_ prefixed) — metadata, not encrypted. */
+    traceId?: string;
     /** Parent message ID for replies. */
     inReplyTo?: string;
     /** Shared secret from key exchange (32 bytes). */
@@ -210,6 +216,7 @@ export declare class RelayClient {
         recipientId: string;
         body: string;
         subject?: string;
+        traceId?: string;
         inReplyTo?: string;
         dedupeKey?: string;
     }): Promise<SendResult>;

@@ -76,6 +76,16 @@ export interface RelayServerOptions {
      * Covers VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013.
      */
     contactStore?: ContactStore;
+    /**
+     * Fixed-window rate limit for unauthenticated public routes (signup, health,
+     * agent-card), keyed by client IP. Bounds mass account creation and public
+     * request floods. Defaults to 60 requests per 60s per client. Set `limit` to
+     * 0 to disable.
+     */
+    publicRateLimit?: {
+        limit: number;
+        windowMs: number;
+    };
 }
 /** Relay server handle with lifecycle methods. */
 export interface RelayServer {

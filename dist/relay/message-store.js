@@ -2,8 +2,9 @@
  * In-memory message store for the relay service.
  *
  * Provides server-side message persistence for cross-developer async messaging.
- * Messages are stored in memory for this phase; future milestones will wire
- * real persistence (SQLite/Postgres).
+ * Messages live in memory and are durably snapshotted to disk by the relay
+ * persistence layer (see persistence.ts, wired via createRelayPersistenceContext);
+ * a future milestone may replace the JSON snapshot with SQLite/Postgres.
  *
  * Invariants preserved:
  * - read and ack are separate operations (read does not imply ack)
@@ -96,7 +97,7 @@ export class RelayMessageStore {
      * @returns A RelaySendResult with the message and whether it was newly created.
      */
     send(senderId, senderLogin, options) {
-        const { recipientId, body, subject, inReplyTo, dedupeKey, senderDeviceId } = options;
+        const { recipientId, body, subject, traceId, inReplyTo, dedupeKey, senderDeviceId } = options;
         // Check dedupe index first — if this key was already used by this sender,
         // verify context compatibility before returning the canonical message.
         // Incompatible reuse (different recipient, thread, or reply-parent) is rejected.
@@ -146,6 +147,7 @@ export class RelayMessageStore {
             recipient_id: recipientId,
             body,
             subject: subject ?? null,
+            trace_id: traceId ?? null,
             state: 'delivered',
             read_at: null,
             acked_at: null,

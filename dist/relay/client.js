@@ -103,6 +103,7 @@ export class RelayClient {
             recipientId: options.recipientId,
             body: options.body,
             subject: options.subject,
+            traceId: options.traceId,
             inReplyTo: options.inReplyTo,
             dedupeKey,
         };
@@ -243,7 +244,7 @@ export class RelayClient {
      * @throws CipherError if the shared secret is invalid or encryption fails.
      */
     async sendEncrypted(options) {
-        const { recipientId, body, subject, inReplyTo, sharedSecret } = options;
+        const { recipientId, body, subject, traceId, inReplyTo, sharedSecret } = options;
         // Encrypt the plaintext body into an EncryptedPayload
         const encrypted = encryptMessage(sharedSecret, body);
         // Serialize the EncryptedPayload as the body field on the wire.
@@ -253,6 +254,7 @@ export class RelayClient {
             recipientId,
             body: ciphertextBody,
             subject,
+            traceId,
             inReplyTo,
         });
     }
@@ -301,6 +303,7 @@ export class RelayClient {
             recipient_id: payload.recipientId,
             body: payload.body,
             subject: payload.subject,
+            trace_id: payload.traceId,
             in_reply_to: payload.inReplyTo,
             dedupe_key: payload.dedupeKey,
         });

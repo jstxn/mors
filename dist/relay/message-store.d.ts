@@ -2,8 +2,9 @@
  * In-memory message store for the relay service.
  *
  * Provides server-side message persistence for cross-developer async messaging.
- * Messages are stored in memory for this phase; future milestones will wire
- * real persistence (SQLite/Postgres).
+ * Messages live in memory and are durably snapshotted to disk by the relay
+ * persistence layer (see persistence.ts, wired via createRelayPersistenceContext);
+ * a future milestone may replace the JSON snapshot with SQLite/Postgres.
  *
  * Invariants preserved:
  * - read and ack are separate operations (read does not imply ack)
@@ -36,6 +37,12 @@ export interface RelayMessage {
     body: string;
     /** Optional subject line. */
     subject: string | null;
+    /**
+     * Optional client-supplied correlation id (trc_ prefixed), carried end-to-end
+     * so an orchestrator can correlate a suggestion with the worker's reply across
+     * the relay. Opaque to the relay; null when absent.
+     */
+    trace_id: string | null;
     /** Delivery state: delivered or acked. */
     state: 'delivered' | 'acked';
     /** ISO-8601 timestamp when the message was read, or null. */
@@ -57,6 +64,8 @@ export interface RelaySendOptions {
     body: string;
     /** Optional subject line. */
     subject?: string;
+    /** Optional correlation id (trc_ prefixed) carried end-to-end for tracing. */
+    traceId?: string;
     /** Parent message ID for replies. */
     inReplyTo?: string;
     /**
