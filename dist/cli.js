@@ -4,6 +4,7 @@
  * Routes commands, handles init gating (VAL-INIT-005),
  * and formats output with secret redaction (VAL-INIT-004).
  */
+import { MORS_VERSION } from './version.js';
 import { initCommand, requireInit, getDbPath, getDbKeyPath } from './init.js';
 import { loadKey } from './key-management.js';
 import { openEncryptedDb, verifySqlCipherAvailable } from './store.js';
@@ -71,7 +72,7 @@ export function run(args) {
         return;
     }
     if (command === '--version' || command === '-v') {
-        console.log('mors 0.1.0');
+        console.log(`mors ${MORS_VERSION}`);
         return;
     }
     // Command-level help should never run init/auth/prerequisite logic.
@@ -388,6 +389,7 @@ function runSend(args, configDir) {
             to,
             body,
             subject,
+            traceId,
             inReplyTo: undefined,
             noEncrypt,
             peerDevice,
@@ -508,6 +510,7 @@ function runRemoteSend(configDir, json, opts) {
             recipientId,
             body: opts.body,
             subject: opts.subject,
+            traceId: opts.traceId,
             inReplyTo: opts.inReplyTo,
             sharedSecret: session.sharedSecret,
         })
@@ -526,6 +529,7 @@ function runRemoteSend(configDir, json, opts) {
         recipientId,
         body: opts.body,
         subject: opts.subject,
+        traceId: opts.traceId,
         inReplyTo: opts.inReplyTo,
     })
         .then((result) => {
@@ -568,6 +572,7 @@ function formatRemoteSendResult(result, json, encrypted) {
                 recipient_id: msg.recipient_id,
                 state: msg.state,
                 dedupe_key: result.dedupeKey,
+                trace_id: msg.trace_id ?? null,
                 ...(encrypted ? { encrypted: true } : {}),
                 created_at: msg.created_at,
             }));
@@ -979,6 +984,7 @@ function runReply(args, configDir) {
             to: recipientId,
             body,
             subject,
+            traceId,
             noEncrypt,
             peerDevice,
         });
@@ -1102,6 +1108,7 @@ function runRemoteReply(configDir, json, opts) {
             recipientId,
             body: opts.body,
             subject: opts.subject,
+            traceId: opts.traceId,
             inReplyTo: opts.parentId,
             sharedSecret: session.sharedSecret,
         })
@@ -1120,6 +1127,7 @@ function runRemoteReply(configDir, json, opts) {
         recipientId,
         body: opts.body,
         subject: opts.subject,
+        traceId: opts.traceId,
         inReplyTo: opts.parentId,
     })
         .then((result) => {
@@ -1163,6 +1171,7 @@ function formatRemoteReplyResult(result, json, encrypted, parentId) {
                 recipient_id: msg.recipient_id,
                 state: msg.state,
                 dedupe_key: result.dedupeKey,
+                trace_id: msg.trace_id ?? null,
                 ...(encrypted ? { encrypted: true } : {}),
                 created_at: msg.created_at,
             }));

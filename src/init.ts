@@ -41,6 +41,7 @@ import {
   getDeviceKeysDir,
 } from './e2ee/device-keys.js';
 import { MorsError, NotInitializedError } from './errors.js';
+import { MORS_VERSION } from './version.js';
 
 /** Sentinel file name that marks successful initialization. */
 const INIT_SENTINEL = '.initialized';
@@ -244,7 +245,7 @@ export function getDbKeyPath(configDir: string): string {
 
 function writeSentinel(sentinelPath: string, fingerprint: string): void {
   const sentinelData = {
-    version: '0.1.0',
+    version: MORS_VERSION,
     fingerprint,
     initializedAt: new Date().toISOString(),
   };

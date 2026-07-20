@@ -19,6 +19,7 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { RelayConfig } from './config.js';
+import { MORS_VERSION } from '../version.js';
 import {
   type TokenVerifier,
   type ParticipantStore,
@@ -108,6 +109,13 @@ export interface RelayServerOptions {
    * Covers VAL-RELAY-011, VAL-RELAY-012, VAL-RELAY-013.
    */
   contactStore?: ContactStore;
+  /**
+   * Fixed-window rate limit for unauthenticated public routes (signup, health,
+   * agent-card), keyed by client IP. Bounds mass account creation and public
+   * request floods. Defaults to 60 requests per 60s per client. Set `limit` to
+   * 0 to disable.
+   */
+  publicRateLimit?: { limit: number; windowMs: number };
 }
 
 /** Relay server handle with lifecycle methods. */
@@ -123,14 +131,88 @@ export interface RelayServer {
 }
 
 /**
- * Read and parse JSON body from a request.
- * Returns null if body is empty or cannot be parsed.
+ * Maximum accepted request body size (1 MiB).
+ *
+ * Relay payloads (messages, device bundles, signup) are small; this cap bounds
+ * per-request memory so an oversized POST cannot exhaust the relay VM's heap.
  */
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+const MAX_REQUEST_BODY_BYTES = 1_048_576;
+
+/** Simple fixed-window rate limiter keyed by an arbitrary string (e.g. client IP). */
+interface RateLimiter {
+  /** Returns true if the request is allowed, false if the window budget is spent. */
+  check(key: string, now: number): boolean;
+}
+
+function createFixedWindowLimiter(limit: number, windowMs: number): RateLimiter {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  return {
+    check(key: string, now: number): boolean {
+      if (limit <= 0) return true;
+      const entry = hits.get(key);
+      if (!entry || now >= entry.resetAt) {
+        // Opportunistic cleanup so the map cannot grow without bound.
+        if (hits.size > 10_000) {
+          for (const [k, v] of hits) {
+            if (now >= v.resetAt) hits.delete(k);
+          }
+        }
+        hits.set(key, { count: 1, resetAt: now + windowMs });
+        return true;
+      }
+      if (entry.count >= limit) return false;
+      entry.count += 1;
+      return true;
+    },
+  };
+}
+
+/**
+ * Best-effort client identifier for rate limiting. Prefers the first
+ * X-Forwarded-For hop (the real client when the relay runs behind a trusted
+ * proxy such as Fly) and falls back to the socket address.
+ */
+function clientRateKey(req: IncomingMessage): string {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) {
+    const first = xff.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+/**
+ * Read and parse JSON body from a request.
+ *
+ * Returns null if the body is empty, unparseable, not a JSON object, or exceeds
+ * {@link MAX_REQUEST_BODY_BYTES}. Buffering stops once the cap is passed so a
+ * malicious client cannot force unbounded memory growth.
+ */
+async function readJsonBody(
+  req: IncomingMessage,
+  maxBytes: number = MAX_REQUEST_BODY_BYTES
+): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let total = 0;
+    let overLimit = false;
+
+    req.on('data', (chunk: Buffer) => {
+      if (overLimit) return;
+      total += chunk.length;
+      if (total > maxBytes) {
+        // Stop buffering and release what we have; memory stays bounded.
+        overLimit = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => {
+      if (overLimit) {
+        resolve(null);
+        return;
+      }
       const raw = Buffer.concat(chunks).toString('utf8');
       if (!raw.trim()) {
         resolve(null);
@@ -236,7 +318,7 @@ function getPrimaryPublishedDeviceBundle(
 const A2A_PROTOCOL_VERSION = '1.0';
 
 /** Agent card version string. */
-const AGENT_CARD_VERSION = '0.1.0';
+const AGENT_CARD_VERSION = MORS_VERSION;
 
 /**
  * Build an A2A-compliant Agent Card JSON object.
@@ -409,6 +491,8 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
   const accountStore = options?.accountStore;
   const contactStore = options?.contactStore;
   const sseAuthRevalidateMs = options?.sseAuthRevalidateMs ?? 60000;
+  const publicRateLimit = options?.publicRateLimit ?? { limit: 60, windowMs: 60_000 };
+  const publicLimiter = createFixedWindowLimiter(publicRateLimit.limit, publicRateLimit.windowMs);
   const startTime = Date.now();
 
   // Track active SSE connections for clean shutdown
@@ -427,6 +511,16 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
     // ── Public routes (no auth required) ─────────────────────────────
 
     if (isPublicRoute(url)) {
+      // Rate-limit unauthenticated public routes to bound mass signup / floods.
+      if (!publicLimiter.check(clientRateKey(req), Date.now())) {
+        res.setHeader('Retry-After', String(Math.ceil(publicRateLimit.windowMs / 1000)));
+        sendJson(res, 429, {
+          error: 'rate_limited',
+          detail: 'Too many requests. Please retry later.',
+        });
+        return;
+      }
+
       // Parse the path (strip query string) to dispatch to the right handler
       const pathOnly = url.split('?')[0];
 
@@ -1162,6 +1256,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       const recipientId = body['recipient_id'];
       const messageBody = body['body'];
       const subject = body['subject'];
+      const traceId = body['trace_id'];
       const inReplyTo = body['in_reply_to'];
       const dedupeKey = body['dedupe_key'];
 
@@ -1186,6 +1281,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
           recipientId,
           body: messageBody,
           subject: typeof subject === 'string' ? subject : undefined,
+          traceId: typeof traceId === 'string' ? traceId : undefined,
           inReplyTo: typeof inReplyTo === 'string' ? inReplyTo : undefined,
           dedupeKey: typeof dedupeKey === 'string' ? dedupeKey : undefined,
           senderDeviceId: principal.deviceId,

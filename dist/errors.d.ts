@@ -38,6 +38,27 @@ export declare class KeyExchangeError extends MorsError {
 export declare class KeyExchangeNotCompleteError extends MorsError {
     constructor(peerDeviceId: string, message?: string);
 }
+/**
+ * Thrown when a relay-published peer device bundle fails integrity checks —
+ * e.g. its declared fingerprint is not an honest hash of its own public keys.
+ * Refusing such a bundle keeps out-of-band fingerprint verification meaningful.
+ */
+export declare class PeerBundleIntegrityError extends MorsError {
+    constructor(message: string);
+}
+/**
+ * Thrown when a peer's published identity key differs from the key pinned on a
+ * previously established session (key-continuity guard). Rather than silently
+ * re-keying — which a malicious relay could exploit to swap in its own key
+ * mid-conversation — the session is refused until the change is explicitly
+ * confirmed after out-of-band fingerprint verification.
+ */
+export declare class PeerIdentityChangedError extends MorsError {
+    readonly peerDeviceId: string;
+    readonly pinnedFingerprint: string;
+    readonly presentedFingerprint: string;
+    constructor(peerDeviceId: string, pinnedFingerprint: string, presentedFingerprint: string);
+}
 /** Thrown when E2EE is attempted on a group or channel conversation (only 1:1/direct is supported). */
 export declare class GroupE2EEUnsupportedError extends MorsError {
     constructor(conversationType: string);

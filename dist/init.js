@@ -20,6 +20,7 @@ import { generateKey, persistKey } from './key-management.js';
 import { openEncryptedDb, verifySqlCipherAvailable, initializeSchema } from './store.js';
 import { generateDeviceKeys, persistDeviceKeys, isDeviceBootstrapped, getDeviceKeysDir, } from './e2ee/device-keys.js';
 import { MorsError, NotInitializedError } from './errors.js';
+import { MORS_VERSION } from './version.js';
 /** Sentinel file name that marks successful initialization. */
 const INIT_SENTINEL = '.initialized';
 /** Lock file name for concurrent init protection. */
@@ -187,7 +188,7 @@ export function getDbKeyPath(configDir) {
 // ── Internal helpers ──────────────────────────────────────────────────
 function writeSentinel(sentinelPath, fingerprint) {
     const sentinelData = {
-        version: '0.1.0',
+        version: MORS_VERSION,
         fingerprint,
         initializedAt: new Date().toISOString(),
     };

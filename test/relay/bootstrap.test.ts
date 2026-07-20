@@ -73,7 +73,7 @@ describe('relay bootstrap', () => {
       expect(config.diagnostics.length).toBeGreaterThan(0);
       // Should list missing config vars with actionable descriptions
       const missingNames = config.diagnostics.map((d) => d.variable);
-      expect(missingNames).toContain('GITHUB_DEVICE_CLIENT_ID');
+      expect(missingNames).toContain('MORS_AUTH_TOKEN_ISSUER');
       expect(missingNames).toContain('MORS_RELAY_BASE_URL');
     });
 
@@ -90,10 +90,6 @@ describe('relay bootstrap', () => {
       const config = loadRelayConfig({
         MORS_RELAY_PORT: '3100',
         MORS_RELAY_BASE_URL: 'http://localhost:3100',
-        GITHUB_DEVICE_CLIENT_ID: 'test-client-id',
-        GITHUB_DEVICE_SCOPE: 'read:user',
-        GITHUB_DEVICE_ENDPOINT: 'https://github.com/login/device/code',
-        GITHUB_TOKEN_ENDPOINT: 'https://github.com/login/oauth/access_token',
         MORS_AUTH_TOKEN_ISSUER: 'mors-relay',
         MORS_AUTH_AUDIENCE: 'mors-cli',
       });

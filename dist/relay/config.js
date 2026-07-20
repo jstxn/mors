@@ -18,26 +18,6 @@ const CONFIG_VARS = [
         description: 'Base URL for the relay service (e.g. https://relay.mors.dev). Used in API responses and redirects.',
     },
     {
-        key: 'GITHUB_DEVICE_CLIENT_ID',
-        field: 'githubClientId',
-        description: 'GitHub OAuth App client ID for device-flow authentication. Create one at https://github.com/settings/applications/new.',
-    },
-    {
-        key: 'GITHUB_DEVICE_SCOPE',
-        field: 'githubScope',
-        description: 'OAuth scope for GitHub device flow (e.g. "read:user"). Controls what permissions the CLI requests.',
-    },
-    {
-        key: 'GITHUB_DEVICE_ENDPOINT',
-        field: 'githubDeviceEndpoint',
-        description: 'GitHub device code request endpoint (typically https://github.com/login/device/code).',
-    },
-    {
-        key: 'GITHUB_TOKEN_ENDPOINT',
-        field: 'githubTokenEndpoint',
-        description: 'GitHub token exchange endpoint (typically https://github.com/login/oauth/access_token).',
-    },
-    {
         key: 'MORS_AUTH_TOKEN_ISSUER',
         field: 'authTokenIssuer',
         description: 'Issuer identifier for relay-issued auth tokens. Used in token validation.',
@@ -84,10 +64,6 @@ export function loadRelayConfig(env = process.env) {
         port,
         host,
         baseUrl: values['baseUrl'],
-        githubClientId: values['githubClientId'],
-        githubScope: values['githubScope'],
-        githubDeviceEndpoint: values['githubDeviceEndpoint'],
-        githubTokenEndpoint: values['githubTokenEndpoint'],
         authTokenIssuer: values['authTokenIssuer'],
         authAudience: values['authAudience'],
         diagnostics,

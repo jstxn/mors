@@ -628,12 +628,4 @@ describe('relay auth guards', () => {
       controller.abort();
     });
   });
-
-  describe('production entry point wiring', () => {
-    it('createGitHubTokenVerifier is exported and callable', async () => {
-      const { createGitHubTokenVerifier } = await import('../../src/relay/auth-middleware.js');
-      const verifier = createGitHubTokenVerifier();
-      expect(typeof verifier).toBe('function');
-    });
-  });
 });

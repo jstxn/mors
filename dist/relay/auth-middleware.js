@@ -224,14 +224,4 @@ export function createNativeTokenVerifier(signingKey) {
         }
     };
 }
-/**
- * @deprecated Use createNativeTokenVerifier instead. Kept for backward compatibility
- * during transition period only.
- */
-export function createGitHubTokenVerifier(_apiBaseUrl) {
-    // Return a verifier that always rejects — GitHub auth is no longer supported
-    return async (_token) => {
-        return null;
-    };
-}
 //# sourceMappingURL=auth-middleware.js.map

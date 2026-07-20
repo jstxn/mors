@@ -17,6 +17,8 @@
  * - VAL-AUTH-011: Invite-token + device-key bootstrap required
  */
 import { MorsError } from '../errors.js';
+/** Default session-token lifetime: 30 days. */
+export declare const DEFAULT_SESSION_TTL_SECONDS: number;
 /** Thrown when an invite token is missing, invalid, or expired. */
 export declare class InvalidInviteTokenError extends MorsError {
     constructor(detail?: string);
@@ -51,6 +53,11 @@ export interface SessionTokenOptions {
     signingKey: string;
     /** Optional relay scopes for restricted sandbox or VM direct-access tokens. */
     scopes?: string[];
+    /**
+     * Token lifetime in seconds. Defaults to {@link DEFAULT_SESSION_TTL_SECONDS}.
+     * Values <= 0 fall back to the default; tokens always carry an expiry.
+     */
+    expiresInSeconds?: number;
 }
 /** Parsed and verified session token payload. */
 export interface SessionTokenPayload {
@@ -60,6 +67,8 @@ export interface SessionTokenPayload {
     deviceId: string;
     /** Token issue timestamp (ISO-8601). */
     issuedAt: string;
+    /** Token expiry timestamp (ISO-8601). Absent only on legacy pre-expiry tokens. */
+    expiresAt?: string;
     /** Token ID (unique per token). */
     tokenId: string;
     /** Optional relay scopes. Absence means a full session token. */
@@ -112,7 +121,9 @@ export declare function generateSessionToken(options: SessionTokenOptions): stri
  * @param signingKey - The key used for HMAC verification.
  * @returns The verified token payload, or null if invalid.
  */
-export declare function verifySessionToken(token: string, signingKey: string): SessionTokenPayload | null;
+export declare function verifySessionToken(token: string, signingKey: string, options?: {
+    now?: number;
+}): SessionTokenPayload | null;
 /**
  * Check whether a token is a structurally valid mors session token
  * (correct prefix, decodable payload with required fields) but has

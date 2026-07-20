@@ -22,14 +22,6 @@ export interface RelayConfig {
     host: string;
     /** Base URL for the relay service (used in responses/redirects). */
     baseUrl: string | undefined;
-    /** GitHub OAuth device-flow client ID. */
-    githubClientId: string | undefined;
-    /** GitHub OAuth scope. */
-    githubScope: string | undefined;
-    /** GitHub device code endpoint. */
-    githubDeviceEndpoint: string | undefined;
-    /** GitHub token exchange endpoint. */
-    githubTokenEndpoint: string | undefined;
     /** Auth token issuer identifier. */
     authTokenIssuer: string | undefined;
     /** Auth token audience identifier. */

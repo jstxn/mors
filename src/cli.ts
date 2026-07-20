@@ -5,6 +5,7 @@
  * and formats output with secret redaction (VAL-INIT-004).
  */
 
+import { MORS_VERSION } from './version.js';
 import { initCommand, requireInit, getDbPath, getDbKeyPath } from './init.js';
 import { loadKey } from './key-management.js';
 import { openEncryptedDb, verifySqlCipherAvailable } from './store.js';
@@ -125,7 +126,7 @@ export function run(args: string[]): void {
   }
 
   if (command === '--version' || command === '-v') {
-    console.log('mors 0.1.0');
+    console.log(`mors ${MORS_VERSION}`);
     return;
   }
 
@@ -488,6 +489,7 @@ function runSend(args: string[], configDir: string): void {
       to,
       body,
       subject,
+      traceId,
       inReplyTo: undefined,
       noEncrypt,
       peerDevice,
@@ -585,6 +587,7 @@ function runRemoteSend(
     to: string;
     body: string;
     subject?: string;
+    traceId?: string;
     inReplyTo?: string;
     noEncrypt?: boolean;
     peerDevice?: string;
@@ -622,6 +625,7 @@ function runRemoteSend(
         recipientId,
         body: opts.body,
         subject: opts.subject,
+        traceId: opts.traceId,
         inReplyTo: opts.inReplyTo,
         sharedSecret: session.sharedSecret,
       })
@@ -641,6 +645,7 @@ function runRemoteSend(
       recipientId,
       body: opts.body,
       subject: opts.subject,
+      traceId: opts.traceId,
       inReplyTo: opts.inReplyTo,
     })
     .then((result) => {
@@ -689,6 +694,7 @@ function formatRemoteSendResult(
           recipient_id: msg.recipient_id,
           state: msg.state,
           dedupe_key: result.dedupeKey,
+          trace_id: msg.trace_id ?? null,
           ...(encrypted ? { encrypted: true } : {}),
           created_at: msg.created_at,
         })
@@ -1127,6 +1133,7 @@ function runReply(args: string[], configDir: string): void {
       to: recipientId,
       body,
       subject,
+      traceId,
       noEncrypt,
       peerDevice,
     });
@@ -1227,6 +1234,7 @@ function runRemoteReply(
     to?: string;
     body: string;
     subject?: string;
+    traceId?: string;
     noEncrypt?: boolean;
     peerDevice?: string;
   }
@@ -1264,6 +1272,7 @@ function runRemoteReply(
         recipientId,
         body: opts.body,
         subject: opts.subject,
+        traceId: opts.traceId,
         inReplyTo: opts.parentId,
         sharedSecret: session.sharedSecret,
       })
@@ -1283,6 +1292,7 @@ function runRemoteReply(
       recipientId,
       body: opts.body,
       subject: opts.subject,
+      traceId: opts.traceId,
       inReplyTo: opts.parentId,
     })
     .then((result) => {
@@ -1333,6 +1343,7 @@ function formatRemoteReplyResult(
           recipient_id: msg.recipient_id,
           state: msg.state,
           dedupe_key: result.dedupeKey,
+          trace_id: msg.trace_id ?? null,
           ...(encrypted ? { encrypted: true } : {}),
           created_at: msg.created_at,
         })

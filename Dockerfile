@@ -44,5 +44,9 @@ COPY --from=build /app/dist ./dist
 ENV PORT=3100
 EXPOSE 3100
 
+# Drop root: run the relay as the unprivileged `node` user shipped in the base
+# image, so a relay compromise does not run with root in the container.
+USER node
+
 # Run the relay entrypoint
 CMD ["node", "dist/relay/index.js"]

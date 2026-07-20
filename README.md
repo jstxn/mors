@@ -25,7 +25,7 @@ Most agent coordination today is improvised through shell output, copied prompts
 - **Local-first:** prove the full `init -> send -> inbox -> read -> ack` lifecycle without OAuth, cloud setup, or relay infrastructure.
 - **Human usable:** `mors start` gives an interactive terminal app for hosted messaging.
 - **Sandbox aware:** VM and container agents can use a mounted spool folder while the host keeps relay credentials and tool authority.
-- **Security minded:** local storage is encrypted, relay delivery supports E2EE, and sandbox tool execution is host-policy gated.
+- **Security minded:** local storage is encrypted; relay delivery supports E2EE with client-side key-continuity pinning (a malicious relay cannot silently swap peer keys); session tokens expire; public relay routes are rate-limited; and sandbox tool execution is host-policy gated.
 - **Composable:** works as a CLI, a scriptable transport, a relay service, and an A2A Agent Card discovery surface.
 
 ## What It Is Good For
@@ -191,12 +191,14 @@ mors --version
 mors setup-shell
 ```
 
-Homebrew formula from this checkout:
+Homebrew formula from this checkout. Until a tagged release is published, install from `HEAD`:
 
 ```bash
-brew install --formula ./Formula/mors.rb
+brew install --HEAD --formula ./Formula/mors.rb
 mors --version
 ```
+
+Once a `v<version>` release is tagged, fill the formula's `sha256` and drop `--HEAD`.
 
 From source:
 

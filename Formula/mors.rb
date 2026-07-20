@@ -1,9 +1,14 @@
 class Mors < Formula
-  desc "Markdown-first encrypted local CLI messaging"
+  desc "Agent-to-agent encrypted messaging CLI with E2EE relay and sandbox bridge"
   homepage "https://github.com/jstxn/mors"
-  url "https://registry.npmjs.org/mors/-/mors-0.1.0.tgz"
-  sha256 "99910c0e70f4992ae903aff5de45042f794edc972ef5308166d0ba8318d2945e"
+  # Install from this project's own GitHub source. The npm name "mors" is owned
+  # by an unrelated package, so the formula must NOT fetch from the npm registry.
+  url "https://github.com/jstxn/mors/archive/refs/tags/v0.1.0.tar.gz"
+  # Placeholder — replace with the real digest once the v0.1.0 tag is published:
+  #   curl -sL https://github.com/jstxn/mors/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "UNLICENSED"
+  head "https://github.com/jstxn/mors.git", branch: "main"
 
   depends_on "python" => :build
   depends_on "node"

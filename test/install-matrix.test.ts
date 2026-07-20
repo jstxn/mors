@@ -173,12 +173,15 @@ describe('Homebrew static formula validation (VAL-INSTALL-007)', () => {
 
   it('formula version aligns with package.json', () => {
     const content = readFileSync(formulaPath, 'utf8');
-    expect(content).toContain(`mors-${pkg.version}.tgz`);
+    expect(content).toContain(`v${pkg.version}.tar.gz`);
   });
 
-  it('formula references valid npm registry URL', () => {
+  it('formula installs from this project GitHub source, not the foreign npm package', () => {
     const content = readFileSync(formulaPath, 'utf8');
-    expect(content).toMatch(/registry\.npmjs\.org\/mors\/-\/mors-/);
+    // The npm name "mors" belongs to an unrelated project; the formula must
+    // fetch from jstxn/mors on GitHub, never from the npm registry.
+    expect(content).toMatch(/github\.com\/jstxn\/mors/);
+    expect(content).not.toMatch(/registry\.npmjs\.org\/mors/);
   });
 
   it('formula has valid metadata fields', () => {
@@ -287,10 +290,10 @@ describe('Homebrew runtime executable proof (VAL-INSTALL-006, VAL-INSTALL-007)',
 describe('install matrix consistency (VAL-INSTALL-007)', () => {
   it('npm and Homebrew formula reference the same package version (static)', () => {
     const formulaContent = readFileSync(join(ROOT, 'Formula', 'mors.rb'), 'utf8');
-    // Formula URL should reference the same version as package.json
-    expect(formulaContent).toContain(`mors-${pkg.version}.tgz`);
-    // Both point to the same npm tarball source
-    expect(formulaContent).toMatch(/registry\.npmjs\.org\/mors\//);
+    // Formula URL should reference the same version tag as package.json
+    expect(formulaContent).toContain(`v${pkg.version}.tar.gz`);
+    // Source of truth is this project's GitHub repo, not the foreign npm package
+    expect(formulaContent).toMatch(/github\.com\/jstxn\/mors/);
   });
 
   it('npm runtime: mors --version outputs correct version', () => {

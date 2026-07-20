@@ -112,9 +112,4 @@ export declare function parseConversationRoute(url: string): ConversationRoute |
  * @returns A TokenVerifier function.
  */
 export declare function createNativeTokenVerifier(signingKey: string): TokenVerifier;
-/**
- * @deprecated Use createNativeTokenVerifier instead. Kept for backward compatibility
- * during transition period only.
- */
-export declare function createGitHubTokenVerifier(_apiBaseUrl?: string): TokenVerifier;
 //# sourceMappingURL=auth-middleware.d.ts.map

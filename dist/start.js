@@ -558,14 +558,23 @@ async function handleFullScreenKeypress(options) {
                 state.status = 'Message body cannot be empty.';
                 return false;
             }
-            const result = await sendToContact(app, runtime, target, body);
+            let result;
+            try {
+                result = await sendToContact(app, runtime, target, body);
+            }
+            catch (err) {
+                state.composerOpen = false;
+                state.draft = '';
+                state.status = err instanceof Error ? err.message : 'Failed to send message.';
+                return false;
+            }
             state.composerOpen = false;
             state.draft = '';
             state.status = result.queued
                 ? `Queued message for @${target.handle}.`
                 : result.encrypted
                     ? `Sent encrypted message to @${target.handle}.`
-                    : `Sent message to @${target.handle}.`;
+                    : `Sent to @${target.handle} WITHOUT encryption — no published device keys for this contact.`;
             await refresh();
             return false;
         }
@@ -1046,12 +1055,22 @@ async function sendFlow(app, prompt, output, runtime, selectedContact) {
         writeLine(output, 'Message body cannot be empty.');
         return target;
     }
-    const result = await sendToContact(app, runtime, target, body);
+    let result;
+    try {
+        result = await sendToContact(app, runtime, target, body);
+    }
+    catch (err) {
+        writeLine(output, err instanceof Error ? err.message : 'Failed to send message.');
+        return target;
+    }
     if (result.queued) {
         writeLine(output, 'Message queued offline.');
     }
-    else {
+    else if (result.encrypted) {
         writeLine(output, `Message sent to @${target.handle}.`);
+    }
+    else {
+        writeLine(output, `Message sent to @${target.handle} WITHOUT encryption — no published device keys for this contact.`);
     }
     return target;
 }
