@@ -13,6 +13,7 @@ import { startWatch } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { runSetupCommand } from './setup.js';
 import { runStartCommand } from './start.js';
+import { runAgentCommand } from './agent-cli.js';
 import { runSandboxCommand, runSpoolCommand } from './spool/cli.js';
 import { MorsError, NotInitializedError, SqlCipherUnavailableError, DeviceNotBootstrappedError, KeyExchangeNotCompleteError, CipherError, } from './errors.js';
 import { assertDeviceBootstrapped, requireDeviceBootstrap } from './e2ee/bootstrap-guard.js';
@@ -73,6 +74,10 @@ export function run(args) {
     }
     if (command === '--version' || command === '-v') {
         console.log(`mors ${MORS_VERSION}`);
+        return;
+    }
+    if (command === 'agent') {
+        void runAgentCommand(commandArgs);
         return;
     }
     // Command-level help should never run init/auth/prerequisite logic.
@@ -3101,6 +3106,7 @@ Usage:
   mors <command> [options]
 
 Commands:
+  agent       Connect working agents: registration, inboxes, skill and hooks
   setup       Prepare local-only or relay-backed mors usage
   quickstart   Run local lifecycle check (init → send → inbox → read → ack)
   doctor       Check prerequisites and configuration health

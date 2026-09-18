@@ -2,20 +2,83 @@
 
 # mors
 
-## What is Mors
+**A communication layer for agents while they work.**
 
-`mors` is messaging infrastructure for people and autonomous agents. It gives coding agents a durable inbox, structured JSON commands, local encrypted state, relay-backed delivery, and a sandbox bridge so humans, host processes, and VM or container agents can coordinate without pasted logs, temp files, or one-off scripts.
+`mors` gives each working agent an inbox. Codex, Claude Code, and other CLI-driven
+workers can discover peers, ask questions, share schemas or code, and reply on the
+same thread during a work session. An agent can keep doing independent work while
+another agent checks a contract or reviews its implementation.
+
+Agents exchange the full payload. You see a one-line summary of each meaningful
+send or reply, such as who requested a schema and what the answer established.
+The communication skill guides these progress lines; supported runtime hooks
+surface pending messages at tool and prompt boundaries.
+
+## Agents communicating during work
+
+![Terminal mockup of backend requesting a schema, contracts sending it, and the agents exchanging an implementation and review](./docs/assets/agents-at-work.gif)
+
+*Terminal mockup using actual sent-message summaries from a two-agent coding
+exercise. Four messages are shown with condensed timing; this is an illustration
+of session activity, not a built-in terminal dashboard.*
+
+The backend agent requested the current event schema, received the actual JSON,
+implemented its validator, and sent the source back for review. `--summary` carries
+the human-facing line; `--body` carries the question, JSON Schema, code, or answer.
+Replies preserve the thread, and acknowledgements record when a message is handled.
+
+<details>
+<summary>View screenshots: one-line summaries and the actual schema payload</summary>
+
+**What you see in the work session**
+
+![Four one-line message summaries covering a schema request, schema delivery, implementation handoff, and review](./docs/assets/agent-message-summaries.png)
+
+**What the agents exchange**
+
+![The actual JSON Schema from the contracts agent's reply, with required fields, numeric constraints, and unknown-field rejection](./docs/assets/agent-schema-exchange.png)
+
+The schema data is unchanged from the recorded reply; its formatting is expanded
+for readability. Full payloads stay in the messages and are available through
+`mors agent read` and `mors agent thread`.
+
+</details>
+
+## Connect your working agents
+
+With `mors` installed, add the integration for each runtime you use in your project:
+
+```bash
+mors agent install --runtime codex --project /path/to/project
+mors agent install --runtime claude --project /path/to/project
+```
+
+The installer adds a project-local communication skill and hooks. Start new agent
+sessions afterward; Codex requires reviewing and trusting the project hooks with
+`/hooks`. Every worker needs the same `MORS_AGENT_DIR` hub, which defaults to
+`~/.local/share/mors/agents`. The local hub needs no relay login or MCP server.
+
+Hooks check mail at supported runtime events; they do not interrupt thinking or
+wake idle workers. Agents can also check their inbox or use a bounded
+`mors agent wait` between work steps.
+
+See [working-agent setup and messaging commands](./docs/working-agents.md) for
+identities, shared hubs, threaded replies, hook support, and manual integration.
+
+## What else Mors provides
+
+Alongside communication between working agents, `mors` supports human messaging,
+encrypted local storage, delivery across machines, and sandbox bridges.
 
 For agentic coding sessions, `mors` provides:
 
 - **Durable task flow:** send work, read updates, acknowledge handoffs, and keep session state outside any one agent runtime.
 - **Agent-safe automation:** every core command supports stable `--json`, predictable exit codes, and actionable errors.
-- **Local-first isolation:** `mors setup local` and `MORS_CONFIG_DIR` let each agent run in its own encrypted local workspace.
+- **Shared worker inboxes:** `mors agent` gives each session its own identity and inbox within a shared encrypted local hub.
+- **Standalone profiles:** `mors setup local` and `MORS_CONFIG_DIR` provide separate local profiles for standalone or relay workflows.
 - **Relay-backed coordination:** `mors setup relay` lets agents communicate across machines through hosted or custom relay infrastructure.
 - **Sandbox-safe communication:** VM and container agents can use a mounted spool folder while the host keeps relay credentials, quotas, and tool policy.
 - **Reviewable transcripts:** message state, spool exports, and explicit read or ack events make coding sessions easier to inspect, replay, and debug.
-
-Most agent coordination today is improvised through shell output, copied prompts, temp files, Slack threads, or hidden runtime state. `mors` provides a small explicit communication layer that works from a terminal, container, VM, or relay-backed environment.
 
 **Status:** beta. Core messaging, auth, E2EE, relay, hosted start, and sandbox-agent flows work end-to-end. Command details may still change.
 
@@ -31,7 +94,8 @@ Most agent coordination today is improvised through shell output, copied prompts
 ## What It Is Good For
 
 - Human-to-agent messaging from a terminal.
-- Multi-agent coordination where each worker needs a durable inbox.
+- Agents asking peers questions, exchanging exact schemas or code, and reviewing each other's work during a session.
+- Multi-agent coordination with durable inboxes, threaded replies, and visible one-line summaries.
 - Sandbox and VM agents that should not receive broad host credentials.
 - CI or coding agents that need structured messages and predictable JSON.
 - Local-first prototypes that can grow into relay-backed messaging.
@@ -43,6 +107,9 @@ For the fastest guided path, use [ONBOARDING.md](./ONBOARDING.md).
 For architecture, trust boundaries, command modes, and deployment notes, read [docs/technical-overview.md](./docs/technical-overview.md).
 
 For sandbox and VM integration, read [docs/sandbox-agents.md](./docs/sandbox-agents.md).
+
+For live Codex and Claude Code workers with shared inboxes and automatic hook
+notifications, read [docs/working-agents.md](./docs/working-agents.md).
 
 ## Requirements
 
@@ -70,7 +137,10 @@ That proves local identity, encrypted storage, message creation, inbox listing, 
 
 ## For Agents
 
-Agents should use isolated config folders, non-interactive commands, and `--json`. They do not need `setup-shell`.
+Agents should use non-interactive commands and `--json`. For workers communicating
+on the same machine, use [`mors agent`](./docs/working-agents.md) with its shared
+hub and distinct session identities. Isolated `MORS_CONFIG_DIR` profiles below
+remain useful for standalone and relay workflows. Agents do not need `setup-shell`.
 
 ### Install Or Run
 
@@ -93,9 +163,12 @@ Run from a source checkout:
 node dist/index.js --version
 ```
 
-### Local Agent Lifecycle
+### Standalone Local Profile Lifecycle
 
-Use `MORS_CONFIG_DIR` so each agent session has its own data. Exit code `0` means success. Any non-zero exit is a failure with an actionable message.
+The commands below exercise one standalone profile. For communication between
+working agents, use `mors agent` with a shared hub as described above; separate
+`MORS_CONFIG_DIR` profiles do not automatically connect to each other.
+Exit code `0` means success. Any non-zero exit is a failure with an actionable message.
 
 ```bash
 export MORS_CONFIG_DIR=/tmp/mors-agent-session

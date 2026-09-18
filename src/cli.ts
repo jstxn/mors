@@ -22,6 +22,7 @@ import type { WatchEvent } from './watch.js';
 import { runSetupShell } from './setup-shell.js';
 import { runSetupCommand } from './setup.js';
 import { runStartCommand } from './start.js';
+import { runAgentCommand } from './agent-cli.js';
 import { runSandboxCommand, runSpoolCommand } from './spool/cli.js';
 import {
   MorsError,
@@ -127,6 +128,11 @@ export function run(args: string[]): void {
 
   if (command === '--version' || command === '-v') {
     console.log(`mors ${MORS_VERSION}`);
+    return;
+  }
+
+  if (command === 'agent') {
+    void runAgentCommand(commandArgs);
     return;
   }
 
@@ -3591,6 +3597,7 @@ Usage:
   mors <command> [options]
 
 Commands:
+  agent       Connect working agents: registration, inboxes, skill and hooks
   setup       Prepare local-only or relay-backed mors usage
   quickstart   Run local lifecycle check (init → send → inbox → read → ack)
   doctor       Check prerequisites and configuration health
