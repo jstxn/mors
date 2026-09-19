@@ -19,9 +19,7 @@ import {
 } from './message.js';
 import { startWatch } from './watch.js';
 import type { WatchEvent } from './watch.js';
-import { runSetupShell } from './setup-shell.js';
 import { runSetupCommand } from './setup.js';
-import { runStartCommand } from './start.js';
 import { runAgentCommand } from './agent-cli.js';
 import { runSandboxCommand, runSpoolCommand } from './spool/cli.js';
 import {
@@ -68,6 +66,7 @@ import { getConfigDir } from './identity.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { parseArgs as parseNodeArgs } from 'node:util';
 import { execFileSync as execFileSyncImport } from 'node:child_process';
 import type BetterSqlite3 from 'better-sqlite3-multiple-ciphers';
 import { RelayClient, RelayClientError, type RelayMessageResponse } from './relay/client.js';
@@ -81,11 +80,8 @@ import {
 import { validateHandle, normalizeHandle } from './relay/account-store.js';
 import { resolveConfiguredRelayBaseUrl, resolveRelayBaseUrl } from './settings.js';
 
-/** Commands that require initialization before use. */
+/** Commands that require initialization and an authenticated session. */
 const GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
-
-/** Commands that are implemented. */
-const IMPLEMENTED_COMMANDS = new Set(['send', 'inbox', 'read', 'ack', 'reply', 'thread', 'watch']);
 
 /**
  * Commands that should short-circuit to help output when `--help`/`-h` is present.
@@ -98,9 +94,7 @@ const HELP_BYPASS_COMMANDS = new Set([
   'login',
   'logout',
   'status',
-  'start',
   'onboard',
-  'setup-shell',
   'send',
   'inbox',
   'read',
@@ -109,13 +103,6 @@ const HELP_BYPASS_COMMANDS = new Set([
   'thread',
   'watch',
 ]);
-
-/**
- * Commands that require an authenticated session (in addition to init).
- *
- * After logout, these commands fail with login-required guidance (VAL-AUTH-005).
- */
-const AUTH_GATED_COMMANDS = new Set(['send', 'inbox', 'read', 'reply', 'ack', 'thread', 'watch']);
 
 export function run(args: string[]): void {
   const command = args[0];
@@ -157,22 +144,8 @@ export function run(args: string[]): void {
     return;
   }
 
-  if (command === 'setup-shell') {
-    runSetupShellCommand(commandArgs);
-    return;
-  }
-
   if (command === 'setup') {
     runSetupCommand(commandArgs).catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${msg}`);
-    });
-    return;
-  }
-
-  if (command === 'start') {
-    runStartCommand(commandArgs).catch((err: unknown) => {
       process.exitCode = 1;
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`Error: ${msg}`);
@@ -253,41 +226,31 @@ export function run(args: string[]): void {
     }
 
     // ── Auth gating: require active session (VAL-AUTH-005) ────────
-    if (AUTH_GATED_COMMANDS.has(command)) {
-      const { flags: cmdFlags } = parseArgs(commandArgs);
-      const isJson = 'json' in cmdFlags;
+    const { flags: cmdFlags } = parseArgs(commandArgs);
+    const isJson = 'json' in cmdFlags;
 
-      try {
-        requireAuth(configDir);
-      } catch (err: unknown) {
-        if (err instanceof NotAuthenticatedError) {
-          if (isJson) {
-            console.log(
-              JSON.stringify({
-                status: 'error',
-                error: 'not_authenticated',
-                message: err.message,
-              })
-            );
-          } else {
-            console.error(`Error: ${err.message}`);
-          }
-          process.exitCode = 1;
-          return;
+    try {
+      requireAuth(configDir);
+    } catch (err: unknown) {
+      if (err instanceof NotAuthenticatedError) {
+        if (isJson) {
+          console.log(
+            JSON.stringify({
+              status: 'error',
+              error: 'not_authenticated',
+              message: err.message,
+            })
+          );
+        } else {
+          console.error(`Error: ${err.message}`);
         }
-        throw err;
+        process.exitCode = 1;
+        return;
       }
+      throw err;
     }
 
-    // Dispatch to implemented commands.
-    if (IMPLEMENTED_COMMANDS.has(command)) {
-      runCommand(command, commandArgs, configDir);
-      return;
-    }
-
-    // Command is gated but not yet implemented — report it.
-    console.error(`Command "${command}" is not yet implemented.`);
-    process.exitCode = 1;
+    runCommand(command, commandArgs, configDir);
     return;
   }
 
@@ -339,7 +302,7 @@ function createRelayClientFromSession(configDir: string): RelayClient {
   const relayBaseUrl = resolveRelayBaseUrl(configDir);
   if (!relayBaseUrl) {
     throw new RemoteUnavailableError(
-      'Remote relay is not configured. Run "mors start" or set MORS_RELAY_BASE_URL.'
+      'Remote relay is not configured. Run "mors setup relay" or set MORS_RELAY_BASE_URL.'
     );
   }
 
@@ -429,37 +392,42 @@ function runCommand(command: string, args: string[], configDir: string): void {
   }
 }
 
-/**
- * Parse named CLI flags from args.
- * Supports --flag value and --flag=value patterns, plus boolean --json.
- */
+const CLI_OPTIONS = {
+  json: { type: 'boolean' },
+  remote: { type: 'boolean' },
+  secure: { type: 'boolean' },
+  'no-encrypt': { type: 'boolean' },
+  unread: { type: 'boolean' },
+  offline: { type: 'boolean' },
+  'dry-run': { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+  to: { type: 'string' },
+  from: { type: 'string' },
+  subject: { type: 'string' },
+  body: { type: 'string' },
+  'dedupe-key': { type: 'string' },
+  'trace-id': { type: 'string' },
+  'peer-device': { type: 'string' },
+  'poll-interval': { type: 'string' },
+  'invite-token': { type: 'string' },
+  handle: { type: 'string' },
+  'display-name': { type: 'string' },
+  bundle: { type: 'string' },
+  'bundle-file': { type: 'string' },
+} as const;
+
 function parseArgs(args: string[]): { positional: string[]; flags: Record<string, string | true> } {
-  const positional: string[] = [];
+  const { values, positionals } = parseNodeArgs({
+    args,
+    options: CLI_OPTIONS,
+    allowPositionals: true,
+  });
   const flags: Record<string, string | true> = {};
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg.startsWith('--')) {
-      const eqIndex = arg.indexOf('=');
-      if (eqIndex >= 0) {
-        const key = arg.slice(2, eqIndex);
-        flags[key] = arg.slice(eqIndex + 1);
-      } else {
-        const key = arg.slice(2);
-        const next = args[i + 1];
-        if (next !== undefined && !next.startsWith('--')) {
-          flags[key] = next;
-          i++;
-        } else {
-          flags[key] = true;
-        }
-      }
-    } else {
-      positional.push(arg);
-    }
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === 'string') flags[key] = value;
+    else if (value === true) flags[key] = true;
   }
-
-  return { positional, flags };
+  return { positional: positionals, flags };
 }
 
 // ── Send command ──────────────────────────────────────────────────────
@@ -1528,7 +1496,7 @@ function runRemoteWatch(configDir: string, json: boolean): void {
     process.exitCode = 1;
     handleRemoteError(
       new RemoteUnavailableError(
-        'Remote relay is not configured. Run "mors start" or set MORS_RELAY_BASE_URL.'
+        'Remote relay is not configured. Run "mors setup relay" or set MORS_RELAY_BASE_URL.'
       ),
       json
     );
@@ -1659,39 +1627,6 @@ function formatWatchEvent(event: WatchEvent): void {
   }
 }
 
-// ── Setup-shell command ──────────────────────────────────────────────
-
-function runSetupShellCommand(_args: string[]): void {
-  const { flags } = parseArgs(_args);
-  const json = 'json' in flags;
-  const autoConfirm = 'confirm' in flags;
-  const autoDecline = 'decline' in flags;
-
-  runSetupShell({
-    json,
-    autoConfirm,
-    autoDecline,
-  })
-    .then(() => {
-      // Success — exit code remains 0.
-    })
-    .catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (json) {
-        console.log(
-          JSON.stringify({
-            status: 'error',
-            error: 'setup_shell_failed',
-            message: msg,
-          })
-        );
-      } else {
-        console.error(`Error: ${msg}`);
-      }
-    });
-}
-
 // ── Login command (VAL-AUTH-001, VAL-AUTH-002, VAL-AUTH-007, VAL-AUTH-011) ─
 
 function runLogin(_args: string[]): void {
@@ -1739,7 +1674,7 @@ function runLogin(_args: string[]): void {
   }
 
   // Check init
-  const isInited = existsSyncCheck(`${configDir}/.initialized`);
+  const isInited = existsSync(`${configDir}/.initialized`);
   if (!isInited) {
     missing.push('initialized');
   }
@@ -1835,11 +1770,6 @@ function runLogin(_args: string[]): void {
     console.log(`Account: ${inviteResult.accountId}`);
     console.log(`Device: ${deviceId}`);
   }
-}
-
-/** Check if a path exists on disk (sync). */
-function existsSyncCheck(filePath: string): boolean {
-  return existsSync(filePath);
 }
 
 // ── Logout command (VAL-AUTH-005) ────────────────────────────────────
@@ -2256,7 +2186,7 @@ async function runStatus(_args: string[]): Promise<void> {
       if (err instanceof HostedStatusUnauthorizedError) {
         const message =
           'Your hosted session has expired or been revoked. ' +
-          'Run "mors logout" and then "mors start" to sign in again.';
+          'Run "mors logout" and then "mors setup relay" to sign in again.';
         if (json) {
           console.log(
             JSON.stringify({
@@ -2276,7 +2206,7 @@ async function runStatus(_args: string[]): Promise<void> {
       if (err instanceof HostedStatusRelayProfileMissingError) {
         const message =
           'The relay no longer has your hosted profile for this session. ' +
-          'Run "mors start" to repair your hosted profile and continue.';
+          'Run "mors setup relay" to repair your hosted profile and continue.';
         if (json) {
           console.log(
             JSON.stringify({
@@ -2794,11 +2724,9 @@ interface QuickstartStep {
  * Flags:
  *   --json                     Output machine-readable JSON
  *   --help                     Show quickstart usage
- *   --simulate-init-failure    (testing) Force init step to fail
  */
 function runQuickstart(_args: string[]): void {
   const json = _args.includes('--json');
-  const simulateInitFailure = _args.includes('--simulate-init-failure');
 
   if (_args.includes('--help') || _args.includes('-h')) {
     console.log(`mors quickstart — run local lifecycle check
@@ -2823,12 +2751,6 @@ Options:
 
   // ── Step 1: init ────────────────────────────────────────────────
   try {
-    if (simulateInitFailure) {
-      throw new SqlCipherUnavailableError(
-        'SQLCipher is not available. Install it with: brew install sqlcipher && npm rebuild'
-      );
-    }
-
     // Use synchronous path: call initCommand and wait for result
     // initCommand is async, so we use a synchronous approach for quickstart
     const initResult = initCommandSync();
@@ -3104,11 +3026,9 @@ interface DoctorCheck {
  * Flags:
  *   --json                          Output machine-readable JSON
  *   --help                          Show doctor usage
- *   --simulate-sqlcipher-failure    (testing) Force sqlcipher check to fail
  */
 function runDoctor(_args: string[]): void {
   const json = _args.includes('--json');
-  const simulateSqlCipherFailure = _args.includes('--simulate-sqlcipher-failure');
 
   if (_args.includes('--help') || _args.includes('-h')) {
     console.log(`mors doctor — check prerequisites and configuration health
@@ -3158,7 +3078,7 @@ Options:
   // ── Check 2: SQLCipher availability ───────────────────────────────
   {
     try {
-      verifySqlCipherAvailable(simulateSqlCipherFailure);
+      verifySqlCipherAvailable();
       checks.push({
         name: 'sqlcipher',
         status: 'pass',
@@ -3247,7 +3167,7 @@ Options:
         name: 'relay_config',
         status: 'warn',
         message: 'Relay URL not configured (remote features unavailable)',
-        remediation: ['mors start', 'export MORS_RELAY_BASE_URL=https://relay.example.com'],
+        remediation: ['mors setup relay', 'export MORS_RELAY_BASE_URL=https://relay.example.com'],
       });
     }
   }
@@ -3307,15 +3227,9 @@ Options:
 function runInit(_args: string[]): void {
   // Parse --json flag for machine-readable output.
   const json = _args.includes('--json');
-  // Parse testing hooks (hidden flags, not shown in help).
-  const simulateSqlCipherUnavailable = _args.includes('--simulate-sqlcipher-unavailable');
-  const simulateFailureAfterIdentity = _args.includes('--simulate-failure-after-identity');
 
   // Use a promise to handle the async initCommand.
-  initCommand({
-    simulateSqlCipherUnavailable,
-    simulateFailureAfterIdentity,
-  })
+  initCommand()
     .then((result) => {
       if (json) {
         console.log(
@@ -3468,7 +3382,7 @@ function runDeploy(args: string[]): void {
   const { flags } = parseArgs(args);
   const isJson = 'json' in flags;
   const isDryRun = 'dry-run' in flags;
-  const isHelp = 'help' in flags || 'h' in flags;
+  const isHelp = 'help' in flags;
 
   if (isHelp) {
     console.log(`mors deploy — Deploy the mors relay to Fly.io
@@ -3606,7 +3520,6 @@ Commands:
   login        Authenticate with mors-native auth
   logout       Clear local auth session
   status       Show current auth status
-  start        Launch the hosted mors app experience
   onboard      First-run setup: register handle + profile
   send         Send a message
   inbox        List messages
@@ -3618,7 +3531,6 @@ Commands:
   spool        Maildir-style agent communication spool
   sandbox      VM and sandbox agent helper commands
   deploy       Deploy relay to Fly.io
-  setup-shell  Configure shell PATH for mors
 
 Options:
   -h, --help     Show this help
@@ -3700,10 +3612,6 @@ Status:
   --json                 Output JSON
   --offline              Skip token liveness check (report local session only)
 
-Start:
-  mors start
-  Interactive relay-backed app for signup, contacts, inbox, and messaging
-
 Setup:
   mors setup local [--json] [--config-dir <path>]
   mors setup relay [--json] [--config-dir <path>] [--relay-url <url>]
@@ -3740,11 +3648,5 @@ Key Exchange:
 Deploy:
   mors deploy [--json] [--dry-run]
   --json                 Output JSON
-  --dry-run              Validate deploy prerequisites without deploying
-
-Setup Shell:
-  mors setup-shell [--json] [--confirm] [--decline]
-  --json                 Output JSON
-  --confirm              Auto-confirm without prompting
-  --decline              Auto-decline without prompting`);
+  --dry-run              Validate deploy prerequisites without deploying`);
 }

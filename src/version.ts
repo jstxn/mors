@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 /**
  * Single source of truth for the package version.
  *
- * Read from package.json at runtime so the CLI `--version` output, the init
- * sentinel, and the A2A Agent Card never drift from the published version.
+ * Read from package.json at runtime so the CLI `--version` output and the init
+ * sentinel never drift from the published version.
  * Both the compiled entrypoint (dist/version.js) and the tsx dev path
  * (src/version.ts) sit one directory below package.json, so the relative
  * lookup resolves in either context.

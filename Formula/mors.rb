@@ -10,7 +10,6 @@ class Mors < Formula
   license "UNLICENSED"
   head "https://github.com/jstxn/mors.git", branch: "main"
 
-  depends_on "python" => :build
   depends_on "node"
   depends_on "sqlcipher"
 

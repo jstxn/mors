@@ -10,7 +10,6 @@
  * - Failure output includes actionable next command(s) for recovery
  * - JSON output is machine-readable with per-step results and summary
  * - Fresh config context isolation
- * - Simulated failure paths with remediation guidance
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -220,111 +219,6 @@ describe('VAL-LAUNCH-007: quickstart command first-success lifecycle', () => {
     expect(parsed).toHaveProperty('totalSteps');
     expect(parsed).toHaveProperty('passedSteps');
     expect(parsed).toHaveProperty('configDir');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════
-// Quickstart failure paths with actionable remediation
-// ═══════════════════════════════════════════════════════════════════════
-
-describe('quickstart: failure paths and remediation', () => {
-  let configDir: string;
-
-  beforeEach(() => {
-    configDir = mkdtempSync(join(tmpdir(), 'mors-quickstart-fail-'));
-  });
-
-  afterEach(() => {
-    rmSync(configDir, { recursive: true, force: true });
-  });
-
-  it('quickstart --json with simulated init failure returns failure status', () => {
-    const result = runCli('quickstart --json --simulate-init-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout.trim());
-    expect(parsed.status).toBe('failure');
-  });
-
-  it('failure output includes actionable next commands for recovery', () => {
-    const result = runCli('quickstart --json --simulate-init-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout.trim());
-    expect(parsed.status).toBe('failure');
-    // Must include remediation
-    expect(parsed.remediation).toBeDefined();
-    expect(Array.isArray(parsed.remediation)).toBe(true);
-    expect(parsed.remediation.length).toBeGreaterThan(0);
-    // Each remediation should be a string (command or instruction)
-    for (const r of parsed.remediation) {
-      expect(typeof r).toBe('string');
-      expect(r.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('failure output identifies which step failed', () => {
-    const result = runCli('quickstart --json --simulate-init-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout.trim());
-
-    // Should have at least one step with fail status
-    const failedSteps = parsed.steps.filter((s: { status: string }) => s.status === 'fail');
-    expect(failedSteps.length).toBeGreaterThan(0);
-
-    // Failed step should include error message
-    for (const s of failedSteps) {
-      expect(s.error).toBeDefined();
-      expect(typeof s.error).toBe('string');
-    }
-  });
-
-  it('steps after a failure are reported as skipped', () => {
-    const result = runCli('quickstart --json --simulate-init-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout.trim());
-
-    // Init should fail, so subsequent steps should be skipped
-    const initStep = parsed.steps.find((s: { name: string }) => s.name === 'init');
-    expect(initStep.status).toBe('fail');
-
-    // Steps after init should be skipped
-    const skippedSteps = parsed.steps.filter((s: { status: string }) => s.status === 'skipped');
-    expect(skippedSteps.length).toBeGreaterThan(0);
-  });
-
-  it('passedSteps count reflects actual passes (not total)', () => {
-    const result = runCli('quickstart --json --simulate-init-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout.trim());
-
-    expect(parsed.passedSteps).toBeLessThan(parsed.totalSteps);
-  });
-
-  it('human-readable failure output mentions the failed step and next action', () => {
-    const result = runCli('quickstart --simulate-init-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const output = result.stdout + result.stderr;
-    // Should mention the failure
-    expect(output.toLowerCase()).toMatch(/fail|error|✗|✘/);
-    // Should suggest what to do
-    expect(output.toLowerCase()).toMatch(/init|sqlcipher|brew/);
   });
 });
 

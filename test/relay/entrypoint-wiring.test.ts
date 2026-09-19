@@ -10,7 +10,7 @@
  * - Auth + messaging behavior matches the tested path
  * - ParticipantStore uses the message store for authorization
  * - ContactStore is wired so /contacts/* routes and first-contact annotations are active
- * - AccountStore is wired so /.well-known/agent-card.json endpoint is active
+ * - AccountStore is wired into production options
  */
 
 import { describe, it, expect, afterEach, beforeEach, afterAll, beforeAll } from 'vitest';
@@ -226,67 +226,8 @@ describe('relay entrypoint wiring', () => {
     });
   });
 
-  describe('agent card endpoint is active with production wiring', () => {
-    it('GET /.well-known/agent-card.json returns relay fallback card (not 404)', async () => {
-      const config = loadRelayConfig({
-        MORS_RELAY_PORT: String(port),
-        MORS_RELAY_HOST: '127.0.0.1',
-      });
-
-      const prodOptions = createProductionServerOptions();
-      server = createRelayServer(config, {
-        ...prodOptions,
-        tokenVerifier: stubVerifier,
-        logger: () => {},
-      });
-      await server.start();
-      port = server.port;
-
-      // Agent card endpoint is public — no auth header needed
-      const res = await fetch(`http://127.0.0.1:${port}/.well-known/agent-card.json`);
-      const body = (await res.json()) as Record<string, unknown>;
-
-      expect(res.status).toBe(200);
-      expect(body['name']).toBe('mors-relay');
-      expect(body['version']).toBeTruthy();
-      expect(body['capabilities']).toBeTruthy();
-      expect(body['skills']).toBeInstanceOf(Array);
-    });
-
-    it('per-handle agent card works through production wiring', async () => {
-      const config = loadRelayConfig({
-        MORS_RELAY_PORT: String(port),
-        MORS_RELAY_HOST: '127.0.0.1',
-      });
-
-      const prodOptions = createProductionServerOptions();
-      server = createRelayServer(config, {
-        ...prodOptions,
-        tokenVerifier: stubVerifier,
-        logger: () => {},
-      });
-      await server.start();
-      port = server.port;
-
-      // Register an account first (requires auth)
-      await relayFetch(port, '/accounts/register', {
-        method: 'POST',
-        token: ALICE.token,
-        body: { handle: 'alice_prod', display_name: 'Alice Production' },
-      });
-
-      // Agent card for registered handle — no auth needed
-      const res = await fetch(
-        `http://127.0.0.1:${port}/.well-known/agent-card.json?handle=alice_prod`
-      );
-      const body = (await res.json()) as Record<string, unknown>;
-
-      expect(res.status).toBe(200);
-      expect(body['name']).toBe('alice_prod');
-      expect(body['description'] as string).toContain('Alice Production');
-    });
-
-    it('accountStore is wired into production options', () => {
+  describe('accountStore is wired into production options', () => {
+    it('returns options containing an AccountStore instance', () => {
       const opts = createProductionServerOptions();
       expect(opts.accountStore).toBeDefined();
       expect(opts.accountStore).toBeInstanceOf(AccountStore);

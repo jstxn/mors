@@ -84,7 +84,7 @@ describe('VAL-LAUNCH-006: agent self-serve invocation path', () => {
 
   it('agent can run mors --version via node dist/index.js without any shell setup', () => {
     // This simulates `npx github:jstxn/mors --version` in a clean environment.
-    // No setup-shell, no PATH mutation, no aliases.
+    // No PATH mutation, no aliases.
     const result = runCli('--version', { configDir });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe(`mors ${pkg.version}`);
@@ -249,10 +249,8 @@ describe('VAL-LAUNCH-006: agent self-serve invocation path', () => {
     }
   });
 
-  // ── Self-serve path does NOT require setup-shell ───────────────────
-
-  it('full lifecycle works without ever calling setup-shell', () => {
-    // This is the core of VAL-LAUNCH-006: agents do not need setup-shell
+  it('full lifecycle works without shell RC edits', () => {
+    // This is the core of VAL-LAUNCH-006: agents invoke dist/index.js directly
     const result = runCli('init --json', { configDir });
     expect(result.exitCode).toBe(0);
 
@@ -270,7 +268,7 @@ describe('VAL-LAUNCH-006: agent self-serve invocation path', () => {
   // ── npx-style one-shot invocation ──────────────────────────────────
 
   it('dist/index.js is directly invocable via node (simulates npx path)', () => {
-    // Ensure dist/index.js exists (it should be pre-built and committed)
+    // Ensure dist/index.js exists (global-setup builds it)
     expect(existsSync(CLI)).toBe(true);
 
     // Invoke directly — no PATH setup, no aliases, no shell RC

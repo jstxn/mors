@@ -11,14 +11,16 @@
  */
 
 import { loadRelayConfig } from './config.js';
-import { bootstrapRelay } from './bootstrap.js';
 import { createRelayServer, type RelayServerOptions } from './server.js';
 import { createNativeTokenVerifier } from './auth-middleware.js';
 import { RelayMessageStore } from './message-store.js';
 import { AccountStore } from './account-store.js';
 import { ContactStore } from './contact-store.js';
 import { generateSessionToken } from '../auth/native.js';
-import type { RelayPersistenceContext } from './persistence.js';
+import {
+  createRelayPersistenceContext,
+  type RelayPersistenceContext,
+} from './persistence.js';
 
 /**
  * Create the production server options including all wired dependencies.
@@ -90,18 +92,8 @@ export function createProductionServerOptions(options?: {
 
 async function main(): Promise<void> {
   const config = loadRelayConfig();
-
-  // Initialize persistence and other dependencies before accepting requests
-  const bootstrap = await bootstrapRelay();
-  if (!bootstrap.ready) {
-    const failed = bootstrap.services.filter((s) => !s.ready).map((s) => s.name);
-    console.error(`relay bootstrap failed: services not ready: ${failed.join(', ')}`);
-    process.exit(1);
-  }
-
-  const serverOptions = createProductionServerOptions({
-    persistence: bootstrap.persistence,
-  });
+  const persistence = createRelayPersistenceContext();
+  const serverOptions = createProductionServerOptions({ persistence });
   const server = createRelayServer(config, serverOptions);
 
   // Graceful shutdown handler

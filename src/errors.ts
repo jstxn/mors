@@ -121,18 +121,6 @@ export class PeerIdentityChangedError extends MorsError {
   }
 }
 
-/** Thrown when E2EE is attempted on a group or channel conversation (only 1:1/direct is supported). */
-export class GroupE2EEUnsupportedError extends MorsError {
-  constructor(conversationType: string) {
-    super(
-      `End-to-end encryption is not supported for "${conversationType}" conversations. ` +
-        'E2EE is currently only supported for 1:1 direct conversations. ' +
-        'Group and channel E2EE support is deferred to a future release.'
-    );
-    this.name = 'GroupE2EEUnsupportedError';
-  }
-}
-
 /** Thrown when E2EE encryption or decryption fails (tampered ciphertext, wrong key, malformed payload). */
 export class CipherError extends MorsError {
   constructor(message: string) {

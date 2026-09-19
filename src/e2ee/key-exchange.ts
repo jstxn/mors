@@ -7,7 +7,6 @@
  * 1. Performs ECDH key agreement between local and peer X25519 keys
  * 2. Derives a shared secret for later encrypt/decrypt operations
  * 3. Persists key exchange session metadata (shared secret + peer info)
- * 4. Enforces 1:1-only scope — rejects group/channel E2EE attempts
  *
  * Security invariants:
  * - Shared secrets are persisted with owner-only permissions (0o600)
@@ -18,7 +17,6 @@
  *
  * Covers:
  * - VAL-E2EE-002: 1:1 key exchange completes before encrypted send
- * - VAL-E2EE-008: Group/channel E2EE attempts return explicit unsupported response
  */
 
 import { diffieHellman, createPublicKey, createPrivateKey, type KeyObject } from 'node:crypto';
@@ -31,11 +29,7 @@ import {
   readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import {
-  KeyExchangeError,
-  KeyExchangeNotCompleteError,
-  GroupE2EEUnsupportedError,
-} from '../errors.js';
+import { KeyExchangeError, KeyExchangeNotCompleteError } from '../errors.js';
 import { generateDeviceKeys, persistDeviceKeys, type DeviceKeyBundle } from './device-keys.js';
 
 /** Owner-only file permissions for session files (containing shared secrets). */
@@ -50,9 +44,6 @@ const SESSIONS_DIR = 'sessions';
 const X25519_KEY_SIZE = 32;
 
 // ── Types ────────────────────────────────────────────────────────────
-
-/** Conversation types for E2EE scope enforcement. */
-export type ConversationType = 'direct' | 'group' | 'channel';
 
 /**
  * Key exchange session metadata persisted for later encrypt/decrypt.
@@ -408,21 +399,6 @@ export function requireKeyExchange(keysDir: string, peerDeviceId: string): KeyEx
     throw new KeyExchangeNotCompleteError(peerDeviceId);
   }
   return session;
-}
-
-/**
- * Validate that a conversation type supports E2EE.
- *
- * Only 'direct' (1:1) conversations support end-to-end encryption.
- * Group and channel E2EE is explicitly deferred/unsupported per mission scope.
- *
- * @param type - The conversation type to validate.
- * @throws GroupE2EEUnsupportedError if the type is not 'direct'.
- */
-export function validateConversationType(type: ConversationType | string): void {
-  if (type !== 'direct') {
-    throw new GroupE2EEUnsupportedError(type);
-  }
 }
 
 // ── Device revocation ───────────────────────────────────────────────

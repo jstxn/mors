@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -151,8 +151,6 @@ describe('Homebrew static formula validation (VAL-INSTALL-007)', () => {
     expect(content).toMatch(/depends_on\s+"node"/);
     // SQLCipher for encrypted storage
     expect(content).toMatch(/depends_on\s+"sqlcipher"/);
-    // Python for native module compilation
-    expect(content).toMatch(/depends_on\s+"python".*=>.*:build/);
   });
 
   it('formula install stanza uses std_npm_args for proper prefix handling', () => {
@@ -323,7 +321,6 @@ describe('install matrix consistency (VAL-INSTALL-007)', () => {
       'reply',
       'ack',
       'watch',
-      'setup-shell',
       'thread',
     ];
     for (const cmd of expectedCommands) {
@@ -432,146 +429,6 @@ describe('first-run operational flow (VAL-CROSS-007)', () => {
   });
 });
 
-// ── VAL-CROSS-007: Setup-shell in first-run context ─────────────────
-
-describe('setup-shell in first-run flow (VAL-CROSS-007)', () => {
-  let fakeHome: string;
-  let configDir: string;
-
-  beforeEach(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), 'mors-first-run-home-'));
-    configDir = mkdtempSync(join(tmpdir(), 'mors-first-run-cfg-'));
-  });
-
-  afterEach(() => {
-    rmSync(fakeHome, { recursive: true, force: true });
-    rmSync(configDir, { recursive: true, force: true });
-  });
-
-  it('setup-shell works before init (install-time command)', () => {
-    const result = runCli('setup-shell --decline', {
-      configDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-npm-bin',
-      },
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).not.toContain('not initialized');
-  });
-
-  it('decline path leaves RC file unchanged', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# existing config\nexport EDITOR=vim\n';
-    writeFileSync(rcPath, originalContent);
-
-    runCli('setup-shell --decline', {
-      configDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-npm-bin',
-      },
-    });
-
-    expect(readFileSync(rcPath, 'utf-8')).toBe(originalContent);
-  });
-
-  it('confirm path applies RC edit and first-run commands still work', () => {
-    // Step 1: Setup shell (confirm)
-    const setupResult = runCli('setup-shell --confirm --json', {
-      configDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-npm-bin',
-      },
-    });
-    expect(setupResult.exitCode).toBe(0);
-    const setupParsed = JSON.parse(setupResult.stdout.trim());
-    expect(setupParsed.status).toBe('applied');
-
-    // Step 2: Verify RC file was modified
-    const rcPath = join(fakeHome, '.zshrc');
-    const rcContent = readFileSync(rcPath, 'utf-8');
-    expect(rcContent).toContain('/tmp/fake-npm-bin');
-    expect(rcContent).toContain('# mors');
-
-    // Step 3: Init still works after setup-shell
-    const initResult = runCli('init --json', { configDir });
-    expect(initResult.exitCode).toBe(0);
-    expect(JSON.parse(initResult.stdout.trim()).status).toBe('initialized');
-
-    // Step 4: Inbox works after init
-    const inboxResult = runCli('inbox --json', { configDir });
-    expect(inboxResult.exitCode).toBe(0);
-    expect(JSON.parse(inboxResult.stdout.trim()).count).toBe(0);
-  });
-
-  it('full first-run with decline: install → decline setup-shell → version → init → inbox', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# pristine rc\n';
-    writeFileSync(rcPath, originalContent);
-
-    // Step 1: Setup-shell declined
-    const setupResult = runCli('setup-shell --decline --json', {
-      configDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-npm-bin',
-      },
-    });
-    expect(setupResult.exitCode).toBe(0);
-    expect(JSON.parse(setupResult.stdout.trim()).status).toBe('declined');
-
-    // Step 2: RC file is unchanged
-    expect(readFileSync(rcPath, 'utf-8')).toBe(originalContent);
-
-    // Step 3: Version check
-    const versionResult = runCli('--version', { configDir });
-    expect(versionResult.exitCode).toBe(0);
-
-    // Step 4: Init
-    const initResult = runCli('init --json', { configDir });
-    expect(initResult.exitCode).toBe(0);
-
-    // Step 5: Inbox
-    const inboxResult = runCli('inbox --json', { configDir });
-    expect(inboxResult.exitCode).toBe(0);
-    expect(JSON.parse(inboxResult.stdout.trim()).status).toBe('ok');
-  });
-
-  it('idempotent setup-shell does not cause RC file mutation on re-run', () => {
-    // First run: confirm
-    runCli('setup-shell --confirm', {
-      configDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-npm-bin',
-      },
-    });
-
-    const rcPath = join(fakeHome, '.zshrc');
-    const contentAfterFirst = readFileSync(rcPath, 'utf-8');
-
-    // Second run: confirm again
-    runCli('setup-shell --confirm', {
-      configDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-npm-bin',
-      },
-    });
-
-    const contentAfterSecond = readFileSync(rcPath, 'utf-8');
-    expect(contentAfterSecond).toBe(contentAfterFirst);
-  });
-});
-
 // ── Install guidance matches actual paths ───────────────────────────
 
 describe('install guidance accuracy', () => {
@@ -595,13 +452,6 @@ describe('install guidance accuracy', () => {
     expect(readme).toContain('init');
     // README shows inbox usage
     expect(readme).toContain('inbox');
-  });
-
-  it('CLI --help documents setup-shell command', () => {
-    const helpResult = runCli('--help');
-    expect(helpResult.exitCode).toBe(0);
-    expect(helpResult.stdout).toContain('setup-shell');
-    expect(helpResult.stdout).toContain('Configure shell PATH');
   });
 
   it('CLI --help documents all first-run commands', () => {

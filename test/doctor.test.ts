@@ -240,26 +240,6 @@ describe('VAL-LAUNCH-008: doctor command failure detection', () => {
     expect(hasRemediation).toBe(true);
   });
 
-  // ── SQLCipher unavailable (simulated) ────────────────────────────
-
-  it('sqlcipher check fails with remediation when simulated unavailable', () => {
-    const result = runCli('doctor --json --simulate-sqlcipher-failure', {
-      configDir,
-      expectFailure: true,
-    });
-    expect(result.exitCode).toBe(1);
-    const parsed = JSON.parse(result.stdout.trim());
-
-    const sqlCheck = parsed.checks.find((c: { name: string }) => c.name === 'sqlcipher');
-    expect(sqlCheck.status).toBe('fail');
-    expect(sqlCheck.remediation).toBeDefined();
-    // Should suggest brew install sqlcipher
-    const hasBrewCmd = sqlCheck.remediation.some((r: string) =>
-      r.includes('brew install sqlcipher')
-    );
-    expect(hasBrewCmd).toBe(true);
-  });
-
   // ── Auth session ─────────────────────────────────────────────────
 
   it('auth check warns when no session exists (not blocking)', () => {
@@ -322,8 +302,7 @@ describe('VAL-LAUNCH-008: doctor command failure detection', () => {
   // ── Multiple failures ────────────────────────────────────────────
 
   it('doctor reports multiple failing checks at once', () => {
-    // fresh configDir, not initialized, simulated sqlcipher failure
-    const result = runCli('doctor --json --simulate-sqlcipher-failure', {
+    const result = runCli('doctor --json', {
       configDir,
       expectFailure: true,
     });
@@ -337,7 +316,7 @@ describe('VAL-LAUNCH-008: doctor command failure detection', () => {
   });
 
   it('each failing check includes non-empty remediation array', () => {
-    const result = runCli('doctor --json --simulate-sqlcipher-failure', {
+    const result = runCli('doctor --json', {
       configDir,
       expectFailure: true,
     });

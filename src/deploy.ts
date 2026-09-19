@@ -13,13 +13,7 @@
 import { execFileSync } from 'node:child_process';
 
 /** Secrets and token patterns that must never appear in deploy output. */
-const SECRET_ENV_KEYS = [
-  'FLY_ACCESS_TOKEN',
-  'GITHUB_DEVICE_CLIENT_ID',
-  'GITHUB_TOKEN_ENDPOINT',
-  'MORS_AUTH_TOKEN_ISSUER',
-  'MORS_AUTH_AUDIENCE',
-] as const;
+const SECRET_ENV_KEYS = ['FLY_ACCESS_TOKEN'] as const;
 
 /** Pattern that matches placeholder values from .env.example. */
 const PLACEHOLDER_PATTERN = /^replace-with-/;

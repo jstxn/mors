@@ -114,11 +114,6 @@ describe('homebrew formula', () => {
     expect(content).toMatch(/depends_on\s+"node"/);
   });
 
-  it('formula depends on python for build (native addon)', () => {
-    const content = readFileSync(formulaPath, 'utf8');
-    expect(content).toMatch(/depends_on\s+"python".*=>.*:build/);
-  });
-
   it('formula depends on sqlcipher', () => {
     const content = readFileSync(formulaPath, 'utf8');
     expect(content).toMatch(/depends_on\s+"sqlcipher"/);
@@ -293,19 +288,14 @@ describe('GitHub shortcut install without build deps (VAL-INSTALL-001)', () => {
     expect(result.trim()).toContain(pkg.version);
   });
 
-  it('dist/ is tracked in git (not gitignored)', () => {
-    // dist/ must be committed so GitHub shortcut install has pre-built files
+  it('dist/ is gitignored (prepare builds it)', () => {
     const gitStatus = execSync('git ls-files dist/index.js', {
       cwd: ROOT,
       encoding: 'utf8',
     });
-    expect(gitStatus.trim()).toBe('dist/index.js');
-  });
-
-  it('dist/ is not listed in .gitignore', () => {
+    expect(gitStatus.trim()).toBe('');
     const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
-    // dist/ must NOT appear as a gitignore pattern
-    expect(gitignore).not.toMatch(/^dist\/?$/m);
+    expect(gitignore).toMatch(/^dist\/?$/m);
   });
 
   it('prepare script invokes tsc via explicit local path, not via PATH lookup', () => {
@@ -385,9 +375,9 @@ describe('GitHub shortcut install without build deps (VAL-INSTALL-001)', () => {
     expect(result.trim()).toContain(pkg.version);
   });
 
-  it('first-run flow works with pre-built dist (simulates GitHub install)', () => {
+  it('first-run flow works with built dist (simulates GitHub install)', () => {
     // Simulate the user experience after `npm i -g github:jstxn/mors`
-    // The dist/ is pre-built and committed, so no build step needed
+    // prepare compiles dist/; tests rely on global-setup having built it.
     const tmpDir = execSync('mktemp -d', { encoding: 'utf8' }).trim();
     try {
       const env = { ...process.env, MORS_CONFIG_DIR: join(tmpDir, 'mors-cfg') };

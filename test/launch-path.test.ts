@@ -3,33 +3,22 @@
  *
  * Validates the VAL-LAUNCH assertions for the developer-launch-path milestone:
  * - VAL-LAUNCH-001: GitHub shortcut npm install works without global TypeScript
- * - VAL-LAUNCH-002: setup-shell prompts before shell RC mutation
- * - VAL-LAUNCH-003: Declining setup-shell leaves RC files unchanged
- * - VAL-LAUNCH-004: Confirmed setup-shell edit is minimal and idempotent
  * - VAL-LAUNCH-005: Installed-command first-run operational flow (login/init/inbox)
  *
- * These tests complement the existing install/setup-shell test files by providing
+ * These tests complement the existing install test files by providing
  * direct evidence for the validation contract assertions with the required
  * evidence patterns (checksums, transcripts, ordered flows).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const CLI = join(ROOT, 'dist', 'index.js');
-
-/** Compute SHA-256 hash of file content for checksum verification. */
-function fileChecksum(filePath: string): string {
-  if (!existsSync(filePath)) return 'FILE_NOT_FOUND';
-  const content = readFileSync(filePath);
-  return createHash('sha256').update(content).digest('hex');
-}
 
 /** Run the CLI and capture output. */
 function runCli(
@@ -37,7 +26,6 @@ function runCli(
   options?: {
     configDir?: string;
     env?: Record<string, string>;
-    input?: string;
     expectFailure?: boolean;
   }
 ): { stdout: string; stderr: string; exitCode: number } {
@@ -50,16 +38,13 @@ function runCli(
   }
 
   try {
-    const stdout = execSync(
-      options?.input ? `echo "${options.input}" | node ${CLI} ${args}` : `node ${CLI} ${args}`,
-      {
-        cwd: ROOT,
-        encoding: 'utf8',
-        env,
-        timeout: 15_000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    );
+    const stdout = execSync(`node ${CLI} ${args}`, {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env,
+      timeout: 15_000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     return { stdout, stderr: '', exitCode: 0 };
   } catch (err: unknown) {
     const e = err as {
@@ -105,17 +90,14 @@ describe('VAL-LAUNCH-001: GitHub shortcut npm install in clean environment', () 
     expect(exitCode).toBe(0);
   });
 
-  it('dist/index.js is pre-built and committed (no build step needed for GitHub install)', () => {
-    // Verify dist/ is tracked in git (essential for GitHub shortcut install)
+  it('dist/ is gitignored; prepare/global-setup builds it', () => {
     const gitTracked = execSync('git ls-files dist/index.js', {
       cwd: ROOT,
       encoding: 'utf8',
     }).trim();
-    expect(gitTracked).toBe('dist/index.js');
-
-    // Verify dist/ is not gitignored
+    expect(gitTracked).toBe('');
     const gitignore = readFileSync(join(ROOT, '.gitignore'), 'utf8');
-    expect(gitignore).not.toMatch(/^dist\/?$/m);
+    expect(gitignore).toMatch(/^dist\/?$/m);
   });
 
   it('pre-built dist produces correct mors --version immediately', () => {
@@ -180,272 +162,6 @@ describe('VAL-LAUNCH-001: GitHub shortcut npm install in clean environment', () 
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════
-// VAL-LAUNCH-002: setup-shell prompts before shell RC mutation
-// ═══════════════════════════════════════════════════════════════════════
-
-describe('VAL-LAUNCH-002: setup-shell prompts before RC mutation', () => {
-  let fakeHome: string;
-
-  beforeEach(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), 'mors-launch-002-'));
-  });
-
-  afterEach(() => {
-    rmSync(fakeHome, { recursive: true, force: true });
-  });
-
-  it('shows preview of exact RC change before any prompt', () => {
-    const result = runCli('setup-shell', {
-      input: 'n',
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    // Must show PATH line preview
-    expect(result.stdout).toContain('PATH');
-    expect(result.stdout).toContain('/tmp/fake-bin');
-    // Must show the target RC file
-    expect(result.stdout).toContain('.zshrc');
-  });
-
-  it('asks for confirmation with y/N prompt', () => {
-    const result = runCli('setup-shell', {
-      input: 'n',
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    // Must ask for confirmation
-    expect(result.stdout).toMatch(/[Yy]\/[Nn]/);
-  });
-
-  it('RC file checksum is unchanged after preview (before confirmation)', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# my shell config\nexport EDITOR=vim\n';
-    writeFileSync(rcPath, originalContent);
-    const checksumBefore = fileChecksum(rcPath);
-
-    // Run with decline to verify prompt doesn't mutate
-    runCli('setup-shell --decline', {
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    const checksumAfter = fileChecksum(rcPath);
-    expect(checksumAfter).toBe(checksumBefore);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════
-// VAL-LAUNCH-003: Declining setup-shell leaves RC files unchanged
-// ═══════════════════════════════════════════════════════════════════════
-
-describe('VAL-LAUNCH-003: decline path leaves RC files unchanged', () => {
-  let fakeHome: string;
-
-  beforeEach(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), 'mors-launch-003-'));
-  });
-
-  afterEach(() => {
-    rmSync(fakeHome, { recursive: true, force: true });
-  });
-
-  it('interactive decline (n) preserves RC checksum', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# existing zshrc\nexport PATH="/usr/local/bin:$PATH"\n';
-    writeFileSync(rcPath, originalContent);
-    const checksumBefore = fileChecksum(rcPath);
-
-    runCli('setup-shell', {
-      input: 'n',
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    expect(fileChecksum(rcPath)).toBe(checksumBefore);
-    expect(readFileSync(rcPath, 'utf-8')).toBe(originalContent);
-  });
-
-  it('--decline flag preserves RC checksum', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# config\nalias g="git"\n';
-    writeFileSync(rcPath, originalContent);
-    const checksumBefore = fileChecksum(rcPath);
-
-    const result = runCli('setup-shell --decline --json', {
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    expect(fileChecksum(rcPath)).toBe(checksumBefore);
-    const parsed = JSON.parse(result.stdout.trim());
-    expect(parsed.status).toBe('declined');
-    expect(parsed.applied).toBe(false);
-  });
-
-  it('decline with bash shell also preserves RC', () => {
-    const rcPath = join(fakeHome, '.bashrc');
-    const originalContent = '# bashrc\n';
-    writeFileSync(rcPath, originalContent);
-    const checksumBefore = fileChecksum(rcPath);
-
-    runCli('setup-shell --decline', {
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/bash',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    expect(fileChecksum(rcPath)).toBe(checksumBefore);
-  });
-
-  it('decline with no existing RC file creates no new file', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    expect(existsSync(rcPath)).toBe(false);
-
-    runCli('setup-shell --decline', {
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    expect(existsSync(rcPath)).toBe(false);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════
-// VAL-LAUNCH-004: Confirmed setup-shell edit is minimal and idempotent
-// ═══════════════════════════════════════════════════════════════════════
-
-describe('VAL-LAUNCH-004: confirm path applies minimal idempotent change', () => {
-  let fakeHome: string;
-
-  beforeEach(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), 'mors-launch-004-'));
-  });
-
-  afterEach(() => {
-    rmSync(fakeHome, { recursive: true, force: true });
-  });
-
-  it('first run applies exactly one PATH line with mors marker', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# my config\nexport EDITOR=vim\n';
-    writeFileSync(rcPath, originalContent);
-
-    const result = runCli('setup-shell --confirm --json', {
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    const parsed = JSON.parse(result.stdout.trim());
-    expect(parsed.status).toBe('applied');
-
-    const newContent = readFileSync(rcPath, 'utf-8');
-    // Original content preserved
-    expect(newContent).toContain('# my config');
-    expect(newContent).toContain('export EDITOR=vim');
-    // Only one mors marker line added
-    const morsLines = newContent.split('\n').filter((l) => l.includes('# mors'));
-    expect(morsLines).toHaveLength(1);
-    // PATH line contains the bin dir
-    expect(newContent).toContain('/tmp/fake-bin');
-    expect(newContent).toContain('export PATH=');
-  });
-
-  it('second run is idempotent — no content change, checksum stable', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const env = {
-      HOME: fakeHome,
-      SHELL: '/bin/zsh',
-      MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-    };
-
-    // First run
-    runCli('setup-shell --confirm', { env });
-    const checksumAfterFirst = fileChecksum(rcPath);
-    const contentAfterFirst = readFileSync(rcPath, 'utf-8');
-
-    // Second run
-    const result = runCli('setup-shell --confirm --json', { env });
-    const checksumAfterSecond = fileChecksum(rcPath);
-    const contentAfterSecond = readFileSync(rcPath, 'utf-8');
-
-    // Checksum unchanged
-    expect(checksumAfterSecond).toBe(checksumAfterFirst);
-    // Content unchanged
-    expect(contentAfterSecond).toBe(contentAfterFirst);
-    // JSON reports already_configured
-    const parsed = JSON.parse(result.stdout.trim());
-    expect(parsed.status).toBe('already_configured');
-  });
-
-  it('third run also produces no change (triple idempotency)', () => {
-    const env = {
-      HOME: fakeHome,
-      SHELL: '/bin/zsh',
-      MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-    };
-
-    runCli('setup-shell --confirm', { env });
-    runCli('setup-shell --confirm', { env });
-    const checksumAfterSecond = fileChecksum(join(fakeHome, '.zshrc'));
-
-    runCli('setup-shell --confirm', { env });
-    const checksumAfterThird = fileChecksum(join(fakeHome, '.zshrc'));
-
-    expect(checksumAfterThird).toBe(checksumAfterSecond);
-  });
-
-  it('diff between pre and post confirm is minimal (one line added)', () => {
-    const rcPath = join(fakeHome, '.zshrc');
-    const originalContent = '# line 1\n# line 2\n# line 3\n';
-    writeFileSync(rcPath, originalContent);
-
-    runCli('setup-shell --confirm', {
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-      },
-    });
-
-    const newContent = readFileSync(rcPath, 'utf-8');
-    const originalLines = originalContent.split('\n').filter(Boolean);
-    const newLines = newContent.split('\n').filter(Boolean);
-    const addedLines = newLines.length - originalLines.length;
-
-    // Only one line was added
-    expect(addedLines).toBe(1);
-    // All original lines are preserved
-    for (const line of originalLines) {
-      expect(newContent).toContain(line);
-    }
-  });
-});
 
 // ═══════════════════════════════════════════════════════════════════════
 // VAL-LAUNCH-005: First-run operational flow (login/init/inbox)
@@ -555,7 +271,6 @@ describe('VAL-LAUNCH-005: installed-command first-run operational flow', () => {
     expect(help.stdout).toContain('login');
     expect(help.stdout).toContain('init');
     expect(help.stdout).toContain('inbox');
-    expect(help.stdout).toContain('setup-shell');
   });
 
   it('gated commands fail clearly before init with actionable guidance', () => {
@@ -567,25 +282,6 @@ describe('VAL-LAUNCH-005: installed-command first-run operational flow', () => {
       // Must mention init in error message
       const output = result.stdout + result.stderr;
       expect(output.toLowerCase()).toContain('init');
-    }
-  });
-
-  it('setup-shell works as install-time command (no init required)', () => {
-    const fakeHome = mkdtempSync(join(tmpdir(), 'mors-launch-005-home-'));
-    try {
-      const result = runCli('setup-shell --decline --json', {
-        configDir,
-        env: {
-          HOME: fakeHome,
-          SHELL: '/bin/zsh',
-          MORS_SETUP_SHELL_BIN_DIR: '/tmp/fake-bin',
-        },
-      });
-      expect(result.exitCode).toBe(0);
-      const parsed = JSON.parse(result.stdout.trim());
-      expect(parsed.status).toBe('declined');
-    } finally {
-      rmSync(fakeHome, { recursive: true, force: true });
     }
   });
 });

@@ -24,13 +24,11 @@ export {
   isKeyExchangeComplete,
   listKeyExchangeSessions,
   requireKeyExchange,
-  validateConversationType,
   revokeDevice,
   isDeviceRevoked,
   listRevokedDevices,
   rotateDeviceKeys,
   type KeyExchangeSession,
-  type ConversationType,
   type RotationResult,
 } from './key-exchange.js';
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -38,28 +38,23 @@ function runCli(
 
 describe('CLI help UX regressions', () => {
   let tempConfigDir: string;
-  let fakeHome: string;
 
   beforeEach(() => {
     tempConfigDir = mkdtempSync(join(tmpdir(), 'mors-help-ux-config-'));
-    fakeHome = mkdtempSync(join(tmpdir(), 'mors-help-ux-home-'));
   });
 
   afterEach(() => {
     rmSync(tempConfigDir, { recursive: true, force: true });
-    rmSync(fakeHome, { recursive: true, force: true });
   });
 
   const helpCommands: string[][] = [
     ['key-exchange', '--help'],
     ['login', '--help'],
     ['setup', '--help'],
-    ['start', '--help'],
     ['send', '--help'],
     ['spool', '--help'],
     ['onboard', '--help'],
     ['status', '--help'],
-    ['setup-shell', '--help'],
   ];
 
   for (const cmd of helpCommands) {
@@ -68,11 +63,6 @@ describe('CLI help UX regressions', () => {
     it(`${label} shows help and bypasses init/auth/prereq checks`, () => {
       const result = runCli(cmd, {
         configDir: tempConfigDir,
-        env: {
-          HOME: fakeHome,
-          SHELL: '/bin/zsh',
-          MORS_SETUP_SHELL_BIN_DIR: '/tmp/mors-test-bin',
-        },
       });
 
       const combined = `${result.stdout}\n${result.stderr}`;
@@ -103,23 +93,5 @@ describe('CLI help UX regressions', () => {
     expect(combined).toContain('mors key-exchange offer [--json]');
     expect(combined).toContain('mors key-exchange accept --bundle <json|-> [--json]');
     expect(combined).toContain('mors key-exchange list [--json]');
-  });
-
-  it('setup-shell --help --json does not prompt interactively', () => {
-    const result = runCli(['setup-shell', '--help', '--json'], {
-      configDir: tempConfigDir,
-      env: {
-        HOME: fakeHome,
-        SHELL: '/bin/zsh',
-        MORS_SETUP_SHELL_BIN_DIR: '/tmp/mors-test-bin',
-      },
-    });
-
-    const combined = `${result.stdout}\n${result.stderr}`;
-
-    expect(result.exitCode).toBe(0);
-    expect(combined).toContain('Usage:');
-    expect(combined).not.toContain('Apply this change?');
-    expect(existsSync(join(fakeHome, '.zshrc'))).toBe(false);
   });
 });

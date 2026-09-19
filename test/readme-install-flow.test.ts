@@ -9,7 +9,7 @@
  * - Each section includes concise install and first-use instructions aligned with current CLI behavior
  * - At least one representative command path per audience is validated and documented accurately
  * - Agent section documents npx/node dist/index.js invocation, MORS_CONFIG_DIR, --json, and error table
- * - Human section documents npm global install, setup-shell, and guided lifecycle
+ * - Human section documents npm global install, PATH setup, and guided lifecycle
  * - Documented commands actually work when executed against the built CLI
  * - quickstart and doctor commands are discoverable in README
  */
@@ -170,8 +170,8 @@ describe('VAL-LAUNCH-009: For Humans section content', () => {
     expect(humanSection).toContain('npm install -g github:jstxn/mors');
   });
 
-  it('documents setup-shell for interactive users', () => {
-    expect(humanSection).toContain('setup-shell');
+  it('documents putting the mors binary on PATH', () => {
+    expect(humanSection).toContain('PATH');
   });
 
   it('documents the standard lifecycle: init, login, send, inbox, read, ack', () => {
@@ -326,10 +326,11 @@ describe('VAL-LAUNCH-009: human representative command path works', () => {
     expect(ackResult.stdout.toLowerCase()).toContain('acknowledged');
   });
 
-  it('human path from README: setup-shell is available', () => {
-    // setup-shell should be recognized (with --decline to avoid mutation)
-    const result = runCli('setup-shell --decline', { configDir });
-    expect(result.exitCode).toBe(0);
+  it('human path from README: setup relay is documented as the hosted entry', () => {
+    const humanSection = extractSection('For Humans');
+    expect(humanSection).toContain('mors setup relay');
+    expect(humanSection).toContain('mors send');
+    expect(humanSection).toContain('mors inbox');
   });
 });
 

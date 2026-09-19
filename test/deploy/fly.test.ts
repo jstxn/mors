@@ -319,7 +319,6 @@ describe('VAL-DEPLOY-003: Deploy path does not leak secrets in output/logs', () 
         FLY_PRIMARY_REGION: 'iad',
         FLY_ORG: 'test-org',
         FLY_ACCESS_TOKEN: canarySecret,
-        GITHUB_DEVICE_CLIENT_ID: 'canary-client-id-secret',
       },
       expectFailure: true,
     });
@@ -327,7 +326,6 @@ describe('VAL-DEPLOY-003: Deploy path does not leak secrets in output/logs', () 
     const fullOutput = result.stdout + result.stderr;
     // The canary secrets must NOT appear in any output
     expect(fullOutput).not.toContain(canarySecret);
-    expect(fullOutput).not.toContain('canary-client-id-secret');
   });
 
   it('deploy --dry-run output does not leak FLY_ACCESS_TOKEN', () => {
@@ -354,7 +352,6 @@ describe('VAL-DEPLOY-003: Deploy path does not leak secrets in output/logs', () 
         FLY_APP_NAME: 'replace-with-fly-app-name',
         FLY_PRIMARY_REGION: 'iad',
         FLY_ORG: 'replace-with-fly-org',
-        GITHUB_DEVICE_CLIENT_ID: 'replace-with-github-oauth-client-id',
         FLY_ACCESS_TOKEN: 'real-secret-token-value',
       },
       expectFailure: true,

@@ -1,6 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { randomUUID } from 'node:crypto';
+import { parseArgs } from 'node:util';
 import { initCommand, getDbKeyPath, getDbPath } from './init.js';
 import { getConfigDir } from './identity.js';
 import { loadKey } from './key-management.js';
@@ -31,8 +32,6 @@ import { RelayClient } from './relay/client.js';
 type CheckStatus = 'pass' | 'warn' | 'fail' | 'skipped';
 type SetupMode = 'local' | 'relay';
 
-const VALUE_FLAGS = new Set(['config-dir', 'relay-url', 'handle', 'display-name', 'invite-token']);
-const BOOLEAN_FLAGS = new Set(['json', 'skip-relay-check', 'help']);
 const RELAY_ONLY_FLAGS = new Set([
   'relay-url',
   'handle',
@@ -40,6 +39,17 @@ const RELAY_ONLY_FLAGS = new Set([
   'invite-token',
   'skip-relay-check',
 ]);
+
+const SETUP_OPTIONS = {
+  json: { type: 'boolean' },
+  'skip-relay-check': { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+  'config-dir': { type: 'string' },
+  'relay-url': { type: 'string' },
+  handle: { type: 'string' },
+  'display-name': { type: 'string' },
+  'invite-token': { type: 'string' },
+} as const;
 
 interface SetupCheck {
   name: string;
@@ -72,15 +82,20 @@ class SetupUsageError extends Error {
 }
 
 export async function runSetupCommand(args: string[]): Promise<void> {
-  const { positional, flags } = parseSetupArgs(args);
-  const json = 'json' in flags;
-
-  if (positional.length === 0 || hasHelpFlag(args)) {
+  if (hasHelpFlag(args)) {
     printSetupUsage();
     return;
   }
 
   try {
+    const { positional, flags } = parseSetupArgs(args);
+    const json = 'json' in flags;
+
+    if (positional.length === 0) {
+      printSetupUsage();
+      return;
+    }
+
     const mode = positional[0];
     validateSetupFlags(flags, mode);
 
@@ -104,7 +119,7 @@ export async function runSetupCommand(args: string[]): Promise<void> {
     );
   } catch (err: unknown) {
     process.exitCode = 1;
-    writeSetupError(err, json);
+    writeSetupError(err, args.includes('--json'));
   }
 }
 
@@ -558,23 +573,17 @@ function relayNextCommands(status: SetupResult['status']): string[] {
 
   if (status === 'ready') {
     return [
-      'mors start',
       'mors send --remote --to <account-id> --body "hello"',
+      'mors inbox --remote',
       'mors watch --remote',
     ];
   }
 
   if (status === 'needs_profile') {
-    return [
-      'mors onboard --handle <handle> --display-name "<name>" --json',
-      'mors start',
-    ];
+    return ['mors onboard --handle <handle> --display-name "<name>" --json'];
   }
 
-  return [
-    'mors setup relay --handle <handle> --display-name "<name>"',
-    'mors start',
-  ];
+  return ['mors setup relay --handle <handle> --display-name "<name>"'];
 }
 
 function hasFailedChecks(checks: SetupCheck[]): boolean {
@@ -633,10 +642,7 @@ function writeSetupError(err: unknown, json: boolean): void {
 
 function validateSetupFlags(flags: Record<string, string | true>, mode: string): void {
   for (const [name, value] of Object.entries(flags)) {
-    if (!VALUE_FLAGS.has(name) && !BOOLEAN_FLAGS.has(name)) {
-      throw new SetupUsageError('unknown_setup_option', `Unknown setup option --${name}.`);
-    }
-    if (VALUE_FLAGS.has(name) && (value === true || value.trim().length === 0)) {
+    if (typeof value === 'string' && value.trim().length === 0) {
       throw new SetupUsageError(
         'missing_setup_option_value',
         `Setup option --${name} requires a value.`
@@ -673,31 +679,34 @@ function parseSetupArgs(args: string[]): {
   positional: string[];
   flags: Record<string, string | true>;
 } {
-  const positional: string[] = [];
-  const flags: Record<string, string | true> = {};
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg.startsWith('--')) {
-      const eqIndex = arg.indexOf('=');
-      if (eqIndex >= 0) {
-        flags[arg.slice(2, eqIndex)] = arg.slice(eqIndex + 1);
-        continue;
-      }
-      const key = arg.slice(2);
-      const next = args[i + 1];
-      if (next !== undefined && !next.startsWith('--')) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = true;
-      }
-      continue;
+  try {
+    const { values, positionals } = parseArgs({
+      args,
+      options: SETUP_OPTIONS,
+      allowPositionals: true,
+    });
+    const flags: Record<string, string | true> = {};
+    for (const [key, value] of Object.entries(values)) {
+      if (typeof value === 'string') flags[key] = value;
+      else if (value === true) flags[key] = true;
     }
-    positional.push(arg);
+    return { positional: positionals, flags };
+  } catch (err: unknown) {
+    const code =
+      err && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : '';
+    const message = err instanceof Error ? err.message : String(err);
+    const option = message.match(/--[\w-]+/)?.[0] ?? 'provided';
+    if (code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
+      throw new SetupUsageError('unknown_setup_option', `Unknown setup option ${option}.`);
+    }
+    if (code === 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE') {
+      throw new SetupUsageError(
+        'missing_setup_option_value',
+        `Setup option ${option} requires a value.`
+      );
+    }
+    throw err;
   }
-
-  return { positional, flags };
 }
 
 function hasHelpFlag(args: string[]): boolean {

@@ -2,7 +2,7 @@
  * Vitest global setup — ensures dist/ is fresh before any tests run.
  *
  * Several test files execute `node dist/index.js` (CLI integration tests for
- * auth-gating, setup-shell, install-matrix, etc.).  When source changes are
+ * auth-gating, install-matrix, etc.).  When source changes are
  * made without a subsequent `npm run build`, those tests fail with confusing
  * stale-artifact errors (missing exports, SyntaxError, etc.).
  *

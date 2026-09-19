@@ -7,7 +7,7 @@ This document keeps the implementation and deployment details out of the main RE
 `mors` is a CLI-first messaging system with four operating modes:
 
 1. **Local mode:** messages are stored in an encrypted local database. This is the fastest way to prove the lifecycle.
-2. **Hosted relay mode:** `mors start` connects to the hosted relay, creates or reuses a profile, and publishes the device bundle needed for remote encrypted messaging.
+2. **Hosted relay mode:** `mors setup relay` connects to the hosted relay, creates or reuses a profile, and publishes the device bundle needed for remote encrypted messaging. Use `send --remote`, `inbox --remote`, and `watch --remote` after setup.
 3. **Low-level relay mode:** scripts can call `login`, `onboard`, `send --remote`, `watch --remote`, and related commands directly.
 4. **Sandbox spool mode:** a VM or container writes files to a mounted spool folder while the host runs `mors spool bridge` with real relay credentials.
 
@@ -16,7 +16,7 @@ This document keeps the implementation and deployment details out of the main RE
 - **CLI:** exposes human and automation commands from `dist/index.js`.
 - **Local encrypted store:** keeps identity, sessions, messages, and state in SQLCipher-backed storage.
 - **Identity and device keys:** `mors init` creates local identity material and device keys. Hosted mode reuses those keys.
-- **Relay service:** accepts authenticated messages, stores relay-side state, streams events, and serves A2A Agent Cards.
+- **Relay service:** accepts authenticated messages, stores relay-side state, and streams events.
 - **E2EE layer:** remote message bodies can be encrypted after device bundle exchange.
 - **Watch streams:** local and relay-backed watchers expose realtime create, reply, and ack events.
 - **Spool bridge:** maps file-based sandbox commands into relay or local actions controlled by host policy.
@@ -28,9 +28,9 @@ Local CLI usage is trusted to the local user account. The encrypted database pro
 
 Relay usage separates local identity from remote delivery. Authenticated relay actions depend on session tokens, which now carry an expiry (default 30 days) and are refused once lapsed, so a captured token cannot be replayed indefinitely. E2EE protects message bodies across relay delivery once device keys are exchanged.
 
-The relay is treated as untrusted for key distribution. Published peer device bundles are verified client-side: a bundle's fingerprint must be an honest hash of its own public keys, and once a peer's key is pinned (trust on first use) a later key change is refused rather than silently re-keyed — a relay cannot swap in its own key mid-conversation. Verify a peer's fingerprint out of band before trusting first contact. The interactive `mors start` send path never silently downgrades to plaintext: sends to a contact with no published keys are labeled as unencrypted.
+The relay is treated as untrusted for key distribution. Published peer device bundles are verified client-side: a bundle's fingerprint must be an honest hash of its own public keys, and once a peer's key is pinned (trust on first use) a later key change is refused rather than silently re-keyed — a relay cannot swap in its own key mid-conversation. Verify a peer's fingerprint out of band before trusting first contact. Remote send never silently downgrades to plaintext: sends to a contact with no published keys are labeled as unencrypted.
 
-The relay also bounds abuse: request bodies are capped, unauthenticated public routes (signup, health, agent-card) are rate-limited per client, and the relay container runs as a non-root user.
+The relay also bounds abuse: request bodies are capped, unauthenticated public routes (signup, health) are rate-limited per client, and the relay container runs as a non-root user.
 
 Sandbox spool usage is a local host trust boundary. The spool is plaintext on disk. Use VM disk encryption or an encrypted host volume for sensitive payloads. The sandbox should not receive relay credentials unless it is intentionally trusted.
 
@@ -120,17 +120,6 @@ docker run --rm mors-sandbox-agent:local sandbox init --root /tmp/mors-spool --a
 ```
 
 The image includes the CLI and local prerequisites, runs as a non-root user, and does not bake relay credentials or host policy into the image.
-
-## Relay And Discovery
-
-The relay supports message delivery, event streams, auth validation, device directory operations, and public A2A Agent Card discovery:
-
-```bash
-curl -s http://localhost:3100/.well-known/agent-card.json
-curl -s http://localhost:3100/.well-known/agent-card.json?handle=agent_alice
-```
-
-Unknown handles return a not-found response. Per-handle cards reflect registered account metadata when available.
 
 ## Deployment Notes
 

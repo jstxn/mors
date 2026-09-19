@@ -80,16 +80,16 @@ For agentic coding sessions, `mors` provides:
 - **Sandbox-safe communication:** VM and container agents can use a mounted spool folder while the host keeps relay credentials, quotas, and tool policy.
 - **Reviewable transcripts:** message state, spool exports, and explicit read or ack events make coding sessions easier to inspect, replay, and debug.
 
-**Status:** beta. Core messaging, auth, E2EE, relay, hosted start, and sandbox-agent flows work end-to-end. Command details may still change.
+**Status:** beta. Core messaging, auth, E2EE, relay, hosted setup, and sandbox-agent flows work end-to-end. Command details may still change.
 
 ## Why Use mors
 
 - **Agent-friendly by default:** every core command can return stable `--json`, with exit code `0` for success and non-zero for actionable failure.
 - **Local-first:** prove the full `init -> send -> inbox -> read -> ack` lifecycle without OAuth, cloud setup, or relay infrastructure.
-- **Human usable:** `mors start` gives an interactive terminal app for hosted messaging.
+- **Human usable:** `mors setup relay` prepares hosted messaging; then use `send`, `inbox`, `read`, and `watch`.
 - **Sandbox aware:** VM and container agents can use a mounted spool folder while the host keeps relay credentials and tool authority.
 - **Security minded:** local storage is encrypted; relay delivery supports E2EE with client-side key-continuity pinning (a malicious relay cannot silently swap peer keys); session tokens expire; public relay routes are rate-limited; and sandbox tool execution is host-policy gated.
-- **Composable:** works as a CLI, a scriptable transport, a relay service, and an A2A Agent Card discovery surface.
+- **Composable:** works as a CLI, a scriptable transport, and a relay service.
 
 ## What It Is Good For
 
@@ -140,7 +140,7 @@ That proves local identity, encrypted storage, message creation, inbox listing, 
 Agents should use non-interactive commands and `--json`. For workers communicating
 on the same machine, use [`mors agent`](./docs/working-agents.md) with its shared
 hub and distinct session identities. Isolated `MORS_CONFIG_DIR` profiles below
-remain useful for standalone and relay workflows. Agents do not need `setup-shell`.
+remain useful for standalone and relay workflows.
 
 ### Install Or Run
 
@@ -252,7 +252,7 @@ node dist/index.js doctor --json
 
 ## For Humans
 
-If you want a guided terminal experience, install `mors`, initialize your local identity, then run `mors start`.
+Install `mors`, put the `mors` binary on your `PATH`, then run `mors setup relay` and the existing send/inbox commands.
 
 ### Install
 
@@ -261,8 +261,9 @@ npm from GitHub:
 ```bash
 npm install -g github:jstxn/mors
 mors --version
-mors setup-shell
 ```
+
+If `mors` is not found, add the npm global bin directory to your `PATH` (`npm prefix -g`/bin).
 
 Homebrew formula from this checkout. Until a tagged release is published, install from `HEAD`:
 
@@ -285,10 +286,11 @@ node dist/index.js --help
 
 ```bash
 mors setup relay
-mors start
+mors send --remote --to <account-id> --body "hello"
+mors inbox --remote
 ```
 
-`mors setup relay` initializes local state, configures the hosted relay by default, and checks relay reachability. `mors start` then helps you choose a handle, publishes your public device bundle, and opens the messaging app in your terminal.
+`mors setup relay` initializes local state, configures the hosted relay by default, and checks relay reachability. After setup, use `send`, `inbox`, `read`, and `watch`. Pass `--handle` and `--display-name` during relay setup to create a hosted profile.
 
 For local-only messaging:
 
@@ -299,7 +301,9 @@ mors setup local
 Use `MORS_CONFIG_DIR` when you want a separate local profile:
 
 ```bash
-MORS_CONFIG_DIR=/tmp/mors-demo mors start
+MORS_CONFIG_DIR=/tmp/mors-demo mors setup local
+MORS_CONFIG_DIR=/tmp/mors-demo mors send --to demo --body "hello"
+MORS_CONFIG_DIR=/tmp/mors-demo mors inbox
 ```
 
 ### Check Your Setup
@@ -322,15 +326,6 @@ mors inbox
 mors read <message-id>
 mors ack <message-id>
 mors watch
-```
-
-## A2A Agent Card Discovery
-
-The relay serves A2A Agent Cards so other systems can discover mors agents.
-
-```bash
-curl -s http://localhost:3100/.well-known/agent-card.json?handle=agent_alice
-curl -s http://localhost:3100/.well-known/agent-card.json
 ```
 
 See [docs/technical-overview.md](./docs/technical-overview.md) for protocol and deployment details.

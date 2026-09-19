@@ -6,8 +6,6 @@
  * - Wrong/missing keys fail closed with non-zero errors — no data exposed.
  * - No plaintext fallback database is ever created or used.
  * - Key artifacts use owner-only permissions (0o600).
- *
- * This module provides the Store class that manages the encrypted database lifecycle.
  */
 
 import Database from 'better-sqlite3-multiple-ciphers';
@@ -173,66 +171,4 @@ export function initializeSchema(db: BetterSqlite3.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_state ON messages(state);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedupe ON messages(dedupe_key) WHERE dedupe_key IS NOT NULL;
   `);
-}
-
-/**
- * The main Store class that encapsulates all encrypted database operations.
- * Ensures fail-closed behavior and no plaintext fallback.
- */
-export class Store {
-  private db: BetterSqlite3.Database | null = null;
-  private readonly dbPath: string;
-
-  constructor(dbPath: string) {
-    this.dbPath = dbPath;
-  }
-
-  /**
-   * Open the store with the given encryption key.
-   * @param key - 32-byte encryption key buffer.
-   * @throws StoreEncryptionError on decryption failure.
-   * @throws KeyError on invalid key.
-   */
-  open(key: Buffer): void {
-    if (this.db) {
-      throw new StoreEncryptionError('Store is already open.');
-    }
-    this.db = openEncryptedDb({ dbPath: this.dbPath, key });
-  }
-
-  /**
-   * Get the underlying database instance.
-   * @throws StoreEncryptionError if the store is not open.
-   */
-  getDb(): BetterSqlite3.Database {
-    if (!this.db) {
-      throw new StoreEncryptionError('Store is not open. Call open() first.');
-    }
-    return this.db;
-  }
-
-  /** Whether the store is currently open. */
-  get isOpen(): boolean {
-    return this.db !== null && this.db.open;
-  }
-
-  /**
-   * Close the store.
-   */
-  close(): void {
-    if (this.db) {
-      try {
-        this.db.close();
-      } finally {
-        this.db = null;
-      }
-    }
-  }
-
-  /**
-   * Initialize the database schema (creates tables if they don't exist).
-   */
-  initialize(): void {
-    initializeSchema(this.getDb());
-  }
 }

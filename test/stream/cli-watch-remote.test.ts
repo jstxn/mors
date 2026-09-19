@@ -37,8 +37,6 @@ function testConfig(): RelayConfig {
     port: 0,
     host: '127.0.0.1',
     baseUrl: undefined,
-    authTokenIssuer: undefined,
-    authAudience: undefined,
     diagnostics: [],
   };
 }

@@ -14,7 +14,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createRelayServer, type RelayServer } from '../../src/relay/server.js';
 import { loadRelayConfig, type RelayConfig } from '../../src/relay/config.js';
-import { bootstrapRelay } from '../../src/relay/bootstrap.js';
+import { createRelayPersistenceContext } from '../../src/relay/persistence.js';
 import type { TokenVerifier } from '../../src/relay/auth-middleware.js';
 import { getTestPort } from '../helpers/test-port.js';
 
@@ -73,7 +73,6 @@ describe('relay bootstrap', () => {
       expect(config.diagnostics.length).toBeGreaterThan(0);
       // Should list missing config vars with actionable descriptions
       const missingNames = config.diagnostics.map((d) => d.variable);
-      expect(missingNames).toContain('MORS_AUTH_TOKEN_ISSUER');
       expect(missingNames).toContain('MORS_RELAY_BASE_URL');
     });
 
@@ -90,8 +89,6 @@ describe('relay bootstrap', () => {
       const config = loadRelayConfig({
         MORS_RELAY_PORT: '3100',
         MORS_RELAY_BASE_URL: 'http://localhost:3100',
-        MORS_AUTH_TOKEN_ISSUER: 'mors-relay',
-        MORS_AUTH_AUDIENCE: 'mors-cli',
       });
       expect(config.diagnostics.length).toBe(0);
     });
@@ -428,30 +425,14 @@ describe('relay bootstrap', () => {
   // --- Persistence bootstrap tests ---
 
   describe('persistence bootstrap', () => {
-    it('bootstrapRelay returns a BootstrapResult with ready state', async () => {
-      const result = await bootstrapRelay();
-      expect(result).toBeDefined();
-      expect(result.ready).toBe(true);
+    it('createRelayPersistenceContext returns wired stores', () => {
+      const context = createRelayPersistenceContext();
+      expect(context.messageStore).toBeDefined();
+      expect(context.accountStore).toBeDefined();
+      expect(context.contactStore).toBeDefined();
     });
 
-    it('bootstrapRelay reports services that were initialized', async () => {
-      const result = await bootstrapRelay();
-      expect(Array.isArray(result.services)).toBe(true);
-      expect(result.services.length).toBeGreaterThan(0);
-      // At minimum, persistence should be listed
-      expect(result.services.some((s) => s.name === 'persistence')).toBe(true);
-    });
-
-    it('bootstrapRelay is idempotent (safe to call multiple times)', async () => {
-      const result1 = await bootstrapRelay();
-      const result2 = await bootstrapRelay();
-      expect(result1.ready).toBe(true);
-      expect(result2.ready).toBe(true);
-    });
-
-    it('bootstrap runs before server start in the entrypoint flow', async () => {
-      // Verify that the relay entrypoint module calls bootstrapRelay
-      // by testing the combined flow: bootstrap + server create + start
+    it('persistence is initialized before server start in the entrypoint flow', async () => {
       const config = loadRelayConfig({
         MORS_RELAY_PORT: String(getTestPort()),
         MORS_RELAY_HOST: '127.0.0.1',
@@ -459,26 +440,17 @@ describe('relay bootstrap', () => {
       const logs: string[] = [];
       const logger = (msg: string) => logs.push(msg);
 
-      // Bootstrap first (as the entrypoint should)
-      const result = await bootstrapRelay({ logger });
-      expect(result.ready).toBe(true);
-      expect(logs.some((l) => l.toLowerCase().includes('bootstrap'))).toBe(true);
+      const persistence = createRelayPersistenceContext({ logger });
+      expect(persistence.statePath).toBeTruthy();
 
-      // Then start server
       server = createRelayServer(config, { logger });
       await server.start();
       expect(server.listening).toBe(true);
 
-      // Verify bootstrap log came before server listening log
-      const bootstrapIdx = logs.findIndex((l) => l.toLowerCase().includes('bootstrap'));
+      const persistenceIdx = logs.findIndex((l) => l.toLowerCase().includes('persistence'));
       const listeningIdx = logs.findIndex((l) => l.includes('listening'));
-      expect(bootstrapIdx).toBeLessThan(listeningIdx);
-    });
-
-    it('bootstrap accepts optional logger for observability', async () => {
-      const logs: string[] = [];
-      await bootstrapRelay({ logger: (msg: string) => logs.push(msg) });
-      expect(logs.length).toBeGreaterThan(0);
+      expect(persistenceIdx).toBeGreaterThanOrEqual(0);
+      expect(persistenceIdx).toBeLessThan(listeningIdx);
     });
   });
 });

@@ -1,14 +1,10 @@
 /**
- * Tests for E2EE 1:1 key exchange and scope enforcement.
+ * Tests for E2EE 1:1 key exchange.
  *
  * Covers:
  * - VAL-E2EE-002: 1:1 key exchange completes before encrypted send
  *   A 1:1 conversation performs key exchange before encrypted send succeeds.
  *   Evidence: key exchange transcript; send behavior before/after exchange.
- *
- * - VAL-E2EE-008: 1:1-only E2EE scope is enforced explicitly
- *   Group/channel E2EE attempts return explicit unsupported/deferred response.
- *   Evidence: group E2EE attempt transcript + deterministic unsupported output.
  *
  * Also supports:
  * - Key-exchange metadata persists for later encrypt/decrypt operations
@@ -33,15 +29,9 @@ import {
   isKeyExchangeComplete,
   listKeyExchangeSessions,
   requireKeyExchange,
-  validateConversationType,
-  type ConversationType,
 } from '../../src/e2ee/key-exchange.js';
 
-import {
-  KeyExchangeError,
-  KeyExchangeNotCompleteError,
-  GroupE2EEUnsupportedError,
-} from '../../src/errors.js';
+import { KeyExchangeError, KeyExchangeNotCompleteError } from '../../src/errors.js';
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'mors-kx-test-'));
@@ -397,53 +387,6 @@ describe('E2EE 1:1 key exchange', () => {
       const session = requireKeyExchange(aliceKeysDir, bobBundle.deviceId);
       expect(session.sharedSecret).toBeInstanceOf(Buffer);
       expect(session.sharedSecret.length).toBeGreaterThan(0);
-    });
-  });
-
-  // ── VAL-E2EE-008: group/channel E2EE scope enforcement ───────────
-
-  describe('group/channel E2EE rejection (VAL-E2EE-008)', () => {
-    it('validateConversationType accepts "direct" conversation type', () => {
-      expect(() => validateConversationType('direct')).not.toThrow();
-    });
-
-    it('validateConversationType rejects "group" with GroupE2EEUnsupportedError', () => {
-      expect(() => validateConversationType('group')).toThrow(GroupE2EEUnsupportedError);
-    });
-
-    it('validateConversationType rejects "channel" with GroupE2EEUnsupportedError', () => {
-      expect(() => validateConversationType('channel')).toThrow(GroupE2EEUnsupportedError);
-    });
-
-    it('GroupE2EEUnsupportedError has deterministic message with deferred/unsupported text', () => {
-      try {
-        validateConversationType('group');
-        expect.fail('should have thrown');
-      } catch (err) {
-        expect(err).toBeInstanceOf(GroupE2EEUnsupportedError);
-        const msg = (err as Error).message;
-        // Must contain explicit unsupported/deferred language per VAL-E2EE-008
-        expect(msg).toMatch(/unsupported|not supported|deferred/i);
-        expect(msg).toMatch(/group|channel/i);
-        expect(msg).toMatch(/1:1|direct/i);
-      }
-    });
-
-    it('GroupE2EEUnsupportedError includes the attempted conversation type', () => {
-      try {
-        validateConversationType('channel');
-        expect.fail('should have thrown');
-      } catch (err) {
-        expect(err).toBeInstanceOf(GroupE2EEUnsupportedError);
-        const msg = (err as Error).message;
-        expect(msg).toContain('channel');
-      }
-    });
-
-    it('validateConversationType rejects unknown types with GroupE2EEUnsupportedError', () => {
-      expect(() => validateConversationType('broadcast' as ConversationType)).toThrow(
-        GroupE2EEUnsupportedError
-      );
     });
   });
 

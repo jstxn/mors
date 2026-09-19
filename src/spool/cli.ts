@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { parseArgs as parseNodeArgs } from 'node:util';
 import { requireInit } from '../init.js';
 import { requireAuth, NotAuthenticatedError } from '../auth/guards.js';
 import { loadSession, loadSigningKey } from '../auth/session.js';
@@ -489,7 +490,7 @@ function createRuntimeClient(): RuntimeClientContext {
   const baseUrl = resolveRelayBaseUrl(configDir);
   if (!baseUrl) {
     throw new SpoolCliError(
-      'Remote relay is not configured. Run "mors start" or set MORS_RELAY_BASE_URL.'
+      'Remote relay is not configured. Run "mors setup relay" or set MORS_RELAY_BASE_URL.'
     );
   }
 
@@ -784,32 +785,51 @@ function formatSpoolError(err: unknown, json: boolean): void {
   }
 }
 
+const SPOOL_OPTIONS = {
+  json: { type: 'boolean' },
+  help: { type: 'boolean', short: 'h' },
+  once: { type: 'boolean' },
+  root: { type: 'string' },
+  agent: { type: 'string' },
+  policy: { type: 'string' },
+  kind: { type: 'string' },
+  mailbox: { type: 'string' },
+  zone: { type: 'string' },
+  limit: { type: 'string' },
+  'timeout-ms': { type: 'string' },
+  'poll-interval': { type: 'string' },
+  output: { type: 'string' },
+  state: { type: 'string' },
+  scopes: { type: 'string' },
+  'message-id': { type: 'string' },
+  'dedupe-key': { type: 'string' },
+  to: { type: 'string' },
+  body: { type: 'string' },
+  format: { type: 'string' },
+  subject: { type: 'string' },
+  'in-reply-to': { type: 'string' },
+  'trace-id': { type: 'string' },
+  tool: { type: 'string' },
+  'args-json': { type: 'string' },
+  'max-entry-bytes': { type: 'string' },
+  'max-pending-entries': { type: 'string' },
+  'max-pending-bytes': { type: 'string' },
+  'max-inbox-entries': { type: 'string' },
+  'max-failed-entries': { type: 'string' },
+} as const;
+
 function parseArgs(args: string[]): { positional: string[]; flags: Record<string, string | true> } {
-  const positional: string[] = [];
+  const { values, positionals } = parseNodeArgs({
+    args,
+    options: SPOOL_OPTIONS,
+    allowPositionals: true,
+  });
   const flags: Record<string, string | true> = {};
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg.startsWith('--')) {
-      const eqIndex = arg.indexOf('=');
-      if (eqIndex >= 0) {
-        flags[arg.slice(2, eqIndex)] = arg.slice(eqIndex + 1);
-      } else {
-        const key = arg.slice(2);
-        const next = args[i + 1];
-        if (next !== undefined && !next.startsWith('--')) {
-          flags[key] = next;
-          i++;
-        } else {
-          flags[key] = true;
-        }
-      }
-    } else {
-      positional.push(arg);
-    }
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === 'string') flags[key] = value;
+    else if (value === true) flags[key] = true;
   }
-
-  return { positional, flags };
+  return { positional: positionals, flags };
 }
 
 function sleep(ms: number): Promise<void> {

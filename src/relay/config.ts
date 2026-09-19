@@ -24,10 +24,6 @@ export interface RelayConfig {
   host: string;
   /** Base URL for the relay service (used in responses/redirects). */
   baseUrl: string | undefined;
-  /** Auth token issuer identifier. */
-  authTokenIssuer: string | undefined;
-  /** Auth token audience identifier. */
-  authAudience: string | undefined;
   /** Diagnostics for missing config variables. */
   diagnostics: ConfigDiagnostic[];
 }
@@ -42,16 +38,6 @@ const CONFIG_VARS = [
     field: 'baseUrl' as const,
     description:
       'Base URL for the relay service (e.g. https://relay.mors.dev). Used in API responses and redirects.',
-  },
-  {
-    key: 'MORS_AUTH_TOKEN_ISSUER',
-    field: 'authTokenIssuer' as const,
-    description: 'Issuer identifier for relay-issued auth tokens. Used in token validation.',
-  },
-  {
-    key: 'MORS_AUTH_AUDIENCE',
-    field: 'authAudience' as const,
-    description: 'Audience identifier for relay-issued auth tokens. Used in token validation.',
   },
 ] as const;
 
@@ -100,8 +86,6 @@ export function loadRelayConfig(
     port,
     host,
     baseUrl: values['baseUrl'],
-    authTokenIssuer: values['authTokenIssuer'],
-    authAudience: values['authAudience'],
     diagnostics,
   };
 }

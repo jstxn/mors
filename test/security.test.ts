@@ -26,7 +26,6 @@ import {
   openEncryptedDb,
   verifySqlCipherAvailable,
   initializeSchema,
-  Store,
 } from '../src/store.js';
 import { StoreEncryptionError, KeyError, SqlCipherUnavailableError } from '../src/errors.js';
 
@@ -255,39 +254,6 @@ describe('encrypted store reopens with persisted key (VAL-SEC-002)', () => {
     expect(row?.body).toBe('Hello from first session');
     db2.close();
   });
-
-  it('Store class manages open/close lifecycle correctly', () => {
-    const dbPath = join(testDir, 'store-lifecycle.db');
-    const key = generateKey();
-
-    const store = new Store(dbPath);
-    expect(store.isOpen).toBe(false);
-
-    store.open(key);
-    expect(store.isOpen).toBe(true);
-
-    store.initialize();
-    store
-      .getDb()
-      .prepare(
-        'INSERT INTO messages (id, thread_id, sender, recipient, body, state) VALUES (?, ?, ?, ?, ?, ?)'
-      )
-      .run('msg-store-1', 'thread-1', 'alice', 'bob', 'Store test', 'delivered');
-
-    store.close();
-    expect(store.isOpen).toBe(false);
-
-    // Reopen same store path with same key.
-    const store2 = new Store(dbPath);
-    store2.open(key);
-    const row = store2
-      .getDb()
-      .prepare('SELECT body FROM messages WHERE id = ?')
-      .get('msg-store-1') as { body: string } | undefined;
-    expect(row).toBeDefined();
-    expect(row?.body).toBe('Store test');
-    store2.close();
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -356,23 +322,6 @@ describe('wrong/missing key fails closed (VAL-SEC-003)', () => {
   it('wrong-size key throws KeyError', () => {
     const dbPath = join(testDir, 'short-key.db');
     expect(() => openEncryptedDb({ dbPath, key: Buffer.alloc(16) })).toThrow(KeyError);
-  });
-
-  it('Store.open with wrong key throws and remains closed', () => {
-    const dbPath = join(testDir, 'store-wrong-key.db');
-    const correctKey = generateKey();
-    const wrongKey = generateKey();
-
-    // Create the encrypted database.
-    const store1 = new Store(dbPath);
-    store1.open(correctKey);
-    store1.initialize();
-    store1.close();
-
-    // Try to open with wrong key.
-    const store2 = new Store(dbPath);
-    expect(() => store2.open(wrongKey)).toThrow(StoreEncryptionError);
-    expect(store2.isOpen).toBe(false);
   });
 });
 
@@ -484,38 +433,5 @@ describe('key artifact permission hardening (VAL-SEC-005)', () => {
     const mode = stat.mode & 0o777;
     // No group or other permissions.
     expect(mode & 0o077).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Store class additional tests
-// ---------------------------------------------------------------------------
-
-describe('Store class', () => {
-  it('throws when getDb called before open', () => {
-    const store = new Store(join(testDir, 'not-open.db'));
-    expect(() => store.getDb()).toThrow(StoreEncryptionError);
-  });
-
-  it('throws when opening an already-open store', () => {
-    const dbPath = join(testDir, 'double-open.db');
-    const key = generateKey();
-    const store = new Store(dbPath);
-
-    store.open(key);
-    expect(() => store.open(key)).toThrow(StoreEncryptionError);
-    store.close();
-  });
-
-  it('close is idempotent', () => {
-    const dbPath = join(testDir, 'close-idem.db');
-    const key = generateKey();
-    const store = new Store(dbPath);
-
-    store.open(key);
-    store.close();
-    // Calling close again should not throw.
-    expect(() => store.close()).not.toThrow();
-    expect(store.isOpen).toBe(false);
   });
 });

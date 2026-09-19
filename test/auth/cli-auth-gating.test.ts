@@ -421,13 +421,13 @@ describe('CLI status token liveness (VAL-AUTH-006)', () => {
       expect(parsed.status).toBe('token_expired');
       expect(parsed.token_valid).toBe(false);
       expect(parsed.message).toContain('mors logout');
-      expect(parsed.message).toContain('mors start');
+      expect(parsed.message).toContain('mors setup relay');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 
-  it('status --json points hosted users to mors start when the relay lost their profile', async () => {
+  it('status --json points hosted users to mors setup relay when the relay lost their profile', async () => {
     const { server, port } = await startMockServer((req, res) => {
       if (req.url === '/accounts/me') {
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -463,7 +463,7 @@ describe('CLI status token liveness (VAL-AUTH-006)', () => {
       expect(result.exitCode).not.toBe(0);
       const parsed = JSON.parse(result.stdout);
       expect(parsed.status).toBe('verification_unavailable');
-      expect(parsed.message).toContain('mors start');
+      expect(parsed.message).toContain('mors setup relay');
       expect(parsed.message).not.toContain('mors onboard');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
