@@ -4,3 +4,8 @@ dist/
 .env
 .mors/
 .mors-relay-state.json
+
+# Local review evidence and session notes
+/.factory/validation/
+/tasks/todo.md
+/tasks/lessons.md
