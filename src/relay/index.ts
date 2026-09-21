@@ -21,6 +21,8 @@ import {
   createRelayPersistenceContext,
   type RelayPersistenceContext,
 } from './persistence.js';
+import { MarketplaceStore } from '../marketplace/store.js';
+import { dirname, join } from 'node:path';
 
 /**
  * Create the production server options including all wired dependencies.
@@ -80,6 +82,12 @@ export function createProductionServerOptions(options?: {
     },
   };
 
+  const marketplaceDir =
+    process.env['MORS_MARKETPLACE_DIR']?.trim() ||
+    (options?.persistence?.statePath && options.persistence.statePath !== 'memory'
+      ? join(dirname(options.persistence.statePath), 'marketplace')
+      : undefined);
+
   return {
     tokenVerifier,
     sessionTokenIssuer,
@@ -87,6 +95,7 @@ export function createProductionServerOptions(options?: {
     messageStore,
     accountStore,
     contactStore,
+    marketplaceStore: new MarketplaceStore(marketplaceDir),
   };
 }
 

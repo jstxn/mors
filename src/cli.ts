@@ -21,6 +21,7 @@ import { startWatch } from './watch.js';
 import type { WatchEvent } from './watch.js';
 import { runSetupCommand } from './setup.js';
 import { runAgentCommand } from './agent-cli.js';
+import { runMarketplaceCommand } from './marketplace/cli.js';
 import { runSandboxCommand, runSpoolCommand } from './spool/cli.js';
 import {
   MorsError,
@@ -105,6 +106,18 @@ const HELP_BYPASS_COMMANDS = new Set([
 ]);
 
 export function run(args: string[]): void {
+  const onError = (err: unknown): void => {
+    process.exitCode = 1;
+    handleCommandError(err, args.includes('--json'));
+  };
+  try {
+    void dispatch(args)?.catch(onError);
+  } catch (err: unknown) {
+    onError(err);
+  }
+}
+
+function dispatch(args: string[]): void | Promise<void> {
   const command = args[0];
   const commandArgs = args.slice(1);
 
@@ -119,8 +132,11 @@ export function run(args: string[]): void {
   }
 
   if (command === 'agent') {
-    void runAgentCommand(commandArgs);
-    return;
+    return runAgentCommand(commandArgs);
+  }
+
+  if (command === 'marketplace') {
+    return runMarketplaceCommand(commandArgs);
   }
 
   // Command-level help should never run init/auth/prerequisite logic.
@@ -145,30 +161,15 @@ export function run(args: string[]): void {
   }
 
   if (command === 'setup') {
-    runSetupCommand(commandArgs).catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${msg}`);
-    });
-    return;
+    return runSetupCommand(commandArgs);
   }
 
   if (command === 'spool') {
-    runSpoolCommand(commandArgs).catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${msg}`);
-    });
-    return;
+    return runSpoolCommand(commandArgs);
   }
 
   if (command === 'sandbox') {
-    runSandboxCommand(commandArgs).catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${msg}`);
-    });
-    return;
+    return runSandboxCommand(commandArgs);
   }
 
   if (command === 'login') {
@@ -182,14 +183,7 @@ export function run(args: string[]): void {
   }
 
   if (command === 'status') {
-    // runStatus is async (token-liveness check); attach error handler
-    // so the process waits for completion and sets exitCode deterministically.
-    runStatus(commandArgs).catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${msg}`);
-    });
-    return;
+    return runStatus(commandArgs);
   }
 
   if (command === 'deploy') {
@@ -203,12 +197,7 @@ export function run(args: string[]): void {
   }
 
   if (command === 'onboard') {
-    runOnboard(commandArgs).catch((err: unknown) => {
-      process.exitCode = 1;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Error: ${msg}`);
-    });
-    return;
+    return runOnboard(commandArgs);
   }
 
   // ── Pre-init command gating (VAL-INIT-005) ──────────────────────
@@ -3295,7 +3284,10 @@ function runInit(_args: string[]): void {
 // ── Error handling helpers ───────────────────────────────────────────
 
 function handleCommandError(err: unknown, json: boolean): void {
-  if (err instanceof ContractValidationError || err instanceof MorsError) {
+  if (err instanceof Error && 'code' in err
+    && typeof err.code === 'string' && err.code.startsWith('ERR_PARSE_ARGS_')) {
+    formatError(err.message, json, 'invalid_arguments');
+  } else if (err instanceof ContractValidationError || err instanceof MorsError) {
     formatError(err.message, json, err.name);
   } else {
     const msg = err instanceof Error ? err.message : String(err);
@@ -3512,6 +3504,7 @@ Usage:
 
 Commands:
   agent       Connect working agents: registration, inboxes, skill and hooks
+  marketplace Browse, publish, and install agent packages
   setup       Prepare local-only or relay-backed mors usage
   quickstart   Run local lifecycle check (init → send → inbox → read → ack)
   doctor       Check prerequisites and configuration health

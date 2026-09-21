@@ -49,6 +49,12 @@ import {
 import { ContactStore } from './contact-store.js';
 import { DedupeConflictError } from '../errors.js';
 import { generateEventId } from '../contract/ids.js';
+import { MarketplaceStore } from '../marketplace/store.js';
+import {
+  handleMarketplaceGet,
+  handleMarketplaceWrite,
+  isMarketplaceGet,
+} from '../marketplace/http.js';
 
 /** Logger function type. */
 export type RelayLogger = (message: string) => void;
@@ -115,6 +121,8 @@ export interface RelayServerOptions {
    * 0 to disable.
    */
   publicRateLimit?: { limit: number; windowMs: number };
+  /** Filesystem or in-memory catalog of published agent packages. */
+  marketplaceStore?: MarketplaceStore;
 }
 
 /** Relay server handle with lifecycle methods. */
@@ -336,6 +344,7 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
   const sseAuthRevalidateMs = options?.sseAuthRevalidateMs ?? 60000;
   const publicRateLimit = options?.publicRateLimit ?? { limit: 60, windowMs: 60_000 };
   const publicLimiter = createFixedWindowLimiter(publicRateLimit.limit, publicRateLimit.windowMs);
+  const marketplaceStore = options?.marketplaceStore ?? new MarketplaceStore();
   const startTime = Date.now();
 
   // Track active SSE connections for clean shutdown
@@ -350,6 +359,16 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? 'GET';
     const url = req.url ?? '/';
+    const pathOnly = url.split('?')[0] ?? url;
+
+    if ((method === 'GET' || method === 'HEAD') && isMarketplaceGet(pathOnly)) {
+      if (!publicLimiter.check(clientRateKey(req), Date.now())) {
+        res.setHeader('Retry-After', String(Math.ceil(publicRateLimit.windowMs / 1000)));
+        sendJson(res, 429, { error: 'rate_limited', detail: 'Too many requests. Please retry later.' });
+        return;
+      }
+      if (handleMarketplaceGet(req, res, { store: marketplaceStore, accountStore })) return;
+    }
 
     // ── Public routes (no auth required) ─────────────────────────────
 
@@ -482,6 +501,10 @@ export function createRelayServer(config: RelayConfig, options?: RelayServerOpti
       return;
     }
     const principal: AuthPrincipal = authResult.principal;
+
+    if (await handleMarketplaceWrite(req, res, { store: marketplaceStore, accountStore, principal })) {
+      return;
+    }
 
     // Route: GET /events (SSE stream — auth required)
     // Provides real-time event streaming for message lifecycle transitions.

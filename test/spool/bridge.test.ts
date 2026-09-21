@@ -114,7 +114,8 @@ describe('spool bridge', () => {
   });
 
   it('preserves spool dedupe keys across duplicate outbox files', async () => {
-    for (const body of ['first copy', 'second copy']) {
+    // Retries repeat one payload; maildir filenames do not promise enqueue order.
+    for (const body of ['same logical message', 'same logical message']) {
       aliceSpool.writeJson('outbox', {
         schema: SPOOL_SCHEMA,
         kind: 'message',
@@ -128,7 +129,7 @@ describe('spool bridge', () => {
 
     expect(result.sent).toBe(2);
     expect(store.inbox('acct_bob')).toHaveLength(1);
-    expect(store.inbox('acct_bob')[0].body).toBe('first copy');
+    expect(store.inbox('acct_bob')[0].body).toBe('same logical message');
   });
 
   it('rejects sender spoofing fields instead of trusting file content authority', async () => {

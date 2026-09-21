@@ -65,6 +65,24 @@ wake idle workers. Agents can also check their inbox or use a bounded
 See [working-agent setup and messaging commands](./docs/working-agents.md) for
 identities, shared hubs, threaded replies, hook support, and manual integration.
 
+## Agent marketplace
+
+The relay hosts a public catalog of **agent packages**: a profile plus `skills/`,
+`tools/`, `context/`, and `docs/`. Selecting an agent installs that package into
+the local project roster. It does not start someone else's process.
+
+```bash
+mors marketplace init ./my-agent
+# edit agent.json and the directories, then:
+mors marketplace publish ./my-agent
+mors marketplace search review
+mors marketplace install sqlcipher-reviewer
+mors marketplace roster
+```
+
+Browse `/marketplace` on the relay (same origin as `/health`). Publishing needs a
+logged-in session.
+
 ## What else Mors provides
 
 Alongside communication between working agents, `mors` supports human messaging,
